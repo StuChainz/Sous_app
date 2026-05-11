@@ -518,6 +518,7 @@ function resumeLog(){
 // ═══════════════════════════════════════════
 function wireLogButtons(){
   document.getElementById('log-cancel-btn').addEventListener('click',()=>{stopAllRec();setMicState('idle');switchTab('home');});
+  document.getElementById('finished-meal-btn').addEventListener('click',()=>{if(!meal.length){showToast('Add some ingredients first!');return;}stopAllRec();showSummary();});
   document.getElementById('mic-btn').addEventListener('click',()=>{if(isSpeaking){window.speechSynthesis&&window.speechSynthesis.cancel();isSpeaking=false;}if(isRecording){try{tapRec&&tapRec.stop();}catch(e){}}else startTapRec();});
   document.getElementById('send-btn').addEventListener('click',submitText);
   document.getElementById('text-input').addEventListener('keydown',e=>{if(e.key==='Enter')submitText();});
