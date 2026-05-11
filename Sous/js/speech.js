@@ -93,6 +93,11 @@ function processQueue(autoAdded=[]){
     return;
   }
   if(shouldAutoAdd(next)){
+    if(!next.weightSpecified && next.rawFood){
+      if(autoAdded.length) showToast('Added '+batchPhrase(autoAdded)+'. One more thing.',2200);
+      askQuantity(next);
+      return;
+    }
     autoAddItem(next);
     autoAdded.push(next);
     processQueue(autoAdded);
@@ -211,6 +216,15 @@ function showConfirm(parsed){
   document.getElementById('c-fat').textContent=parsed.fat+'g';
   document.getElementById('pill-raw').className='toggle-pill active';
   document.getElementById('pill-cooked').className='toggle-pill inactive';
+  const qtyRow=document.getElementById('confirm-qty-row');
+  const qtyInput=document.getElementById('confirm-qty-input');
+  if(!parsed.weightSpecified&&parsed.rawFood){
+    qtyRow.style.display='block';
+    qtyInput.value=parsed.weight;
+  } else {
+    qtyRow.style.display='none';
+    qtyInput.value='';
+  }
   showLogScreen('confirm');
   pauseAlwaysOn();
   speak(`Check this: ${parsed.name}, ${itemWeightLabel(parsed)}. Confirm?`,()=>startConfirmListen());
@@ -231,6 +245,20 @@ function startConfirmListen(){
 }
 function doConfirm(){
   if(!pendingFood) return;
+  const qtyRow=document.getElementById('confirm-qty-row');
+  const qtyInput=document.getElementById('confirm-qty-input');
+  if(qtyRow.style.display!=='none'&&pendingFood.rawFood){
+    const grams=parseFloat(qtyInput.value);
+    if(grams&&grams>0){
+      const food=pendingFood.rawFood,r=grams/food.w;
+      pendingFood.weight=Math.round(grams);
+      pendingFood.kcal=Math.round(food.kcal*r);
+      pendingFood.protein=Math.round(food.p*r*10)/10;
+      pendingFood.carbs=Math.round(food.c*r*10)/10;
+      pendingFood.fat=Math.round(food.f*r*10)/10;
+      pendingFood.fibre=Math.round((food.fi||0)*r*10)/10;
+    }
+  }
   meal.push(pendingFood);
   const name=pendingFood.name;
   speak(itemQueue.length ? 'Added. Next.' : 'Added.',()=>{
@@ -242,6 +270,43 @@ function doConfirm(){
 function doChange(){
   pendingFood=null;
   speak('OK, what would you like to add?',()=>{showLogScreen('listening');setTimeout(restartAlwaysOn,300);});
+}
+
+// ═══════════════════════════════════════════
+// QUANTITY PROMPT (voice — high confidence, no weight)
+// ═══════════════════════════════════════════
+function parseGramsFromText(text){
+  const m=text.match(/(\d+(?:\.\d+)?)\s*(?:g(?:rams?)?)?/i);
+  return m?parseFloat(m[1]):null;
+}
+function commitQuantity(grams){
+  if(!pendingFood||!pendingFood.rawFood) return;
+  const food=pendingFood.rawFood;
+  const r=grams/food.w;
+  const item={id:nextIngId++,name:food.name,weight:Math.round(grams),kcal:Math.round(food.kcal*r),protein:Math.round(food.p*r*10)/10,carbs:Math.round(food.c*r*10)/10,fat:Math.round(food.f*r*10)/10,fibre:Math.round((food.fi||0)*r*10)/10,icon:food.icon};
+  meal.push(item);
+  showToast('Added '+item.name+' '+Math.round(grams)+'g ✓');
+  pendingFood=null;
+  showLogScreen('listening');
+  renderCurrentMeal();
+  processQueue();
+}
+function askQuantity(item){
+  pendingFood=item;
+  document.getElementById('qty-food-name').textContent=item.name;
+  document.getElementById('qty-default-btn').textContent='Use default ('+item.weight+'g)';
+  document.getElementById('qty-input').value='';
+  showLogScreen('quantity');
+  pauseAlwaysOn();
+  speakThenListen('How much '+item.name+'?',voiceAnswer=>{
+    if(document.querySelector('.log-screen.active')?.id!=='ls-quantity') return;
+    const grams=parseGramsFromText(voiceAnswer);
+    if(grams&&grams>0){
+      commitQuantity(grams);
+    } else {
+      showToast('Didn\'t catch that — type it or use default');
+    }
+  });
 }
 
 // ═══════════════════════════════════════════
@@ -276,7 +341,7 @@ function showAmbiguous(matches,amount,label,question){
 }
 function resolveAmbig(food,amount){
   const r=amount?amount/food.w:1;
-  const resolved={name:food.name,weight:amount?Math.round(amount):food.w,kcal:Math.round(food.kcal*r),protein:Math.round(food.p*r*10)/10,carbs:Math.round(food.c*r*10)/10,fat:Math.round(food.f*r*10)/10,fibre:Math.round(food.fi*r*10)/10,icon:food.icon};
+  const resolved={name:food.name,weight:amount?Math.round(amount):food.w,kcal:Math.round(food.kcal*r),protein:Math.round(food.p*r*10)/10,carbs:Math.round(food.c*r*10)/10,fat:Math.round(food.f*r*10)/10,fibre:Math.round(food.fi*r*10)/10,icon:food.icon,rawFood:food,weightSpecified:amount!=null};
   currentAmbig=null;
   showConfirm(resolved);
 }
@@ -578,6 +643,33 @@ function wireLogButtons(){
   document.getElementById('edit-delete-btn').addEventListener('click',()=>deleteIngredient(parseInt(document.getElementById('edit-ing-id').value)));
   document.getElementById('pill-raw').addEventListener('click',()=>{document.getElementById('pill-raw').className='toggle-pill active';document.getElementById('pill-cooked').className='toggle-pill inactive';});
   document.getElementById('pill-cooked').addEventListener('click',()=>{document.getElementById('pill-cooked').className='toggle-pill active';document.getElementById('pill-raw').className='toggle-pill inactive';});
+  // Quantity prompt screen
+  document.getElementById('qty-send-btn').addEventListener('click',()=>{
+    const g=parseFloat(document.getElementById('qty-input').value);
+    if(!g||g<=0){showToast('Enter an amount in grams');return;}
+    commitQuantity(g);
+  });
+  document.getElementById('qty-input').addEventListener('keydown',e=>{if(e.key==='Enter'){const g=parseFloat(e.target.value);if(g&&g>0)commitQuantity(g);}});
+  document.getElementById('qty-default-btn').addEventListener('click',()=>{
+    if(!pendingFood) return;
+    meal.push({...pendingFood,id:nextIngId++});
+    showToast('Added '+pendingFood.name+' ✓');
+    pendingFood=null;
+    showLogScreen('listening');
+    renderCurrentMeal();
+    processQueue();
+  });
+  // Confirm screen — live macro update when weight input changes
+  document.getElementById('confirm-qty-input').addEventListener('input',e=>{
+    const grams=parseFloat(e.target.value);
+    if(!pendingFood||!pendingFood.rawFood||!grams||grams<=0) return;
+    const food=pendingFood.rawFood,r=grams/food.w;
+    document.getElementById('c-kcal').textContent=Math.round(food.kcal*r);
+    document.getElementById('c-protein').textContent=Math.round(food.p*r*10)/10+'g';
+    document.getElementById('c-carbs').textContent=Math.round(food.c*r*10)/10+'g';
+    document.getElementById('c-fat').textContent=Math.round(food.f*r*10)/10+'g';
+    document.getElementById('confirm-weight').textContent=Math.round(grams)+'g · raw';
+  });
 }
 function submitText(){
   const inp=document.getElementById('text-input'),val=inp.value.trim();

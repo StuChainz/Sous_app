@@ -611,6 +611,13 @@ html,body{height:100%;font-family:'Geist',sans-serif;background:var(--bg);oversc
               <div class="food-weight-lbl" id="confirm-weight">—</div>
             </div>
           </div>
+          <div id="confirm-qty-row" style="display:none;padding:10px 16px 4px;border-top:.5px solid var(--border);">
+            <div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px;">How much? (grams)</div>
+            <div style="display:flex;gap:8px;align-items:center;">
+              <input type="number" id="confirm-qty-input" class="custom-input" placeholder="e.g. 150" min="1" style="flex:1;margin:0;">
+              <span style="font-size:13px;color:var(--text-muted);">g</span>
+            </div>
+          </div>
           <div class="macro-grid">
             <div class="macro-cell kcal"><div class="macro-cell-val" id="c-kcal">—</div><div class="macro-cell-lbl">kcal</div></div>
             <div class="macro-cell"><div class="macro-cell-val" id="c-protein">—</div><div class="macro-cell-lbl">protein</div></div>
@@ -648,6 +655,20 @@ html,body{height:100%;font-family:'Geist',sans-serif;background:var(--bg);oversc
           <span class="ambig-cancel" id="ambig-custom">Add custom ingredient</span>
           <span class="ambig-cancel" id="ambig-skip">Skip</span>
         </div>
+      </div>
+
+      <!-- QUANTITY PROMPT -->
+      <div class="log-screen" id="ls-quantity">
+        <div style="text-align:center;margin-bottom:20px;">
+          <div style="font-size:22px;font-weight:500;color:var(--text);margin-bottom:6px;">How much?</div>
+          <div style="font-size:16px;color:var(--accent);font-weight:500;" id="qty-food-name">—</div>
+        </div>
+        <div class="text-input-row" style="margin-bottom:12px;">
+          <input class="voice-text-input" type="number" id="qty-input" placeholder="Amount in grams" min="1">
+          <button class="send-btn" id="qty-send-btn"><i class="ti ti-send"></i></button>
+        </div>
+        <button class="btn-secondary" id="qty-default-btn" style="width:100%;margin-bottom:12px;">Use default</button>
+        <div class="voice-hint-bar"><i class="ti ti-microphone"></i><span class="voice-hint-text">Say the amount, e.g. "150 grams" or "200"</span></div>
       </div>
 
       <!-- SUMMARY -->

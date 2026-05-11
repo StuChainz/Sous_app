@@ -271,7 +271,7 @@ function parseSingleSegment(seg){
     if(qty.multiplier!=null) grams=Math.round(bestFood.w*qty.multiplier);
     else if(qty.count!=null)  grams=Math.round(bestFood.w*qty.count);
   }
-  return{...foodScale(bestFood,grams),rawFood:bestFood,confidence:'high',needsConfirm:false};
+  return{...foodScale(bestFood,grams),rawFood:bestFood,confidence:'high',needsConfirm:false,weightSpecified:grams!==null};
 }
 function parseText(text){
   text=normaliseLogText(text);
