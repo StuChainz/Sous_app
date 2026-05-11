@@ -5,6 +5,15 @@ let meal=[], itemQueue=[], pendingFood=null, currentAmbig=null;
 let tapRec=null, alwaysOnRec=null, isRecording=false, alwaysOnActive=false, isSpeaking=false;
 let nextIngId=1;
 let modalSelectedFood=null, modalActiveTab='search';
+let undoSnapshot=null;
+
+function snapshotMeal(){undoSnapshot=meal.map(i=>({...i}));updateUndoBtn();}
+function updateUndoBtn(){const r=document.getElementById('undo-row');if(r)r.style.display=undoSnapshot?'flex':'none';}
+function undoLastAction(){
+  if(!undoSnapshot) return;
+  meal.length=0; undoSnapshot.forEach(i=>meal.push(i));
+  undoSnapshot=null; updateUndoBtn(); renderCurrentMeal(); showToast('Undone');
+}
 
 // ═══════════════════════════════════════════
 // SPEECH RECOGNITION CONSTRUCTOR
@@ -37,7 +46,7 @@ function showBatchHeard(results){
   }
 }
 function autoAddItem(item){
-  meal.push(item);
+  snapshotMeal(); meal.push(item);
 }
 function announceAutoAdded(items,after){
   if(!items.length){ if(after) after(); return; }
@@ -124,23 +133,37 @@ function renderCurrentMeal(){
   const container=document.getElementById('current-meal-list');
   if(!container) return;
   if(!meal.length){container.style.display='none';return;}
+  meal.forEach(i=>{if(!i.id)i.id=nextIngId++;});
   const t=sumMacros(meal);
   container.style.display='block';
-  container.innerHTML=
-    `<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 12px;border-bottom:.5px solid var(--border);">
-       <span style="font-size:12px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:.04em;">Added so far</span>
-       <span style="font-size:12px;color:var(--accent);font-family:'Geist Mono',monospace;">${Math.round(t.kcal)} kcal · ${Math.round(t.protein)}g P</span>
-     </div>`+
-    meal.map(i=>
-      `<div style="display:flex;justify-content:space-between;align-items:center;padding:7px 12px;border-bottom:.5px solid var(--border);">
-         <span style="font-size:13px;color:var(--text);flex:1;min-width:0;">${i.name}${i.weight?' <span style="color:var(--text-muted);">'+i.weight+'g</span>':''}</span>
-         <span style="font-size:12px;color:var(--text-muted);font-family:'Geist Mono',monospace;margin-right:10px;">${i.kcal} kcal · ${i.protein}g P</span>
-         <span style="display:flex;gap:6px;flex-shrink:0;">
-           <button onclick="openEditModal(${i.id})" style="background:none;border:none;padding:2px 4px;cursor:pointer;color:var(--text-muted);font-size:14px;" title="Edit"><i class="ti ti-pencil"></i></button>
-           <button onclick="deleteFromCurrentMeal(${i.id})" style="background:none;border:none;padding:2px 4px;cursor:pointer;color:var(--red);font-size:14px;" title="Remove"><i class="ti ti-trash"></i></button>
-         </span>
-       </div>`
-    ).join('');
+  container.innerHTML='';
+  const header=document.createElement('div');
+  header.style.cssText='display:flex;justify-content:space-between;align-items:center;padding:8px 12px;border-bottom:.5px solid var(--border);';
+  header.innerHTML=`<span style="font-size:12px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:.04em;">Added so far</span><span style="font-size:12px;color:var(--accent);font-family:'Geist Mono',monospace;">${Math.round(t.kcal)} kcal · ${Math.round(t.protein)}g P</span>`;
+  container.appendChild(header);
+  meal.forEach(i=>{
+    const row=document.createElement('div');
+    row.style.cssText='display:flex;justify-content:space-between;align-items:center;padding:7px 12px;border-bottom:.5px solid var(--border);';
+    const label=document.createElement('span');
+    label.style.cssText='font-size:13px;color:var(--text);flex:1;min-width:0;';
+    label.textContent=i.name+(i.weight?' '+i.weight+'g':'');
+    const macros=document.createElement('span');
+    macros.style.cssText='font-size:12px;color:var(--text-muted);font-family:\'Geist Mono\',monospace;margin-right:10px;';
+    macros.textContent=i.kcal+' kcal · '+i.protein+'g P';
+    const btns=document.createElement('span');
+    btns.style.cssText='display:flex;gap:6px;flex-shrink:0;';
+    const editBtn=document.createElement('button');
+    editBtn.style.cssText='background:none;border:none;padding:2px 4px;cursor:pointer;color:var(--text-muted);font-size:14px;';
+    editBtn.title='Edit'; editBtn.innerHTML='<i class="ti ti-pencil"></i>';
+    editBtn.addEventListener('click',()=>openEditModal(i.id));
+    const delBtn=document.createElement('button');
+    delBtn.style.cssText='background:none;border:none;padding:2px 4px;cursor:pointer;color:var(--red);font-size:14px;';
+    delBtn.title='Remove'; delBtn.innerHTML='<i class="ti ti-trash"></i>';
+    delBtn.addEventListener('click',()=>deleteFromCurrentMeal(i.id));
+    btns.appendChild(editBtn); btns.appendChild(delBtn);
+    row.appendChild(label); row.appendChild(macros); row.appendChild(btns);
+    container.appendChild(row);
+  });
 }
 
 function showLogScreen(id){
@@ -263,7 +286,7 @@ function doConfirm(){
       pendingFood.fibre=Math.round((food.fi||0)*r*10)/10;
     }
   }
-  meal.push(pendingFood);
+  snapshotMeal(); meal.push(pendingFood);
   const name=pendingFood.name;
   speak(itemQueue.length ? 'Added. Next.' : 'Added.',()=>{
     pendingFood=null;
@@ -288,7 +311,7 @@ function commitQuantity(grams){
   const food=pendingFood.rawFood;
   const r=grams/food.w;
   const item={id:nextIngId++,name:food.name,weight:Math.round(grams),kcal:Math.round(food.kcal*r),protein:Math.round(food.p*r*10)/10,carbs:Math.round(food.c*r*10)/10,fat:Math.round(food.f*r*10)/10,fibre:Math.round((food.fi||0)*r*10)/10,icon:food.icon};
-  meal.push(item);
+  snapshotMeal(); meal.push(item);
   showToast('Added '+item.name+' '+Math.round(grams)+'g ✓');
   pendingFood=null;
   showLogScreen('listening');
@@ -445,7 +468,7 @@ function addManualIngredient(){
     const grams=parseFloat(document.getElementById('gram-input').value)||100;
     if(grams<=0){showToast('Enter a valid amount');return;}
     const r=grams/(modalSelectedFood.w||100);
-    meal.push({id:nextIngId++,name:modalSelectedFood.name,weight:Math.round(grams),kcal:Math.round(modalSelectedFood.kcal*r),protein:Math.round(modalSelectedFood.p*r*10)/10,carbs:Math.round(modalSelectedFood.c*r*10)/10,fat:Math.round(modalSelectedFood.f*r*10)/10,fibre:Math.round((modalSelectedFood.fi||0)*r*10)/10,icon:modalSelectedFood.icon});
+    snapshotMeal(); meal.push({id:nextIngId++,name:modalSelectedFood.name,weight:Math.round(grams),kcal:Math.round(modalSelectedFood.kcal*r),protein:Math.round(modalSelectedFood.p*r*10)/10,carbs:Math.round(modalSelectedFood.c*r*10)/10,fat:Math.round(modalSelectedFood.f*r*10)/10,fibre:Math.round((modalSelectedFood.fi||0)*r*10)/10,icon:modalSelectedFood.icon});
     showToast('Added '+modalSelectedFood.name+' ✓');
   } else {
     const name=document.getElementById('custom-name').value.trim();
@@ -457,7 +480,7 @@ function addManualIngredient(){
     const carbs=parseFloat(document.getElementById('custom-carbs').value)||0;
     const fat=parseFloat(document.getElementById('custom-fat').value)||0;
     const fibre=parseFloat(document.getElementById('custom-fibre').value)||0;
-    meal.push({id:nextIngId++,name,weight,kcal,protein,carbs,fat,fibre,icon:'ti-clipboard'});
+    snapshotMeal(); meal.push({id:nextIngId++,name,weight,kcal,protein,carbs,fat,fibre,icon:'ti-clipboard'});
     showToast('Added '+name+' ✓');
   }
   closeAddModal();
@@ -470,7 +493,8 @@ function addManualIngredient(){
 // ═══════════════════════════════════════════
 function openEditModal(id){
   const item=meal.find(i=>i.id===id);
-  if(!item) return;
+  if(!item){showToast('Debug: item '+id+' not found (meal has '+meal.length+')');return;}
+  showToast('Debug: opening edit for '+item.name);
   document.getElementById('edit-ing-id').value=id;
   document.getElementById('edit-name').value=item.name;
   document.getElementById('edit-weight').value=item.weight??'';
@@ -479,9 +503,15 @@ function openEditModal(id){
   document.getElementById('edit-carbs').value=item.carbs;
   document.getElementById('edit-fat').value=item.fat;
   document.getElementById('edit-fibre').value=item.fibre??'';
-  document.getElementById('edit-modal').style.display='flex';
+  const m=document.getElementById('edit-modal');
+  m.style.display='flex';
+  requestAnimationFrame(()=>m.classList.add('show'));
 }
-function closeEditModal(){document.getElementById('edit-modal').style.display='none';}
+function closeEditModal(){
+  const m=document.getElementById('edit-modal');
+  m.classList.remove('show');
+  setTimeout(()=>{m.style.display='none';},300);
+}
 function _refreshAfterEdit(){
   const active=document.querySelector('.log-screen.active')?.id;
   if(active==='ls-listening') renderCurrentMeal(); else showSummary(false);
@@ -499,6 +529,7 @@ function saveEdit(){
   if(!name){showToast('Food name required');return;}
   const item=meal.find(i=>i.id===id);
   if(!item) return;
+  snapshotMeal();
   item.name=name; item.weight=weight; item.kcal=kcal; item.protein=protein; item.carbs=carbs; item.fat=fat; item.fibre=fibre;
   closeEditModal(); _refreshAfterEdit(); showToast('Updated ✓');
 }
@@ -506,14 +537,14 @@ function deleteIngredient(id){
   const idx=meal.findIndex(i=>i.id===id);
   if(idx===-1) return;
   const name=meal[idx].name;
-  meal.splice(idx,1);
+  snapshotMeal(); meal.splice(idx,1);
   closeEditModal(); _refreshAfterEdit(); showToast(name+' removed');
 }
 function deleteFromCurrentMeal(id){
   const idx=meal.findIndex(i=>i.id===id);
   if(idx===-1) return;
   const name=meal[idx].name;
-  meal.splice(idx,1);
+  snapshotMeal(); meal.splice(idx,1);
   renderCurrentMeal(); showToast(name+' removed');
 }
 
@@ -615,7 +646,7 @@ function stopAllRec(){
 // LOG ENTRY POINTS
 // ═══════════════════════════════════════════
 function startFreshLog(){
-  meal=[]; itemQueue=[]; pendingFood=null; currentAmbig=null;
+  meal=[]; itemQueue=[]; pendingFood=null; currentAmbig=null; undoSnapshot=null; updateUndoBtn();
   stopAllRec();
   showLogScreen('listening');
   const el=document.getElementById('transcript-text'); if(el) el.textContent='—';
@@ -654,6 +685,7 @@ function wireLogButtons(){
   document.getElementById('gram-input').addEventListener('input',updatePreviewMacros);
   document.getElementById('modal-add-btn').addEventListener('click',addManualIngredient);
   // Edit modal
+  document.getElementById('undo-btn').addEventListener('click',undoLastAction);
   document.getElementById('edit-modal-close-btn').addEventListener('click',closeEditModal);
   document.getElementById('edit-modal').addEventListener('click',e=>{if(e.target===document.getElementById('edit-modal'))closeEditModal();});
   document.getElementById('edit-save-btn').addEventListener('click',saveEdit);
@@ -669,7 +701,7 @@ function wireLogButtons(){
   document.getElementById('qty-input').addEventListener('keydown',e=>{if(e.key==='Enter'){const g=parseFloat(e.target.value);if(g&&g>0)commitQuantity(g);}});
   document.getElementById('qty-default-btn').addEventListener('click',()=>{
     if(!pendingFood) return;
-    meal.push({...pendingFood,id:nextIngId++});
+    snapshotMeal(); meal.push({...pendingFood,id:nextIngId++});
     showToast('Added '+pendingFood.name+' ✓');
     pendingFood=null;
     showLogScreen('listening');

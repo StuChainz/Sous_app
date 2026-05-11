@@ -587,6 +587,9 @@ html,body{height:100%;font-family:'Geist',sans-serif;background:var(--bg);oversc
           <button class="send-btn" id="send-btn"><i class="ti ti-send"></i></button>
         </div>
         <div id="current-meal-list" style="display:none;margin:12px 20px 0;background:var(--card);border:.5px solid var(--border);border-radius:var(--radius-sm);overflow:hidden;"></div>
+        <div style="display:none;justify-content:flex-end;margin:6px 20px 0;" id="undo-row">
+          <button id="undo-btn" style="background:none;border:none;padding:4px 8px;cursor:pointer;color:var(--text-muted);font-size:12px;display:inline-flex;align-items:center;gap:4px;"><i class="ti ti-arrow-back-up" style="font-size:14px;"></i> Undo</button>
+        </div>
         <button class="btn-secondary" id="finished-meal-btn" style="margin:12px 20px 0;width:calc(100% - 40px);">Finished meal</button>
         <div style="text-align:center;margin:8px 20px 0;"><span id="add-custom-btn" style="font-size:13px;color:var(--text-muted);cursor:pointer;text-decoration:underline;text-underline-offset:2px;">+ Add custom ingredient</span></div>
         <div class="listen-hint">Say ingredients + amounts · "Hey Sous, done" when finished</div>
