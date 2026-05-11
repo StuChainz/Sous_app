@@ -314,13 +314,22 @@ function openAddModal(){
   document.getElementById('gram-input').value='100';
   document.getElementById('selected-preview-box').style.display='none';
   renderFoodResults('');
-  ['custom-name','custom-kcal','custom-protein','custom-carbs','custom-fat'].forEach(id=>{document.getElementById(id).value='';});
+  ['custom-name','custom-weight','custom-kcal','custom-protein','custom-carbs','custom-fat','custom-fibre'].forEach(id=>{document.getElementById(id).value='';});
   switchModalTab('search');
-  document.getElementById('add-modal').style.display='flex';
+  const m=document.getElementById('add-modal');
+  m.style.display='flex';
+  requestAnimationFrame(()=>m.classList.add('show'));
   setTimeout(()=>document.getElementById('food-search').focus(),150);
 }
+function openCustomEntry(){
+  openAddModal();
+  switchModalTab('custom');
+  setTimeout(()=>document.getElementById('custom-name').focus(),150);
+}
 function closeAddModal(){
-  document.getElementById('add-modal').style.display='none';
+  const m=document.getElementById('add-modal');
+  m.classList.remove('show');
+  setTimeout(()=>{m.style.display='none';},300);
   modalSelectedFood=null;
 }
 function switchModalTab(tab){
@@ -371,16 +380,20 @@ function addManualIngredient(){
     showToast('Added '+modalSelectedFood.name+' ✓');
   } else {
     const name=document.getElementById('custom-name').value.trim();
+    if(!name){showToast('Enter a food name');return;}
+    const weightRaw=document.getElementById('custom-weight').value;
+    const weight=weightRaw!==''?parseFloat(weightRaw)||null:null;
     const kcal=parseFloat(document.getElementById('custom-kcal').value)||0;
     const protein=parseFloat(document.getElementById('custom-protein').value)||0;
     const carbs=parseFloat(document.getElementById('custom-carbs').value)||0;
     const fat=parseFloat(document.getElementById('custom-fat').value)||0;
-    if(!name){showToast('Enter a food name');return;}
-    meal.push({id:nextIngId++,name,weight:null,kcal,protein,carbs,fat,fibre:0,icon:'ti-clipboard'});
+    const fibre=parseFloat(document.getElementById('custom-fibre').value)||0;
+    meal.push({id:nextIngId++,name,weight,kcal,protein,carbs,fat,fibre,icon:'ti-clipboard'});
     showToast('Added '+name+' ✓');
   }
   closeAddModal();
-  showSummary(false);
+  showLogScreen('listening');
+  renderCurrentMeal();
 }
 
 // ═══════════════════════════════════════════
@@ -545,7 +558,9 @@ function wireLogButtons(){
   document.getElementById('confirm-btn').addEventListener('click',doConfirm);
   document.getElementById('change-btn').addEventListener('click',doChange);
   document.getElementById('summary-btn-conf').addEventListener('click',()=>{if(meal.length){stopAllRec();showSummary();}else showToast('Add ingredients first!');});
-  document.getElementById('ambig-cancel').addEventListener('click',()=>{currentAmbig=null;showLogScreen('listening');setTimeout(restartAlwaysOn,400);});
+  document.getElementById('ambig-custom').addEventListener('click',()=>{currentAmbig=null;openCustomEntry();});
+  document.getElementById('ambig-skip').addEventListener('click',()=>{currentAmbig=null;showLogScreen('listening');setTimeout(restartAlwaysOn,400);});
+  document.getElementById('add-custom-btn').addEventListener('click',()=>openCustomEntry());
   document.getElementById('add-more-btn').addEventListener('click',()=>openAddModal());
   document.getElementById('save-meal-btn').addEventListener('click',()=>{saveMealToLog();showToast('Meal saved! 🎉',2500);setTimeout(()=>{meal=[];itemQueue=[];nextIngId=1;stopAllRec();switchTab('home');},1800);});
   // Add modal

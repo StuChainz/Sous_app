@@ -588,6 +588,7 @@ html,body{height:100%;font-family:'Geist',sans-serif;background:var(--bg);oversc
         </div>
         <div id="current-meal-list" style="display:none;margin:12px 20px 0;background:var(--card);border:.5px solid var(--border);border-radius:var(--radius-sm);overflow:hidden;"></div>
         <button class="btn-secondary" id="finished-meal-btn" style="margin:12px 20px 0;width:calc(100% - 40px);">Finished meal</button>
+        <div style="text-align:center;margin:8px 20px 0;"><span id="add-custom-btn" style="font-size:13px;color:var(--text-muted);cursor:pointer;text-decoration:underline;text-underline-offset:2px;">+ Add custom ingredient</span></div>
         <div class="listen-hint">Say ingredients + amounts · "Hey Sous, done" when finished</div>
       </div>
 
@@ -643,7 +644,10 @@ html,body{height:100%;font-family:'Geist',sans-serif;background:var(--bg);oversc
         </div>
         <div class="ambig-options" id="ambig-options"></div>
         <button class="btn-primary" id="ambig-confirm-btn" style="margin-bottom:10px;">Confirm selection</button>
-        <div class="ambig-cancel" id="ambig-cancel">None of these · skip</div>
+        <div style="display:flex;justify-content:center;gap:24px;margin-top:4px;">
+          <span class="ambig-cancel" id="ambig-custom">Add custom ingredient</span>
+          <span class="ambig-cancel" id="ambig-skip">Skip</span>
+        </div>
       </div>
 
       <!-- SUMMARY -->
@@ -1063,6 +1067,10 @@ html,body{height:100%;font-family:'Geist',sans-serif;background:var(--bg);oversc
     <div id="panel-custom" class="modal-panel" style="display:none">
       <div class="custom-form">
         <input type="text" class="custom-input" id="custom-name" placeholder="Food name (e.g. chicken casserole)">
+        <div class="custom-field-group" style="margin-bottom:10px;">
+          <div class="custom-field-label">Quantity (g) — leave blank if unknown</div>
+          <input type="number" class="custom-input" id="custom-weight" placeholder="e.g. 200" min="0">
+        </div>
         <div class="custom-label-row">
           <div class="custom-field-group">
             <div class="custom-field-label">Calories (kcal)</div>
@@ -1082,6 +1090,10 @@ html,body{height:100%;font-family:'Geist',sans-serif;background:var(--bg);oversc
             <div class="custom-field-label">Fat (g)</div>
             <input type="number" class="custom-input" id="custom-fat" placeholder="0" min="0" step="0.1">
           </div>
+        </div>
+        <div class="custom-field-group">
+          <div class="custom-field-label">Fibre (g)</div>
+          <input type="number" class="custom-input" id="custom-fibre" placeholder="0" min="0" step="0.1">
         </div>
       </div>
     </div>
@@ -1132,6 +1144,59 @@ html,body{height:100%;font-family:'Geist',sans-serif;background:var(--bg);oversc
     <div class="btn-row" style="margin-top:14px;">
       <button class="btn-danger" id="edit-delete-btn"><i class="ti ti-trash" style="vertical-align:-2px;font-size:14px;"></i> Delete</button>
       <button class="btn-primary" id="edit-save-btn" style="flex:2;">Save changes</button>
+    </div>
+  </div>
+</div>
+
+<!-- History ingredient edit modal -->
+<div id="hist-edit-modal" class="modal-overlay" style="display:none">
+  <div class="modal-sheet">
+    <div class="modal-header">
+      <span class="modal-title">Edit Ingredient</span>
+      <button class="modal-close" id="hist-edit-close-btn">✕</button>
+    </div>
+    <div class="modal-panel">
+      <div class="custom-form">
+        <input type="hidden" id="hist-edit-date">
+        <input type="hidden" id="hist-edit-meal-idx">
+        <input type="hidden" id="hist-edit-ing-idx">
+        <div class="custom-field-group" style="margin-bottom:10px;">
+          <div class="custom-field-label">Food name</div>
+          <input type="text" class="custom-input" id="hist-edit-name" placeholder="Food name">
+        </div>
+        <div class="custom-field-group" style="margin-bottom:10px;">
+          <div class="custom-field-label">Quantity (g) — leave blank for custom</div>
+          <input type="number" class="custom-input" id="hist-edit-weight" placeholder="e.g. 150" min="0">
+        </div>
+        <div class="custom-label-row" style="margin-bottom:10px;">
+          <div class="custom-field-group">
+            <div class="custom-field-label">Calories (kcal)</div>
+            <input type="number" class="custom-input" id="hist-edit-kcal" placeholder="0" min="0">
+          </div>
+          <div class="custom-field-group">
+            <div class="custom-field-label">Protein (g)</div>
+            <input type="number" class="custom-input" id="hist-edit-protein" placeholder="0" min="0" step="0.1">
+          </div>
+        </div>
+        <div class="custom-label-row" style="margin-bottom:10px;">
+          <div class="custom-field-group">
+            <div class="custom-field-label">Carbs (g)</div>
+            <input type="number" class="custom-input" id="hist-edit-carbs" placeholder="0" min="0" step="0.1">
+          </div>
+          <div class="custom-field-group">
+            <div class="custom-field-label">Fat (g)</div>
+            <input type="number" class="custom-input" id="hist-edit-fat" placeholder="0" min="0" step="0.1">
+          </div>
+        </div>
+        <div class="custom-field-group">
+          <div class="custom-field-label">Fibre (g)</div>
+          <input type="number" class="custom-input" id="hist-edit-fibre" placeholder="0" min="0" step="0.1">
+        </div>
+      </div>
+    </div>
+    <div class="btn-row" style="margin-top:14px;">
+      <button class="btn-secondary" id="hist-edit-cancel-btn">Cancel</button>
+      <button class="btn-primary" id="hist-edit-save-btn" style="flex:2;">Save changes</button>
     </div>
   </div>
 </div>
