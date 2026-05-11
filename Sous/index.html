@@ -1,0 +1,1153 @@
+<!DOCTYPE html>
+<html lang="en" data-palette="ember">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<meta name="theme-color" content="#14110D">
+<meta name="color-scheme" content="dark light">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Sous">
+<title>Sous</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600&family=Geist+Mono:wght@400;500;600&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3/dist/tabler-icons.min.css">
+<style>
+/* ── TOKENS ─────────────────────────────────────────────── */
+:root {
+  color-scheme: dark;
+  --bg:#14110D; --bg-2:#1A1611;
+  --card:#1E1913; --card-2:#251F18; --raised:#2C2519;
+  --text:#F2EAD9; --text-muted:#8A7F6E; --text-dim:#5C5447;
+  --border:rgba(242,234,217,0.08); --border-strong:rgba(242,234,217,0.14);
+  --accent:#FF6B3D; --accent-2:#FF8A5C;
+  --accent-soft:rgba(255,107,61,0.14); --accent-pale:rgba(255,107,61,0.08);
+  --accent-glow:rgba(255,107,61,0.35);
+  --sage:#B5C56F; --sage-soft:rgba(181,197,111,0.16);
+  --green:#A8C770; --green-light:rgba(168,199,112,0.16);
+  --amber:#E8A547; --amber-light:rgba(232,165,71,0.16);
+  --red:#E5705B;
+  --radius:20px; --radius-sm:12px; --tab-h:64px;
+  --purple:var(--accent); --purple-light:var(--accent-soft);
+  --purple-mid:var(--accent-2); --purple-pale:var(--accent-pale);
+  --font-mono:'Geist Mono','SF Mono',ui-monospace,monospace;
+  --font-display:'Instrument Serif',Georgia,serif;
+}
+[data-palette="phosphor"]{
+  --accent:#B8E84E; --accent-2:#CDF373;
+  --accent-soft:rgba(184,232,78,0.14); --accent-pale:rgba(184,232,78,0.08);
+  --accent-glow:rgba(184,232,78,0.35);
+}
+[data-palette="midnight"]{
+  --accent:#7DB7FF; --accent-2:#9BC8FF;
+  --accent-soft:rgba(125,183,255,0.14); --accent-pale:rgba(125,183,255,0.08);
+  --accent-glow:rgba(125,183,255,0.35);
+}
+[data-palette^="ceramic"]{
+  color-scheme: light;
+  --bg:#F4EFE6; --bg-2:#EDE6D9; --card:#FFFFFF; --card-2:#FAF6EC; --raised:#FFFFFF;
+  --text:#1F1A12; --text-muted:#86796A; --text-dim:#B0A593;
+  --border:rgba(31,26,18,0.08); --border-strong:rgba(31,26,18,0.16);
+  --accent:#C5532D; --accent-2:#E06A40;
+  --accent-soft:rgba(197,83,45,0.10); --accent-pale:rgba(197,83,45,0.06);
+  --accent-glow:rgba(197,83,45,0.25);
+}
+[data-palette="ceramic-phosphor"]{
+  --accent:#5C8A1F; --accent-2:#7AAB35;
+  --accent-soft:rgba(92,138,31,0.10); --accent-pale:rgba(92,138,31,0.06);
+  --accent-glow:rgba(92,138,31,0.25);
+}
+[data-palette="ceramic-midnight"]{
+  --accent:#2F6BC4; --accent-2:#4683DC;
+  --accent-soft:rgba(47,107,196,0.10); --accent-pale:rgba(47,107,196,0.06);
+  --accent-glow:rgba(47,107,196,0.25);
+}
+[data-palette="phosphor"] .btn-primary,
+[data-palette="phosphor"] .modal-btn.primary,
+[data-palette="midnight"] .btn-primary,
+[data-palette="midnight"] .modal-btn.primary{ color:#14110D; }
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;}
+html,body{height:100%;font-family:'Geist',sans-serif;background:var(--bg);overscroll-behavior:none;}
+.app{max-width:430px;margin:0 auto;min-height:100dvh;display:flex;flex-direction:column;background:var(--bg);background-image:radial-gradient(ellipse 70% 30% at 50% 0%,var(--accent-pale),transparent);position:relative;}
+.status-bar{height:44px;display:flex;align-items:flex-end;justify-content:space-between;padding:0 24px 8px;font-size:12px;font-weight:500;color:var(--text);flex-shrink:0;background:var(--bg);}
+.status-time{font-family:'Geist Mono',monospace;font-size:14px;}
+.status-icons{display:flex;gap:6px;align-items:center;}
+.status-icons i{font-size:14px;}
+.app-body{flex:1;position:relative;overflow:hidden;min-height:0;}
+.tab-pane{position:absolute;inset:0;display:none;flex-direction:column;overflow-y:auto;-webkit-overflow-scrolling:touch;padding-bottom:calc(var(--tab-h) + 16px);}
+.tab-pane.active{display:flex;}
+#pane-log{overflow:hidden;padding-bottom:0;}
+#pane-recipes{overflow:hidden;padding-bottom:0;}
+.bottom-tabs{position:fixed;bottom:0;left:50%;transform:translateX(-50%);width:100%;max-width:430px;height:var(--tab-h);background:var(--card);border-top:.5px solid var(--border);display:flex;z-index:50;}
+.tab{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;cursor:pointer;color:var(--text-muted);font-size:10px;font-weight:500;transition:color .15s;padding-bottom:4px;user-select:none;}
+.tab i{font-size:22px;}
+.tab.active{color:var(--accent);}
+.section{padding:0 16px 12px;}
+.section-label{font-size:11px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px;padding:0 4px;}
+.card{background:var(--card);border:.5px solid var(--border);border-radius:var(--radius);overflow:hidden;}
+.page-header{padding:8px 20px 16px;}
+.page-title{font-size:26px;font-weight:500;color:var(--text);}
+.page-sub{font-size:13px;color:var(--text-muted);margin-top:2px;}
+.btn-primary{background:var(--accent);color:#fff;border:none;border-radius:var(--radius-sm);padding:14px;font-size:15px;font-weight:500;cursor:pointer;font-family:'Geist',sans-serif;width:100%;transition:transform .15s,box-shadow .15s;text-align:center;}
+.btn-primary:hover{box-shadow:0 6px 20px var(--accent-glow);}
+.btn-primary:active{transform:scale(.98);}
+.btn-secondary{flex:1;background:var(--card);border:.5px solid var(--border);border-radius:var(--radius-sm);padding:12px;text-align:center;font-size:14px;color:var(--accent);font-weight:500;cursor:pointer;font-family:'Geist',sans-serif;transition:background .15s;}
+.btn-secondary:hover{background:var(--accent-soft);}
+.btn-row{display:flex;gap:10px;}
+.form-row{display:flex;align-items:center;padding:13px 16px;border-bottom:.5px solid var(--border);gap:12px;}
+.form-row:last-child{border-bottom:none;}
+.form-row-label{font-size:14px;font-weight:500;color:var(--text);flex:1;min-width:0;}
+.form-row-sub{font-size:11px;color:var(--text-muted);margin-top:1px;}
+.field-input{background:var(--bg);border:.5px solid var(--border);border-radius:8px;padding:6px 10px;font-size:14px;font-family:'Geist Mono',monospace;color:var(--text);width:80px;text-align:right;outline:none;transition:border-color .2s;}
+.field-input:focus{border-color:var(--accent);}
+.field-input.wide{width:140px;text-align:left;font-family:'Geist',sans-serif;}
+.field-unit{font-size:12px;color:var(--text-muted);min-width:28px;}
+.field-select{background:var(--bg);border:.5px solid var(--border);border-radius:8px;padding:6px 10px;font-size:13px;font-family:'Geist',sans-serif;color:var(--text);outline:none;appearance:none;cursor:pointer;transition:border-color .2s;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%238A7F6E' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 10px center;padding-right:28px;}
+.field-select:focus{border-color:var(--accent);}
+.segment{display:flex;background:var(--bg);border:.5px solid var(--border);border-radius:10px;padding:3px;gap:2px;}
+.seg-btn{flex:1;padding:5px 8px;border-radius:7px;font-size:12px;font-weight:500;cursor:pointer;border:none;font-family:'Geist',sans-serif;color:var(--text-muted);background:transparent;transition:all .15s;white-space:nowrap;}
+.seg-btn.active{background:var(--card);color:var(--accent);box-shadow:0 1px 4px rgba(0,0,0,.12);}
+.toggle{width:44px;height:26px;border-radius:13px;background:var(--border-strong);position:relative;cursor:pointer;transition:background .2s;border:none;flex-shrink:0;}
+.toggle.on{background:var(--accent);}
+.toggle::after{content:'';position:absolute;width:20px;height:20px;border-radius:50%;background:#fff;top:3px;left:3px;transition:transform .2s;box-shadow:0 1px 3px rgba(0,0,0,.15);}
+.toggle.on::after{transform:translateX(18px);}
+.toast{position:fixed;bottom:80px;left:50%;transform:translateX(-50%) translateY(20px);background:var(--raised);color:var(--text);border:.5px solid var(--border-strong);padding:10px 20px;border-radius:24px;font-size:13px;font-weight:500;opacity:0;transition:all .3s;pointer-events:none;white-space:nowrap;z-index:200;}
+.toast.show{opacity:1;transform:translateX(-50%) translateY(0);}
+.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:flex-end;justify-content:center;z-index:100;opacity:0;pointer-events:none;transition:opacity .2s;}
+.modal-overlay.show{opacity:1;pointer-events:all;}
+.modal-sheet{background:var(--card);border-radius:24px 24px 0 0;border:.5px solid var(--border);padding:24px 20px 40px;width:100%;max-width:430px;transform:translateY(100%);transition:transform .3s ease;}
+.modal-overlay.show .modal-sheet{transform:translateY(0);}
+.modal-title{font-size:18px;font-weight:500;color:var(--text);margin-bottom:8px;}
+.modal-body{font-size:13px;color:var(--text-muted);line-height:1.6;margin-bottom:20px;}
+.modal-btns{display:flex;flex-direction:column;gap:8px;}
+.modal-btn{padding:13px;border-radius:var(--radius-sm);font-size:15px;font-weight:500;cursor:pointer;font-family:'Geist',sans-serif;border:none;text-align:center;}
+.modal-btn.primary{background:var(--accent);color:#fff;}
+.modal-btn.secondary{background:var(--bg);color:var(--text-muted);border:.5px solid var(--border);}
+@keyframes fadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.3}}
+@keyframes pulseDot{0%,100%{opacity:1;box-shadow:0 0 8px var(--accent-glow)}50%{opacity:.65;box-shadow:0 0 16px var(--accent-glow)}}
+.greeting-wrap{display:flex;align-items:center;gap:8px;margin-bottom:4px;}
+.greeting-dot{width:6px;height:6px;border-radius:50%;background:var(--accent);box-shadow:0 0 8px var(--accent-glow);flex-shrink:0;animation:pulseDot 2.6s ease-in-out infinite;}
+.home-greeting{font-size:11px;color:var(--text-muted);font-weight:500;text-transform:uppercase;letter-spacing:.16em;}
+.home-name{font-family:'Instrument Serif',serif;font-size:34px;font-weight:400;letter-spacing:-0.01em;color:var(--text);line-height:1.15;margin-bottom:0;}
+.home-name em{font-style:italic;color:var(--accent);}
+.streak-badge{background:var(--accent-soft);color:var(--accent);font-size:12px;font-weight:500;border-radius:100px;padding:4px 12px;margin-top:6px;display:inline-block;}
+.no-profile-banner{margin:0 16px 12px;background:var(--accent-soft);border-radius:var(--radius-sm);padding:14px 16px;}
+.no-profile-banner p{font-size:13px;color:var(--accent);line-height:1.5;margin-bottom:10px;}
+.progress-card{background:var(--card);border:.5px solid var(--border);border-radius:var(--radius);padding:18px;}
+.pcrd-top{display:flex;align-items:center;gap:16px;margin-bottom:14px;}
+.pcrd-kcal{flex:1;}
+.pcrd-kcal-label{font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:2px;}
+.pcrd-kcal-val{font-size:34px;font-weight:500;color:var(--accent);font-family:'Geist Mono',monospace;line-height:1;}
+.pcrd-kcal-goal{font-size:12px;color:var(--text-muted);margin-top:3px;}
+.kcal-ring{width:80px;height:80px;flex-shrink:0;}
+.ring-bg{fill:none;stroke:var(--accent-pale);stroke-width:8;}
+.ring-fill{fill:none;stroke:var(--accent);stroke-width:8;stroke-linecap:round;transition:stroke-dashoffset .6s ease;}
+.ring-text{font-family:'Geist Mono',monospace;font-size:11px;fill:var(--text-muted);text-anchor:middle;dominant-baseline:middle;}
+.macro-bars{display:flex;flex-direction:column;gap:8px;}
+.mbar-row{display:flex;align-items:center;gap:10px;}
+.mbar-name{font-size:12px;color:var(--text-muted);width:52px;flex-shrink:0;}
+.mbar-track{flex:1;height:6px;background:var(--bg);border-radius:3px;overflow:hidden;}
+.mbar-fill{height:6px;border-radius:3px;transition:width .5s ease;}
+.mbar-fill.protein{background:var(--accent);}
+.mbar-fill.carbs{background:var(--accent-2);}
+.mbar-fill.fat{background:var(--accent);opacity:.35;}
+.mbar-val{font-size:11px;color:var(--text-muted);font-family:'Geist Mono',monospace;width:72px;text-align:right;flex-shrink:0;}
+.date-nav-row{display:flex;align-items:center;gap:6px;margin-bottom:0;position:relative;}
+.date-nav-btn{width:32px;height:32px;border-radius:50%;background:var(--card);border:.5px solid var(--border);display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:16px;color:var(--text-muted);transition:background .15s,color .15s;flex-shrink:0;padding:0;outline:none;appearance:none;-webkit-appearance:none;line-height:1;}
+.date-nav-btn:hover{background:var(--accent-soft);color:var(--accent);border-color:var(--accent-2);}
+.date-nav-btn:disabled{opacity:.35;cursor:default;pointer-events:none;}
+.date-nav-label{flex:1;text-align:center;font-size:13px;font-weight:500;color:var(--text);cursor:pointer;font-family:'Geist Mono',monospace;letter-spacing:.02em;padding:4px 8px;border-radius:8px;transition:color .15s,background .15s;}
+.date-nav-label:hover{color:var(--accent);background:var(--accent-soft);}
+.cta-btn{background:var(--card);border:.5px solid var(--border);border-radius:var(--radius);padding:20px 16px;text-align:center;cursor:pointer;transition:transform .15s,box-shadow .15s;user-select:none;}
+.cta-btn:hover{transform:scale(1.01);box-shadow:0 8px 24px var(--accent-glow);}
+.cta-btn:active{transform:scale(.98);}
+.cta-icon{font-size:30px;color:var(--accent);margin-bottom:6px;}
+.cta-label{font-size:17px;font-weight:500;color:var(--text);margin-bottom:2px;}
+.cta-sub{font-size:12px;color:var(--text-muted);}
+.bw-row{display:flex;align-items:center;gap:8px;padding:12px 16px;}
+.bw-input{flex:1;background:var(--bg);border:.5px solid var(--border);border-radius:10px;padding:10px 12px;font-size:16px;font-family:'Geist Mono',monospace;color:var(--text);outline:none;transition:border-color .2s;}
+.bw-input:focus{border-color:var(--accent);}
+.bw-unit{font-size:13px;color:var(--text-muted);}
+.bw-btn{background:var(--accent);color:#fff;border:none;border-radius:10px;padding:10px 16px;font-size:14px;font-weight:500;cursor:pointer;font-family:'Geist',sans-serif;white-space:nowrap;}
+.meal-item{background:var(--card);border:.5px solid var(--border);border-radius:var(--radius-sm);padding:12px 14px;display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;}
+.meal-item-left{flex:1;min-width:0;}
+.meal-item-name{font-size:14px;font-weight:500;color:var(--text);}
+.meal-item-detail{font-size:11px;color:var(--text-muted);margin-top:2px;}
+.meal-item-kcal{font-size:15px;font-weight:500;color:var(--accent);font-family:'Geist Mono',monospace;}
+.empty-state{text-align:center;padding:32px 16px;color:var(--text-muted);font-size:13px;}
+.empty-state i{font-size:36px;color:var(--border-strong);display:block;margin-bottom:8px;}
+.log-screen{position:absolute;inset:0;display:none;flex-direction:column;overflow-y:auto;-webkit-overflow-scrolling:touch;}
+.log-screen.active{display:flex;}
+#ls-listening{background:var(--bg);position:relative;overflow:hidden;}
+#ls-listening::before{content:"";position:absolute;inset:0;pointer-events:none;background:radial-gradient(60% 40% at 50% 38%, var(--accent-soft), transparent 70%);z-index:0;transition:opacity 0.4s;}
+#ls-listening > *{position:relative;z-index:1;}
+#ls-confirm,#ls-ambiguous,#ls-summary{background:var(--bg);padding:16px 20px calc(var(--tab-h) + 24px);}
+.listen-topbar{display:flex;justify-content:space-between;align-items:center;padding:14px 22px;flex-shrink:0;}
+.listen-cancel{font-size:12px;color:var(--text-muted);cursor:pointer;display:flex;align-items:center;gap:4px;text-transform:uppercase;letter-spacing:0.1em;font-weight:500;}
+.listen-cancel:hover{color:var(--text);}
+.listen-title{font-size:11px;color:var(--text-dim);font-weight:600;text-transform:uppercase;letter-spacing:0.14em;}
+.always-on-bar{background:var(--card);border:0.5px solid var(--border);border-radius:100px;padding:8px 14px;display:flex;align-items:center;gap:10px;margin:0 22px 12px;flex-shrink:0;box-shadow:inset 0 1px 0 rgba(255,255,255,0.03);}
+.aob-dot{width:7px;height:7px;border-radius:50%;background:var(--text-dim);flex-shrink:0;transition:background .3s;}
+.aob-dot.listening{background:var(--accent);box-shadow:0 0 10px var(--accent-glow);animation:blink .6s ease-in-out infinite;}
+.aob-dot.wake{background:var(--amber);box-shadow:0 0 10px rgba(232,165,71,0.6);animation:blink 1s ease-in-out infinite;}
+.aob-dot.active{background:var(--accent);box-shadow:0 0 14px var(--accent-glow);animation:blink .3s ease-in-out infinite;}
+.aob-dot.speaking{background:var(--sage);box-shadow:0 0 10px rgba(181,197,111,0.5);animation:blink .4s ease-in-out infinite;}
+.aob-text{font-size:11px;color:var(--text-muted);flex:1;text-transform:uppercase;letter-spacing:0.1em;font-weight:500;}
+.aob-text.on{color:var(--text);}
+.queue-bar{background:var(--card);border:0.5px solid var(--border);border-radius:14px;padding:8px 14px;margin:0 22px 12px;display:none;flex-shrink:0;}
+.queue-bar.show{display:block;}
+.queue-label{font-size:10px;color:var(--text-dim);margin-bottom:4px;text-transform:uppercase;letter-spacing:.06em;}
+.queue-items{display:flex;flex-wrap:wrap;gap:6px;}
+.queue-chip{background:var(--accent-soft);border:0.5px solid var(--accent-soft);border-radius:100px;padding:4px 10px;font-size:11px;font-family:var(--font-mono);color:var(--accent);}
+.perm-warn{background:rgba(232,165,71,0.1);border:0.5px solid rgba(232,165,71,0.3);border-radius:12px;padding:10px 14px;font-size:12px;color:var(--amber);margin:0 22px 12px;display:none;text-align:center;line-height:1.5;flex-shrink:0;}
+.mic-area{display:flex;flex-direction:column;align-items:center;justify-content:center;flex:1;min-height:160px;padding:10px 0 14px;}
+.mic-outer{width:160px;height:160px;border-radius:50%;display:flex;align-items:center;justify-content:center;position:relative;margin-bottom:24px;}
+.pulse-ring{position:absolute;width:160px;height:160px;border-radius:50%;border:1px solid var(--accent);opacity:0;}
+.pulse-ring.active{animation:pulseRing2 2s ease-out infinite;}
+.pulse-ring:nth-child(2).active{animation-delay:0.66s;}
+.pulse-ring:nth-child(3).active{animation-delay:1.32s;}
+@keyframes pulseRing{0%{transform:scale(1);opacity:.8}100%{transform:scale(2);opacity:0}}
+@keyframes pulseRing2{0%{transform:scale(0.7);opacity:0.7}100%{transform:scale(1.45);opacity:0}}
+.mic-btn{width:120px;height:120px;border-radius:50%;background:radial-gradient(circle at 30% 25%, #2C2419, #15110C 70%);border:0.5px solid var(--border-strong);box-shadow:inset 0 2px 0 rgba(255,255,255,0.05),inset 0 -10px 30px rgba(0,0,0,0.6),0 12px 40px rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;z-index:1;cursor:pointer;position:relative;transition:transform 0.2s ease,box-shadow 0.3s ease;}
+.mic-btn::before{content:"";position:absolute;inset:8px;border-radius:50%;background:radial-gradient(circle at 50% 30%, rgba(255,255,255,0.05), transparent 60%);pointer-events:none;}
+.mic-btn:active{transform:scale(0.97);}
+.mic-btn.wake{background:radial-gradient(circle at 30% 25%, #3F2D14, #1F140A 70%);border-color:rgba(232,165,71,0.4);}
+.mic-btn.listening{background:radial-gradient(circle at 30% 25%, #3A2419, #1F100A 70%);border-color:rgba(255,107,61,0.4);box-shadow:inset 0 2px 0 rgba(255,255,255,0.06),inset 0 -10px 30px rgba(0,0,0,0.5),0 0 0 1px var(--accent-soft),0 12px 50px var(--accent-glow);}
+.mic-btn.recording{background:radial-gradient(circle at 30% 25%, var(--accent), #B83820 70%);border-color:var(--accent-2);box-shadow:inset 0 2px 0 rgba(255,255,255,0.15),inset 0 -10px 30px rgba(0,0,0,0.3),0 0 0 1px var(--accent),0 14px 60px var(--accent-glow);}
+.mic-btn.speaking{background:radial-gradient(circle at 30% 25%, #2C3818, #14180A 70%);border-color:rgba(181,197,111,0.4);}
+.mic-btn i{font-size:42px;color:var(--text-muted);transition:color .2s;}
+.mic-btn.wake i{color:var(--amber);}
+.mic-btn.listening i{color:var(--accent);}
+.mic-btn.recording i{color:#FFEFE6;}
+.mic-btn.speaking i{color:var(--sage);}
+.listen-status{font-size:13px;color:var(--text-muted);margin-bottom:16px;font-weight:500;text-align:center;transition:color .3s;text-transform:uppercase;letter-spacing:0.12em;}
+.listen-status.on{color:var(--text);}
+.waveform{display:flex;align-items:center;gap:4px;height:36px;}
+.wbar{width:4px;background:var(--text-dim);border-radius:3px;height:6px;}
+.waveform.active .wbar{background:var(--accent);box-shadow:0 0 6px var(--accent-glow);animation:wv .7s ease-in-out infinite;}
+.waveform.speaking .wbar{background:var(--sage);animation:wv .5s ease-in-out infinite;}
+.wbar:nth-child(1){animation-delay:0s}.wbar:nth-child(2){animation-delay:.08s}.wbar:nth-child(3){animation-delay:.16s}
+.wbar:nth-child(4){animation-delay:.24s}.wbar:nth-child(5){animation-delay:.32s}.wbar:nth-child(6){animation-delay:.4s}
+.wbar:nth-child(7){animation-delay:.48s}.wbar:nth-child(8){animation-delay:.56s}.wbar:nth-child(9){animation-delay:.64s}
+.wbar:nth-child(10){animation-delay:.72s}
+@keyframes wv{0%,100%{height:6px}50%{height:26px}}
+.transcript-box{background:var(--card);border:0.5px solid var(--border);border-radius:14px;padding:14px 16px;min-height:52px;margin:14px 22px 12px;flex-shrink:0;}
+.transcript-label{font-size:10px;color:var(--text-dim);font-weight:600;margin-bottom:4px;text-transform:uppercase;letter-spacing:.06em;}
+.transcript-text{font-size:14px;color:var(--text);font-style:normal;min-height:20px;line-height:1.5;}
+.text-input-row{display:flex;gap:8px;margin:0 22px 12px;flex-shrink:0;}
+.voice-text-input{flex:1;background:var(--card);border:0.5px solid var(--border);border-radius:12px;padding:12px 16px;font-size:13px;color:var(--text);font-family:'Geist',sans-serif;outline:none;transition:border-color .2s;}
+.voice-text-input::placeholder{color:var(--text-dim);}
+.voice-text-input:focus{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft);}
+.send-btn{width:46px;height:46px;border-radius:12px;background:var(--accent);border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;box-shadow:0 0 0 1px rgba(255,255,255,0.08) inset,0 6px 14px var(--accent-glow);}
+.send-btn i{font-size:18px;color:#14110D;}
+.listen-hint{font-size:10px;color:var(--text-dim);text-align:center;line-height:1.5;padding:0 20px 14px;font-weight:500;text-transform:uppercase;letter-spacing:0.14em;flex-shrink:0;}
+.conf-row{display:flex;align-items:center;gap:6px;justify-content:center;margin-bottom:10px;}
+.conf-dot{width:7px;height:7px;border-radius:50%;}
+.conf-dot.high{background:var(--sage);box-shadow:0 0 8px rgba(181,197,111,0.5);}
+.conf-dot.low{background:var(--amber);box-shadow:0 0 8px rgba(232,165,71,0.5);}
+.conf-text{font-size:12px;font-weight:500;}
+.conf-text.high{color:var(--sage);}
+.conf-text.low{color:var(--amber);}
+.queue-remaining{background:var(--accent-soft);color:var(--accent);font-size:12px;border:0.5px solid var(--accent-soft);border-radius:100px;padding:6px 12px;text-align:center;margin-bottom:10px;display:none;}
+.queue-remaining.show{display:block;}
+.food-card{background:var(--card);border:0.5px solid var(--border);border-radius:var(--radius);padding:20px;margin-bottom:14px;}
+.food-card-top{display:flex;align-items:center;gap:12px;margin-bottom:16px;}
+.food-icon{width:48px;height:48px;background:var(--accent-soft);border:0.5px solid var(--accent-soft);border-radius:14px;display:flex;align-items:center;justify-content:center;flex-shrink:0;}
+.food-icon i{font-size:22px;color:var(--accent);}
+.food-name{font-size:18px;font-weight:500;color:var(--text);letter-spacing:-0.01em;}
+.food-weight-lbl{font-size:12px;color:var(--text-muted);font-family:var(--font-mono);letter-spacing:0.02em;}
+.macro-grid{display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:6px;}
+.macro-cell{text-align:center;background:var(--bg-2);border:0.5px solid var(--border);border-radius:10px;padding:10px 4px;}
+.macro-cell-val{font-size:15px;font-weight:500;color:var(--text);font-family:'Geist Mono',monospace;}
+.macro-cell-lbl{font-size:9px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.08em;font-weight:600;}
+.macro-cell.kcal .macro-cell-val{color:var(--accent);}
+.cooked-row{display:flex;align-items:center;gap:8px;justify-content:center;margin-bottom:16px;}
+.cooked-lbl{font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.08em;}
+.toggle-pill{font-size:12px;border-radius:20px;padding:4px 14px;font-weight:500;cursor:pointer;transition:all .15s;border:none;font-family:'Geist',sans-serif;}
+.toggle-pill.active{background:var(--accent-soft);color:var(--accent);border:0.5px solid var(--accent-soft);}
+.toggle-pill.inactive{background:var(--bg-2);border:0.5px solid var(--border);color:var(--text-muted);}
+.voice-hint-bar{background:var(--accent-soft);border:0.5px solid var(--accent-soft);border-radius:12px;padding:8px 14px;display:flex;align-items:center;gap:8px;margin-bottom:14px;}
+.voice-hint-bar i{font-size:16px;color:var(--accent);}
+.voice-hint-text{font-size:12px;color:var(--accent);}
+.action-stack{display:flex;flex-direction:column;gap:10px;}
+.ambig-icon-wrap{width:52px;height:52px;background:var(--amber-light);border-radius:16px;display:flex;align-items:center;justify-content:center;margin:0 auto 14px;}
+.ambig-icon-wrap i{font-size:26px;color:var(--amber);}
+.ambig-title{font-size:22px;font-weight:500;color:var(--text);text-align:center;margin-bottom:4px;letter-spacing:-0.01em;}
+.ambig-sub{font-size:13px;color:var(--text-muted);text-align:center;margin-bottom:8px;}
+.ambig-listening{display:flex;align-items:center;gap:8px;justify-content:center;margin-bottom:20px;}
+.ambig-dot{width:8px;height:8px;border-radius:50%;background:var(--accent);box-shadow:0 0 8px var(--accent-glow);animation:blink .6s ease-in-out infinite;}
+.ambig-listen-text{font-size:12px;color:var(--accent);font-weight:500;}
+.ambig-options{display:flex;flex-direction:column;gap:10px;margin-bottom:16px;}
+.ambig-opt{background:var(--card);border:0.5px solid var(--border);border-radius:var(--radius-sm);padding:14px 16px;display:flex;justify-content:space-between;align-items:center;cursor:pointer;transition:all .15s;}
+.ambig-opt:hover{background:var(--card-2);border-color:var(--border-strong);}
+.ambig-opt.selected{background:var(--accent-soft);border-color:var(--accent);border-width:1.5px;}
+.ambig-opt-name{font-size:14px;font-weight:500;color:var(--text);}
+.ambig-opt.selected .ambig-opt-name{color:var(--accent);}
+.ambig-opt-macros{font-size:10px;color:var(--text-muted);margin-top:2px;font-family:var(--font-mono);letter-spacing:0.02em;}
+.ambig-opt-right{display:flex;align-items:center;gap:8px;}
+.ambig-opt-kcal{font-size:13px;color:var(--text-muted);font-weight:500;font-family:'Geist Mono',monospace;}
+.ambig-opt.selected .ambig-opt-kcal{color:var(--accent);}
+.ambig-check{font-size:18px;color:var(--accent);opacity:0;transition:opacity .15s;}
+.ambig-opt.selected .ambig-check{opacity:1;}
+.ambig-cancel{font-size:13px;color:var(--text-muted);text-align:center;cursor:pointer;padding:8px;margin-top:4px;}
+.total-card{background:linear-gradient(180deg, #2C2118, #1A1611);border:0.5px solid var(--border-strong);border-radius:var(--radius);padding:22px 20px;margin-bottom:14px;position:relative;overflow:hidden;}
+.total-card::before{content:"";position:absolute;inset:0;background:radial-gradient(80% 60% at 80% 0%, var(--accent-soft), transparent 70%);pointer-events:none;}
+.total-card > *{position:relative;}
+.total-lbl{font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.14em;font-weight:600;margin-bottom:4px;}
+.total-kcal{font-size:48px;font-weight:500;color:var(--accent);font-family:'Geist Mono',monospace;margin-bottom:12px;letter-spacing:-0.04em;text-shadow:0 0 24px var(--accent-glow);}
+.total-macros{display:flex;}
+.total-macro{flex:1;}
+.total-macro-val{font-size:15px;font-weight:500;color:var(--text);font-family:'Geist Mono',monospace;}
+.total-macro-lbl{font-size:9px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.1em;font-weight:600;margin-top:2px;}
+.ing-list{display:flex;flex-direction:column;gap:8px;margin-bottom:12px;}
+.ing-list{display:flex;flex-direction:column;gap:8px;margin-bottom:12px;flex:1;overflow-y:auto;max-height:240px;}
+.ing-item{background:var(--card);border:0.5px solid var(--border);border-radius:var(--radius-sm);padding:10px 14px;display:flex;justify-content:space-between;align-items:center;cursor:pointer;transition:border-color .15s,background .15s;}
+.ing-item:hover{background:var(--card-2);}
+.ing-name{font-size:14px;font-weight:500;color:var(--text);}
+.ing-weight{font-size:10px;color:var(--text-muted);font-family:var(--font-mono);letter-spacing:0.02em;}
+.ing-kcal{font-size:14px;color:var(--accent);font-weight:500;font-family:'Geist Mono',monospace;}
+.ing-edit-icon{font-size:13px;color:var(--text-muted);opacity:.5;margin-left:6px;transition:opacity .15s,color .15s;}
+.ing-item:hover .ing-edit-icon{color:var(--accent);opacity:1;}
+.add-more-btn{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--accent);font-weight:500;cursor:pointer;padding:8px 0;margin-bottom:10px;border:none;background:none;font-family:'Geist',sans-serif;width:100%;text-transform:uppercase;letter-spacing:0.08em;}
+.add-more-btn:hover{opacity:.7;}
+.btn-danger{background:rgba(229,112,91,.1);border:.5px solid var(--red);color:var(--red);border-radius:var(--radius-sm);padding:12px;text-align:center;font-size:14px;font-weight:500;cursor:pointer;font-family:'Geist',sans-serif;transition:background .15s;flex:1;}
+.btn-danger:hover{background:rgba(229,112,91,.2);}
+/* ── MODALS ── */
+.modal-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-shrink:0;}
+.modal-title{font-size:18px;font-weight:500;color:var(--text);}
+.modal-close{background:var(--bg);border:none;width:30px;height:30px;border-radius:50%;font-size:14px;cursor:pointer;color:var(--text-muted);display:flex;align-items:center;justify-content:center;font-family:'Geist',sans-serif;}
+.modal-tabs{display:flex;gap:8px;margin-bottom:14px;flex-shrink:0;}
+.tab-btn{flex:1;padding:8px;border-radius:10px;border:.5px solid var(--border);background:var(--bg);font-size:13px;font-weight:500;color:var(--text-muted);cursor:pointer;font-family:'Geist',sans-serif;transition:all .15s;}
+.tab-btn.active{background:var(--accent-soft);color:var(--accent);border-color:var(--accent-soft);}
+.modal-panel{overflow-y:auto;flex:1;min-height:0;}
+.modal-search{width:100%;background:var(--bg);border:.5px solid var(--border);border-radius:12px;padding:10px 14px;font-size:14px;color:var(--text);font-family:'Geist',sans-serif;outline:none;margin-bottom:10px;transition:border-color .2s;box-sizing:border-box;}
+.modal-search:focus{border-color:var(--accent-2);}
+.modal-search::placeholder{color:var(--text-dim);}
+.food-results{display:flex;flex-direction:column;gap:4px;margin-bottom:10px;}
+.food-result-item{padding:10px 12px;border-radius:10px;cursor:pointer;display:flex;justify-content:space-between;align-items:center;transition:background .15s;border:1px solid transparent;}
+.food-result-item:hover{background:var(--accent-soft);}
+.food-result-item.selected{background:var(--accent-soft);border-color:var(--accent-2);}
+.fri-name{font-size:13px;font-weight:500;color:var(--text);}
+.fri-kcal{font-size:12px;color:var(--text-muted);font-family:'Geist Mono',monospace;}
+.selected-preview-box{background:var(--bg);border-radius:14px;padding:14px;margin-bottom:10px;}
+.spb-name{font-size:15px;font-weight:500;color:var(--text);margin-bottom:3px;}
+.spb-per100{font-size:11px;color:var(--text-muted);margin-bottom:12px;}
+.gram-row{display:flex;align-items:center;gap:10px;margin-bottom:12px;}
+.gram-label{font-size:13px;color:var(--text-muted);flex-shrink:0;}
+.gram-input{width:90px;background:var(--card);border:.5px solid var(--border);border-radius:10px;padding:8px 12px;font-size:15px;font-weight:500;color:var(--text);font-family:'Geist Mono',monospace;outline:none;text-align:center;transition:border-color .2s;}
+.gram-input:focus{border-color:var(--accent-2);}
+.gram-suffix{font-size:13px;color:var(--text-muted);}
+.preview-macro-grid{display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:6px;}
+.pmg-cell{background:var(--card);border-radius:8px;padding:6px 4px;text-align:center;}
+.pmg-val{font-size:13px;font-weight:500;color:var(--text);font-family:'Geist Mono',monospace;}
+.pmg-lbl{font-size:9px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.04em;}
+.pmg-cell.kcal .pmg-val{color:var(--accent);}
+.custom-form{display:flex;flex-direction:column;gap:10px;}
+.custom-input{background:var(--bg);border:.5px solid var(--border);border-radius:12px;padding:10px 14px;font-size:14px;color:var(--text);font-family:'Geist',sans-serif;outline:none;width:100%;transition:border-color .2s;box-sizing:border-box;}
+.custom-input:focus{border-color:var(--accent-2);}
+.custom-input::placeholder{color:var(--text-dim);}
+.custom-label-row{display:flex;gap:8px;}
+.custom-field-group{flex:1;display:flex;flex-direction:column;gap:4px;}
+.custom-field-label{font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.06em;}
+.modal-add-btn{flex-shrink:0;margin-top:14px;}
+.rs-screen{position:absolute;inset:0;display:none;flex-direction:column;overflow-y:auto;-webkit-overflow-scrolling:touch;padding-bottom:calc(var(--tab-h)+16px);}
+.rs-screen.active{display:flex;}
+.recipe-item{background:var(--card);border:.5px solid var(--border);border-radius:var(--radius-sm);padding:14px 16px;display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;cursor:pointer;transition:background .15s;}
+.recipe-item:hover{background:var(--accent-soft);}
+.recipe-item-name{font-size:14px;font-weight:500;color:var(--text);}
+.recipe-item-detail{font-size:11px;color:var(--text-muted);margin-top:2px;}
+.recipe-item-kcal{font-size:13px;color:var(--accent);font-family:'Geist Mono',monospace;font-weight:500;white-space:nowrap;margin-left:12px;}
+.import-textarea{width:100%;min-height:180px;background:var(--bg);border:.5px solid var(--border);border-radius:var(--radius-sm);padding:12px;font-size:13px;font-family:'Geist',sans-serif;color:var(--text);outline:none;resize:vertical;line-height:1.5;transition:border-color .2s;}
+.import-textarea:focus{border-color:var(--accent);}
+.step-item{background:var(--card);border:.5px solid var(--border);border-radius:var(--radius-sm);padding:14px 16px;margin-bottom:8px;}
+.step-num{font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px;}
+.step-text{font-size:14px;color:var(--text);line-height:1.5;}
+.step-timer{display:inline-flex;align-items:center;gap:4px;background:var(--accent-soft);color:var(--accent);border-radius:20px;padding:3px 10px;font-size:11px;font-weight:500;margin-top:8px;}
+.cook-step-big{font-size:22px;font-weight:400;color:var(--text);line-height:1.5;margin-bottom:24px;flex:1;}
+.cook-counter{font-size:12px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.08em;margin-bottom:12px;}
+.cook-timer-box{background:var(--accent-soft);border-radius:var(--radius-sm);padding:16px;text-align:center;margin-bottom:20px;}
+.cook-timer-val{font-size:48px;font-weight:500;color:var(--accent);font-family:'Geist Mono',monospace;line-height:1;}
+.cook-timer-lbl{font-size:11px;color:var(--text-muted);margin-top:4px;}
+.cook-nav{display:flex;gap:10px;margin-top:auto;padding-top:16px;flex-shrink:0;}
+.total-row{display:flex;justify-content:space-between;align-items:center;padding:11px 16px;border-bottom:.5px solid var(--border);}
+.total-row:last-child{border-bottom:none;}
+.total-label{font-size:14px;color:var(--text-muted);}
+.total-val{font-size:14px;font-weight:500;color:var(--text);font-family:'Geist Mono',monospace;}
+.hist-nav{display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;}
+.hist-nav-btn{background:none;border:none;cursor:pointer;color:var(--accent);font-size:22px;padding:4px 8px;border-radius:8px;transition:background .15s;line-height:1;}
+.hist-nav-btn:hover{background:var(--accent-soft);}
+.hist-nav-btn:disabled{color:var(--border-strong);cursor:default;}
+.hist-nav-btn:disabled:hover{background:none;}
+.hist-date-label{font-size:16px;font-weight:500;color:var(--text);}
+.hist-day-summary{display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:14px 16px;}
+.hist-stat{text-align:center;}
+.hist-stat-val{font-size:20px;font-weight:500;color:var(--accent);font-family:'Geist Mono',monospace;}
+.hist-stat-lbl{font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.06em;}
+.chart-section{background:var(--card);border:.5px solid var(--border);border-radius:var(--radius);padding:16px;margin-bottom:12px;}
+.chart-title{font-size:13px;font-weight:500;color:var(--text);margin-bottom:10px;}
+.chart-range{display:flex;gap:6px;margin-bottom:12px;}
+.range-btn{padding:4px 12px;border-radius:20px;border:.5px solid var(--border);background:var(--bg);font-size:12px;font-weight:500;cursor:pointer;font-family:'Geist',sans-serif;color:var(--text-muted);transition:all .15s;}
+.range-btn.active{background:var(--accent);color:#fff;border-color:var(--accent);}
+.tdee-card{background:var(--accent);border-radius:var(--radius);padding:20px;margin:0 16px 12px;}
+.tdee-top{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:16px;}
+.tdee-label{font-size:11px;color:rgba(255,255,255,.7);text-transform:uppercase;letter-spacing:.08em;margin-bottom:4px;}
+.tdee-value{font-size:34px;font-weight:500;color:#fff;font-family:'Geist Mono',monospace;}
+.tdee-sub{font-size:12px;color:rgba(255,255,255,.7);margin-top:2px;}
+.tdee-edit-btn{background:rgba(255,255,255,.15);border:none;border-radius:10px;padding:6px 12px;font-size:12px;color:#fff;cursor:pointer;font-family:'Geist',sans-serif;font-weight:500;white-space:nowrap;}
+.tdee-edit-btn:hover{background:rgba(255,255,255,.25);}
+.tdee-macros{display:flex;}
+.tdee-macro{flex:1;}
+.tdee-macro-val{font-size:16px;font-weight:500;color:#fff;font-family:'Geist Mono',monospace;}
+.tdee-macro-lbl{font-size:10px;color:rgba(255,255,255,.65);}
+.override-row{display:flex;align-items:center;gap:8px;padding:12px 16px;border-bottom:.5px solid var(--border);}
+.override-row:last-child{border-bottom:none;}
+.override-label{font-size:14px;font-weight:500;color:var(--text);flex:1;}
+.override-input{background:var(--bg);border:.5px solid var(--border);border-radius:8px;padding:5px 8px;font-size:14px;font-family:'Geist Mono',monospace;color:var(--text);width:70px;text-align:right;outline:none;transition:border-color .2s;}
+.override-input:focus{border-color:var(--accent);}
+.override-unit{font-size:12px;color:var(--text-muted);min-width:28px;}
+.bw-avg-chip{display:inline-flex;align-items:center;gap:6px;background:var(--accent-soft);color:var(--accent);border-radius:20px;padding:5px 12px;font-size:12px;font-weight:500;margin:8px 16px 4px;}
+.bw-hist-row{display:flex;justify-content:space-between;align-items:center;padding:8px 16px;border-bottom:.5px solid var(--border);font-size:13px;}
+.bw-hist-row:last-child{border-bottom:none;}
+.bw-hist-date{color:var(--text-muted);}
+.bw-hist-val{font-family:'Geist Mono',monospace;font-weight:500;}
+.bw-hist-delta{font-size:11px;}
+.bw-hist-delta.up{color:var(--amber);}
+.bw-hist-delta.down{color:var(--green);}
+.bw-hist-delta.same{color:var(--text-muted);}
+.recal-banner{margin:0 16px 12px;background:var(--amber-light);border:.5px solid rgba(232,165,71,0.3);border-radius:var(--radius-sm);padding:14px 16px;display:none;}
+.recal-banner.show{display:block;}
+.recal-title{font-size:14px;font-weight:500;color:var(--amber);margin-bottom:4px;}
+.recal-body{font-size:12px;color:var(--text-muted);line-height:1.5;margin-bottom:10px;}
+.recal-btns{display:flex;gap:8px;}
+.recal-btn{flex:1;padding:8px;border-radius:8px;font-size:13px;font-weight:500;cursor:pointer;font-family:'Geist',sans-serif;border:none;text-align:center;}
+.recal-btn.primary{background:var(--amber);color:#fff;}
+.recal-btn.secondary{background:var(--amber-light);color:var(--amber);}
+.info-box{margin:0 16px 12px;background:var(--accent-soft);border-radius:var(--radius-sm);padding:14px 16px;}
+.info-box-title{display:flex;align-items:center;gap:8px;font-size:13px;font-weight:500;color:var(--accent);margin-bottom:8px;}
+.info-box-body{font-size:12px;color:var(--text-muted);line-height:1.6;}
+.save-btn{margin:0 16px 12px;width:calc(100% - 32px);background:var(--accent);color:#fff;border:none;border-radius:var(--radius-sm);padding:14px;font-size:15px;font-weight:500;cursor:pointer;font-family:'Geist',sans-serif;transition:transform .15s,box-shadow .15s;}
+.save-btn:hover{box-shadow:0 6px 20px var(--accent-glow);}
+.save-btn:active{transform:scale(.98);}
+.modal-suggestion{background:var(--accent-soft);border-radius:var(--radius-sm);padding:14px 16px;margin-bottom:20px;}
+.modal-suggestion-row{display:flex;justify-content:space-between;align-items:center;font-size:14px;padding:4px 0;}
+.modal-suggestion-label{color:var(--text);font-weight:500;}
+.modal-suggestion-val{color:var(--accent);font-family:'Geist Mono',monospace;font-weight:500;}
+.accent-grid{display:flex;gap:8px;}
+.accent-swatch{flex:1;padding:10px 8px;border-radius:10px;border:1.5px solid var(--border);cursor:pointer;text-align:center;transition:border-color .2s,box-shadow .2s;background:var(--card);}
+.accent-swatch.active{border-color:var(--accent);box-shadow:inset 0 0 0 1px var(--accent);}
+.accent-dot{width:14px;height:14px;border-radius:50%;margin:0 auto 6px;}
+.accent-bar{height:5px;border-radius:3px;margin-bottom:6px;}
+.accent-name{font-size:11px;color:var(--text-muted);font-weight:500;}
+</style>
+</head>
+<body>
+<div class="app">
+
+  <div class="status-bar">
+    <span class="status-time" id="clock">00:00</span>
+    <div class="status-icons"><i class="ti ti-wifi"></i><i class="ti ti-battery-3"></i></div>
+  </div>
+
+  <div class="app-body">
+
+    <!-- ══════════════════════════════════════════════════
+         HOME
+    ══════════════════════════════════════════════════ -->
+    <div class="tab-pane active" id="pane-home">
+      <div class="page-header" style="padding-bottom:8px;">
+        <div class="greeting-wrap">
+          <div class="greeting-dot"></div>
+          <div class="home-greeting" id="home-greeting">Good morning</div>
+        </div>
+        <div class="home-name" id="home-name">Hello, <em>chef</em></div>
+        <div id="home-streak" style="margin-top:6px;display:none;">
+          <span class="streak-badge" id="home-streak-text">🔥 1 day streak</span>
+        </div>
+      </div>
+
+      <div class="no-profile-banner" id="no-profile-banner" style="display:none;">
+        <p>Set up your profile to see personalised calorie and macro targets.</p>
+        <button class="btn-primary" style="font-size:13px;padding:10px;" onclick="switchTab('profile')">Set up profile →</button>
+      </div>
+
+      <div class="section" style="padding-bottom:0;">
+        <div class="date-nav-row">
+          <button class="date-nav-btn" id="date-prev"><i class="ti ti-arrow-left"></i></button>
+          <div class="date-nav-label" id="date-label">—</div>
+          <button class="date-nav-btn" id="date-next"><i class="ti ti-arrow-right"></i></button>
+          <input type="date" id="date-picker" style="position:absolute;width:1px;height:1px;opacity:0;pointer-events:none;overflow:hidden;">
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="progress-card">
+          <div class="pcrd-top">
+            <div class="pcrd-kcal">
+              <div class="pcrd-kcal-label" id="home-date-label">Today so far</div>
+              <div class="pcrd-kcal-val" id="home-kcal">0</div>
+              <div class="pcrd-kcal-goal" id="home-kcal-goal">of — kcal</div>
+            </div>
+            <svg class="kcal-ring" viewBox="0 0 80 80">
+              <circle class="ring-bg" cx="40" cy="40" r="34"/>
+              <circle class="ring-fill" id="kcal-ring-fill" cx="40" cy="40" r="34"
+                stroke-dasharray="213.628" stroke-dashoffset="213.628"
+                transform="rotate(-90 40 40)"/>
+              <text class="ring-text" x="40" y="40" id="kcal-ring-pct">0%</text>
+            </svg>
+          </div>
+          <div class="macro-bars">
+            <div class="mbar-row">
+              <span class="mbar-name">Protein</span>
+              <div class="mbar-track"><div class="mbar-fill protein" id="bar-protein" style="width:0%"></div></div>
+              <span class="mbar-val" id="val-protein">0g</span>
+            </div>
+            <div class="mbar-row">
+              <span class="mbar-name">Carbs</span>
+              <div class="mbar-track"><div class="mbar-fill carbs" id="bar-carbs" style="width:0%"></div></div>
+              <span class="mbar-val" id="val-carbs">0g</span>
+            </div>
+            <div class="mbar-row">
+              <span class="mbar-name">Fat</span>
+              <div class="mbar-track"><div class="mbar-fill fat" id="bar-fat" style="width:0%"></div></div>
+              <span class="mbar-val" id="val-fat">0g</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="cta-btn" onclick="startCookingLog()">
+          <div class="cta-icon"><i class="ti ti-microphone"></i></div>
+          <div class="cta-label">Start cooking log</div>
+          <div class="cta-sub">Tap or say "Hey Sous"</div>
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="section-label">Bodyweight</div>
+        <div class="card">
+          <div class="bw-row">
+            <input class="bw-input" id="home-bw-input" type="number" step="0.1" min="30" max="300" placeholder="82.5">
+            <span class="bw-unit">kg</span>
+            <button class="bw-btn" onclick="homeLogWeight()">Log</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="section-label" id="home-meals-label">Today's meals</div>
+        <div id="home-meals-list">
+          <div class="empty-state"><i class="ti ti-bowl-spoon"></i>No meals logged yet today</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══════════════════════════════════════════════════
+         LOG
+    ══════════════════════════════════════════════════ -->
+    <div class="tab-pane" id="pane-log">
+
+      <!-- LISTENING -->
+      <div class="log-screen active" id="ls-listening">
+        <div class="listen-topbar">
+          <div class="listen-cancel" id="log-cancel-btn"><i class="ti ti-chevron-left"></i> Cancel</div>
+          <div class="listen-title">Cooking log</div>
+          <div style="width:56px;"></div>
+        </div>
+        <div class="perm-warn" id="perm-warn">Microphone access denied. Please allow mic access in your browser settings and reload.</div>
+        <div class="always-on-bar">
+          <div class="aob-dot" id="aob-dot"></div>
+          <div class="aob-text" id="aob-text">Starting mic…</div>
+        </div>
+        <div class="queue-bar" id="queue-bar">
+          <div class="queue-label">Up next</div>
+          <div class="queue-items" id="queue-items"></div>
+        </div>
+        <div class="mic-area">
+          <div class="mic-outer">
+            <div class="pulse-ring" id="pr1"></div>
+            <div class="pulse-ring" id="pr2"></div>
+            <div class="pulse-ring" id="pr3"></div>
+            <div class="mic-btn" id="mic-btn"><i class="ti ti-microphone"></i></div>
+          </div>
+          <div class="listen-status" id="listen-status">Tap mic to speak</div>
+          <div class="waveform" id="waveform">
+            <div class="wbar"></div><div class="wbar"></div><div class="wbar"></div><div class="wbar"></div><div class="wbar"></div>
+            <div class="wbar"></div><div class="wbar"></div><div class="wbar"></div><div class="wbar"></div><div class="wbar"></div>
+          </div>
+        </div>
+        <div class="transcript-box">
+          <div class="transcript-label">Heard</div>
+          <div class="transcript-text" id="transcript-text">—</div>
+        </div>
+        <div class="text-input-row">
+          <input class="voice-text-input" id="text-input" type="text" placeholder='e.g. "150g chicken and 80g rice" or "casserole 600 cal 45g protein"'>
+          <button class="send-btn" id="send-btn"><i class="ti ti-send"></i></button>
+        </div>
+        <div class="listen-hint">Say ingredients + amounts · "Hey Sous, done" when finished</div>
+      </div>
+
+      <!-- CONFIRM -->
+      <div class="log-screen" id="ls-confirm">
+        <div style="text-align:center;margin-bottom:12px;">
+          <div style="font-size:20px;font-weight:500;color:var(--text);margin-bottom:4px;">Got it!</div>
+          <div style="font-size:13px;color:var(--text-muted);">Does this look right?</div>
+        </div>
+        <div class="conf-row">
+          <div class="conf-dot high" id="conf-dot"></div>
+          <div class="conf-text high" id="conf-text">High confidence match</div>
+        </div>
+        <div class="queue-remaining" id="queue-remaining"></div>
+        <div class="food-card">
+          <div class="food-card-top">
+            <div class="food-icon"><i id="confirm-icon" class="ti ti-meat"></i></div>
+            <div>
+              <div class="food-name" id="confirm-name">—</div>
+              <div class="food-weight-lbl" id="confirm-weight">—</div>
+            </div>
+          </div>
+          <div class="macro-grid">
+            <div class="macro-cell kcal"><div class="macro-cell-val" id="c-kcal">—</div><div class="macro-cell-lbl">kcal</div></div>
+            <div class="macro-cell"><div class="macro-cell-val" id="c-protein">—</div><div class="macro-cell-lbl">protein</div></div>
+            <div class="macro-cell"><div class="macro-cell-val" id="c-carbs">—</div><div class="macro-cell-lbl">carbs</div></div>
+            <div class="macro-cell"><div class="macro-cell-val" id="c-fat">—</div><div class="macro-cell-lbl">fat</div></div>
+          </div>
+        </div>
+        <div class="cooked-row">
+          <span class="cooked-lbl">State:</span>
+          <button class="toggle-pill active" id="pill-raw">Raw</button>
+          <button class="toggle-pill inactive" id="pill-cooked">Cooked</button>
+        </div>
+        <div class="voice-hint-bar"><i class="ti ti-microphone"></i><span class="voice-hint-text">Say "yes" to confirm or "change" to try again</span></div>
+        <div class="action-stack">
+          <button class="btn-primary" id="confirm-btn">✓ Confirm &amp; add</button>
+          <div class="btn-row">
+            <button class="btn-secondary" id="change-btn"><i class="ti ti-refresh" style="vertical-align:-2px;font-size:14px;"></i> Change</button>
+            <button class="btn-secondary" id="summary-btn-conf"><i class="ti ti-list" style="vertical-align:-2px;font-size:14px;"></i> Summary</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- AMBIGUOUS -->
+      <div class="log-screen" id="ls-ambiguous">
+        <div class="ambig-icon-wrap"><i class="ti ti-help"></i></div>
+        <div class="ambig-title">Which did you mean?</div>
+        <div class="ambig-sub" id="ambig-sub">Pick the closest match</div>
+        <div class="ambig-listening">
+          <div class="ambig-dot"></div>
+          <div class="ambig-listen-text" id="ambig-listen-text">Say the name or tap to choose</div>
+        </div>
+        <div class="ambig-options" id="ambig-options"></div>
+        <button class="btn-primary" id="ambig-confirm-btn" style="margin-bottom:10px;">Confirm selection</button>
+        <div class="ambig-cancel" id="ambig-cancel">None of these · skip</div>
+      </div>
+
+      <!-- SUMMARY -->
+      <div class="log-screen" id="ls-summary">
+        <div style="font-size:22px;font-weight:500;color:var(--text);margin-bottom:2px;" id="sum-title">Meal summary</div>
+        <div style="font-size:13px;color:var(--text-muted);margin-bottom:14px;" id="sum-sub">0 ingredients</div>
+        <div class="total-card">
+          <div class="total-lbl">Total calories</div>
+          <div class="total-kcal" id="sum-kcal">0</div>
+          <div class="total-macros">
+            <div class="total-macro"><div class="total-macro-val" id="sum-protein">0g</div><div class="total-macro-lbl">protein</div></div>
+            <div class="total-macro"><div class="total-macro-val" id="sum-carbs">0g</div><div class="total-macro-lbl">carbs</div></div>
+            <div class="total-macro"><div class="total-macro-val" id="sum-fat">0g</div><div class="total-macro-lbl">fat</div></div>
+            <div class="total-macro"><div class="total-macro-val" id="sum-fibre">0g</div><div class="total-macro-lbl">fibre</div></div>
+          </div>
+        </div>
+        <div class="ing-list" id="ing-list"></div>
+        <button class="add-more-btn" id="add-more-btn"><i class="ti ti-plus"></i> Add another ingredient</button>
+        <button class="btn-primary" id="save-meal-btn">Save meal</button>
+      </div>
+
+    </div>
+
+    <!-- ══════════════════════════════════════════════════
+         RECIPES
+    ══════════════════════════════════════════════════ -->
+    <div class="tab-pane" id="pane-recipes">
+
+      <!-- LIST -->
+      <div class="rs-screen active" id="rs-list">
+        <div class="page-header" style="padding-bottom:8px;">
+          <div style="display:flex;justify-content:space-between;align-items:center;">
+            <div>
+              <div class="page-title">Recipes</div>
+              <div class="page-sub">Your saved recipes</div>
+            </div>
+            <button onclick="showRsScreen('add')" style="background:var(--accent);color:#fff;border:none;border-radius:10px;padding:9px 14px;font-size:13px;font-weight:500;cursor:pointer;font-family:'Geist',sans-serif;display:flex;align-items:center;gap:5px;"><i class="ti ti-plus"></i>New</button>
+          </div>
+        </div>
+        <div class="section" id="rs-list-content">
+          <div class="empty-state"><i class="ti ti-chef-hat"></i>No recipes yet — tap New to add one</div>
+        </div>
+      </div>
+
+      <!-- ADD / IMPORT -->
+      <div class="rs-screen" id="rs-add">
+        <div class="page-header">
+          <div style="display:flex;align-items:center;gap:10px;margin-bottom:4px;">
+            <button onclick="showRsScreen('list')" style="background:none;border:none;cursor:pointer;color:var(--accent);font-size:22px;padding:0;line-height:1;"><i class="ti ti-arrow-left"></i></button>
+            <div class="page-title">Add recipe</div>
+          </div>
+          <div class="page-sub">Paste any recipe text and Sous will parse it</div>
+        </div>
+        <div class="section">
+          <div class="section-label">Recipe name</div>
+          <div class="card">
+            <div class="form-row" style="border:none;">
+              <input class="field-input wide" id="recipe-name-inp" type="text" placeholder="e.g. Chicken stir fry" style="width:100%;text-align:left;">
+            </div>
+          </div>
+        </div>
+        <div class="section">
+          <div class="section-label">Paste recipe (optional)</div>
+          <textarea class="import-textarea" id="recipe-paste" placeholder="Paste ingredients &amp; steps here — any format works. Sous will find ingredients with amounts, and numbered/bulleted steps."></textarea>
+        </div>
+        <div class="section">
+          <button class="btn-primary" onclick="importRecipe()">Parse &amp; save →</button>
+        </div>
+      </div>
+
+      <!-- DETAIL -->
+      <div class="rs-screen" id="rs-detail">
+        <div class="page-header" style="padding-bottom:4px;">
+          <div style="display:flex;align-items:center;gap:10px;margin-bottom:4px;">
+            <button onclick="showRsScreen('list')" style="background:none;border:none;cursor:pointer;color:var(--accent);font-size:22px;padding:0;line-height:1;"><i class="ti ti-arrow-left"></i></button>
+            <div class="page-title" id="rd-name">Recipe</div>
+          </div>
+        </div>
+        <div class="section">
+          <div class="card" id="rd-totals"></div>
+        </div>
+        <div class="section" id="rd-ing-sec">
+          <div class="section-label">Ingredients</div>
+          <div id="rd-ing-list"></div>
+        </div>
+        <div class="section" id="rd-steps-sec" style="display:none;">
+          <div class="section-label">Steps</div>
+          <div id="rd-steps-list"></div>
+        </div>
+        <div class="section">
+          <div class="btn-row">
+            <button class="btn-secondary" id="rd-delete-btn" style="color:var(--red);border-color:var(--red);">Delete</button>
+            <button class="btn-primary" id="rd-cook-btn">Start cooking →</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- COOK -->
+      <div class="rs-screen" id="rs-cook">
+        <div class="page-header" style="padding-bottom:0;">
+          <div style="display:flex;justify-content:space-between;align-items:center;">
+            <button onclick="stopCooking()" style="background:none;border:none;cursor:pointer;color:var(--accent);font-size:22px;padding:0;line-height:1;"><i class="ti ti-x"></i></button>
+            <div class="cook-counter" id="cook-counter" style="font-size:12px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.08em;"></div>
+            <div style="width:32px;"></div>
+          </div>
+        </div>
+        <div style="padding:8px 20px 0;flex:1;display:flex;flex-direction:column;">
+          <div style="font-size:22px;font-weight:400;color:var(--text);line-height:1.5;flex:1;margin-bottom:16px;" id="cook-step-text">—</div>
+          <div id="cook-timer-wrap" style="display:none;">
+            <div class="cook-timer-box">
+              <div class="cook-timer-val" id="cook-timer-val">0:00</div>
+              <div class="cook-timer-lbl" id="cook-timer-lbl">tap to start</div>
+              <button onclick="toggleCookTimer()" id="cook-timer-btn" style="margin-top:10px;background:var(--accent);color:#fff;border:none;border-radius:8px;padding:6px 16px;font-size:13px;font-weight:500;cursor:pointer;font-family:'Geist',sans-serif;">Start timer</button>
+            </div>
+          </div>
+          <div style="display:flex;gap:10px;padding-bottom:calc(var(--tab-h)+16px);flex-shrink:0;">
+            <button class="btn-secondary" id="cook-prev-btn" onclick="cookNav(-1)"><i class="ti ti-arrow-left" style="vertical-align:-2px;font-size:14px;"></i> Prev</button>
+            <button class="btn-primary" id="cook-next-btn" onclick="cookNav(1)">Next <i class="ti ti-arrow-right" style="vertical-align:-2px;font-size:14px;"></i></button>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- ══════════════════════════════════════════════════
+         HISTORY
+    ══════════════════════════════════════════════════ -->
+    <div class="tab-pane" id="pane-history">
+
+      <div class="page-header" style="padding-bottom:4px;">
+        <div class="hist-nav">
+          <button class="hist-nav-btn" id="hist-prev" onclick="histNav(-1)"><i class="ti ti-chevron-left"></i></button>
+          <div class="hist-date-label" id="hist-date-label">Today</div>
+          <button class="hist-nav-btn" id="hist-next" onclick="histNav(1)" disabled><i class="ti ti-chevron-right"></i></button>
+        </div>
+      </div>
+
+      <!-- Day summary -->
+      <div class="section">
+        <div class="card" id="hist-day-card">
+          <div class="hist-day-summary" id="hist-day-summary">
+            <div class="hist-stat"><div class="hist-stat-val" id="hst-kcal">—</div><div class="hist-stat-lbl">kcal</div></div>
+            <div class="hist-stat"><div class="hist-stat-val" id="hst-protein">—</div><div class="hist-stat-lbl">protein</div></div>
+            <div class="hist-stat"><div class="hist-stat-val" id="hst-carbs">—</div><div class="hist-stat-lbl">carbs</div></div>
+            <div class="hist-stat"><div class="hist-stat-val" id="hst-fat">—</div><div class="hist-stat-lbl">fat</div></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Meals for this day -->
+      <div class="section" id="hist-meals-section">
+        <div class="section-label">Meals</div>
+        <div id="hist-meals-list">
+          <div class="empty-state"><i class="ti ti-bowl-spoon"></i>Nothing logged this day</div>
+        </div>
+      </div>
+
+      <!-- Charts -->
+      <div class="section">
+        <div class="section-label">Trends</div>
+        <div class="chart-section">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+            <div class="chart-title" style="margin-bottom:0;">Calories</div>
+            <div class="chart-range">
+              <button class="range-btn" onclick="setChartRange(7)">7d</button>
+              <button class="range-btn active" onclick="setChartRange(30)">30d</button>
+              <button class="range-btn" onclick="setChartRange(90)">90d</button>
+            </div>
+          </div>
+          <canvas id="chart-calories" height="140"></canvas>
+        </div>
+        <div class="chart-section">
+          <div class="chart-title">Protein</div>
+          <canvas id="chart-protein" height="120"></canvas>
+        </div>
+        <div class="chart-section">
+          <div class="chart-title">Bodyweight</div>
+          <canvas id="chart-weight" height="140"></canvas>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- ══════════════════════════════════════════════════
+         PROFILE
+    ══════════════════════════════════════════════════ -->
+    <div class="tab-pane" id="pane-profile">
+      <div class="page-header">
+        <div class="page-title">Profile</div>
+        <div class="page-sub">Your goals, targets &amp; body data</div>
+      </div>
+
+      <div class="recal-banner" id="recal-banner">
+        <div class="recal-title">📊 Time to recalibrate?</div>
+        <div class="recal-body" id="recal-body">Based on your last 14 days of weight data, your actual progress differs from your goal.</div>
+        <div class="recal-btns">
+          <button class="recal-btn primary" onclick="showRecalModal()">See suggestion</button>
+          <button class="recal-btn secondary" onclick="dismissRecal()">Not now</button>
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="section-label">Personal</div>
+        <div class="card">
+          <div class="form-row">
+            <div><div class="form-row-label">Name</div></div>
+            <input class="field-input wide" id="f-name" type="text" placeholder="Alex">
+          </div>
+          <div class="form-row">
+            <div><div class="form-row-label">Sex</div></div>
+            <div class="segment" id="seg-sex">
+              <button class="seg-btn active" data-val="male" onclick="segSelect('seg-sex',this)">Male</button>
+              <button class="seg-btn" data-val="female" onclick="segSelect('seg-sex',this)">Female</button>
+            </div>
+          </div>
+          <div class="form-row">
+            <div><div class="form-row-label">Age</div></div>
+            <input class="field-input" id="f-age" type="number" min="10" max="100" placeholder="30">
+            <span class="field-unit">yrs</span>
+          </div>
+          <div class="form-row">
+            <div><div class="form-row-label">Height</div></div>
+            <input class="field-input" id="f-height" type="number" min="100" max="250" placeholder="175">
+            <span class="field-unit">cm</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="section-label">Goal &amp; Activity</div>
+        <div class="card">
+          <div class="form-row">
+            <div><div class="form-row-label">Goal</div></div>
+            <select class="field-select" id="f-goal" onchange="onGoalChange()">
+              <option value="lose">Lose fat</option>
+              <option value="maintain" selected>Maintain</option>
+              <option value="gain">Build muscle</option>
+            </select>
+          </div>
+          <div class="form-row" id="rate-row" style="display:none;">
+            <div>
+              <div class="form-row-label">Rate</div>
+              <div class="form-row-sub" id="rate-sub">kg per week</div>
+            </div>
+            <div class="segment" id="seg-rate"></div>
+          </div>
+          <div class="form-row">
+            <div>
+              <div class="form-row-label">Activity level</div>
+              <div class="form-row-sub">Average across the week</div>
+            </div>
+            <select class="field-select" id="f-activity" onchange="recalcTDEE()">
+              <option value="1.2">Sedentary (desk job)</option>
+              <option value="1.375">Lightly active (1–3×/wk)</option>
+              <option value="1.55" selected>Moderately active (3–5×/wk)</option>
+              <option value="1.725">Very active (6–7×/wk)</option>
+              <option value="1.9">Athlete / physical job</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <div class="tdee-card">
+        <div class="tdee-top">
+          <div>
+            <div class="tdee-label">Daily calorie target</div>
+            <div class="tdee-value" id="tdee-kcal">—</div>
+            <div class="tdee-sub" id="tdee-sub">Enter details to calculate</div>
+          </div>
+          <button class="tdee-edit-btn" onclick="toggleOverride()">Override</button>
+        </div>
+        <div class="tdee-macros">
+          <div class="tdee-macro"><div class="tdee-macro-val" id="tdee-protein">—</div><div class="tdee-macro-lbl">protein</div></div>
+          <div class="tdee-macro"><div class="tdee-macro-val" id="tdee-carbs">—</div><div class="tdee-macro-lbl">carbs</div></div>
+          <div class="tdee-macro"><div class="tdee-macro-val" id="tdee-fat">—</div><div class="tdee-macro-lbl">fat</div></div>
+        </div>
+      </div>
+
+      <div class="section" id="override-section" style="display:none;">
+        <div class="section-label">Manual targets</div>
+        <div class="card">
+          <div class="override-row"><span class="override-label">Calories</span><input class="override-input" id="o-kcal" type="number" placeholder="2000" oninput="overrideChanged()"><span class="override-unit">kcal</span></div>
+          <div class="override-row"><span class="override-label">Protein</span><input class="override-input" id="o-protein" type="number" placeholder="160" oninput="overrideChanged()"><span class="override-unit">g</span></div>
+          <div class="override-row"><span class="override-label">Carbs</span><input class="override-input" id="o-carbs" type="number" placeholder="200" oninput="overrideChanged()"><span class="override-unit">g</span></div>
+          <div class="override-row"><span class="override-label">Fat</span><input class="override-input" id="o-fat" type="number" placeholder="65" oninput="overrideChanged()"><span class="override-unit">g</span></div>
+          <div class="override-row">
+            <div><div class="form-row-label" style="font-size:13px;">Use manual targets</div><div class="form-row-sub">Overrides calculated values</div></div>
+            <button class="toggle" id="override-toggle" onclick="toggleOverrideActive()"></button>
+          </div>
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="section-label">Bodyweight</div>
+        <div class="card">
+          <div class="bw-row">
+            <input class="bw-input" id="prof-bw-input" type="number" step="0.1" min="30" max="300" placeholder="82.5">
+            <span class="bw-unit">kg</span>
+            <button class="bw-btn" onclick="profLogWeight()">Log today</button>
+          </div>
+        </div>
+      </div>
+
+      <div id="bw-avg-wrap" style="display:none;">
+        <div class="bw-avg-chip" id="bw-avg-chip">
+          <i class="ti ti-trending-down" id="bw-avg-icon"></i>
+          <span id="bw-avg-text">7-day avg: — kg</span>
+        </div>
+      </div>
+
+      <div class="section" id="bw-hist-section" style="display:none;">
+        <div class="section-label">Recent entries</div>
+        <div class="card"><div id="bw-hist-list"></div></div>
+      </div>
+
+      <div class="info-box">
+        <div class="info-box-title"><i class="ti ti-info-circle"></i> How to weigh yourself</div>
+        <div class="info-box-body">
+          Weigh <strong>2–3× per week</strong>, same days each week. Always <strong>first thing in the morning</strong> — before eating, after the bathroom.<br><br>
+          Daily weight fluctuates 1–2 kg due to water and food. The <strong>7-day rolling average</strong> is what matters. We'll suggest a calorie recalibration every <strong>2 weeks</strong> if your trend diverges from goal.
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="section-label">Appearance</div>
+        <div class="card">
+          <div class="form-row">
+            <div class="form-row-label">Mode</div>
+            <div class="segment" id="seg-mode">
+              <button class="seg-btn active" data-val="dark" onclick="setThemeMode('dark')"><i class="ti ti-moon"></i> Dark</button>
+              <button class="seg-btn" data-val="light" onclick="setThemeMode('light')"><i class="ti ti-sun"></i> Light</button>
+            </div>
+          </div>
+          <div class="form-row" style="border-bottom:none;flex-direction:column;align-items:stretch;gap:8px;">
+            <div class="form-row-label">Accent</div>
+            <div class="accent-grid" id="accent-grid">
+              <div class="accent-swatch active" data-accent="ember" onclick="setThemeAccent('ember')">
+                <div class="accent-dot" style="background:#FF6B3D;"></div>
+                <div class="accent-bar" style="background:linear-gradient(90deg,#FF6B3D,#FF8A5C);"></div>
+                <div class="accent-name">Ember</div>
+              </div>
+              <div class="accent-swatch" data-accent="phosphor" onclick="setThemeAccent('phosphor')">
+                <div class="accent-dot" style="background:#B8E84E;"></div>
+                <div class="accent-bar" style="background:linear-gradient(90deg,#B8E84E,#CDF373);"></div>
+                <div class="accent-name">Phosphor</div>
+              </div>
+              <div class="accent-swatch" data-accent="midnight" onclick="setThemeAccent('midnight')">
+                <div class="accent-dot" style="background:#7DB7FF;"></div>
+                <div class="accent-bar" style="background:linear-gradient(90deg,#7DB7FF,#9BC8FF);"></div>
+                <div class="accent-name">Midnight</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <button class="save-btn" onclick="saveProfileData()">Save profile</button>
+      <div style="height:8px;"></div>
+    </div>
+
+  </div><!-- /app-body -->
+
+  <div class="bottom-tabs">
+    <div class="tab active" data-tab="home" onclick="switchTab('home')"><i class="ti ti-home"></i><span>Home</span></div>
+    <div class="tab" data-tab="log" onclick="switchTab('log')"><i class="ti ti-microphone"></i><span>Log</span></div>
+    <div class="tab" data-tab="recipes" onclick="switchTab('recipes')"><i class="ti ti-chef-hat"></i><span>Recipes</span></div>
+    <div class="tab" data-tab="history" onclick="switchTab('history')"><i class="ti ti-chart-line"></i><span>History</span></div>
+    <div class="tab" data-tab="profile" onclick="switchTab('profile')"><i class="ti ti-user"></i><span>Profile</span></div>
+  </div>
+</div>
+
+<!-- Recalibration modal -->
+<div class="modal-overlay" id="recal-modal" onclick="if(event.target===this)closeRecalModal()">
+  <div class="modal-sheet">
+    <div class="modal-title">Recalibrate your target</div>
+    <div class="modal-body">Based on your weight trend over the last 14 days, here's what we suggest:</div>
+    <div class="modal-suggestion" id="recal-modal-suggestion"></div>
+    <div class="modal-btns">
+      <button class="modal-btn primary" onclick="applyRecal()">Apply new target</button>
+      <button class="modal-btn secondary" onclick="closeRecalModal()">Keep current target</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<!-- MANUAL ADD MODAL -->
+<div id="add-modal" class="modal-overlay" style="display:none">
+  <div class="modal-sheet">
+    <div class="modal-header">
+      <span class="modal-title">Add Ingredient</span>
+      <button class="modal-close" id="modal-close-btn">✕</button>
+    </div>
+    <div class="modal-tabs">
+      <button class="tab-btn active" id="tab-search-btn">Search food</button>
+      <button class="tab-btn" id="tab-custom-btn">Custom entry</button>
+    </div>
+    <div id="panel-search" class="modal-panel">
+      <input type="text" class="modal-search" id="food-search" placeholder="Search e.g. chicken, broccoli…" autocomplete="off">
+      <div class="food-results" id="food-results"></div>
+      <div id="selected-preview-box" class="selected-preview-box" style="display:none">
+        <div class="spb-name" id="spb-name"></div>
+        <div class="spb-per100" id="spb-per100"></div>
+        <div class="gram-row">
+          <span class="gram-label">Amount</span>
+          <input type="number" class="gram-input" id="gram-input" value="100" min="1" max="5000">
+          <span class="gram-suffix">g</span>
+        </div>
+        <div class="preview-macro-grid">
+          <div class="pmg-cell kcal"><div class="pmg-val" id="pmg-kcal">0</div><div class="pmg-lbl">kcal</div></div>
+          <div class="pmg-cell"><div class="pmg-val" id="pmg-p">0g</div><div class="pmg-lbl">protein</div></div>
+          <div class="pmg-cell"><div class="pmg-val" id="pmg-c">0g</div><div class="pmg-lbl">carbs</div></div>
+          <div class="pmg-cell"><div class="pmg-val" id="pmg-f">0g</div><div class="pmg-lbl">fat</div></div>
+        </div>
+      </div>
+    </div>
+    <div id="panel-custom" class="modal-panel" style="display:none">
+      <div class="custom-form">
+        <input type="text" class="custom-input" id="custom-name" placeholder="Food name (e.g. chicken casserole)">
+        <div class="custom-label-row">
+          <div class="custom-field-group">
+            <div class="custom-field-label">Calories (kcal)</div>
+            <input type="number" class="custom-input" id="custom-kcal" placeholder="0" min="0">
+          </div>
+          <div class="custom-field-group">
+            <div class="custom-field-label">Protein (g)</div>
+            <input type="number" class="custom-input" id="custom-protein" placeholder="0" min="0" step="0.1">
+          </div>
+        </div>
+        <div class="custom-label-row">
+          <div class="custom-field-group">
+            <div class="custom-field-label">Carbs (g)</div>
+            <input type="number" class="custom-input" id="custom-carbs" placeholder="0" min="0" step="0.1">
+          </div>
+          <div class="custom-field-group">
+            <div class="custom-field-label">Fat (g)</div>
+            <input type="number" class="custom-input" id="custom-fat" placeholder="0" min="0" step="0.1">
+          </div>
+        </div>
+      </div>
+    </div>
+    <button class="btn-primary modal-add-btn" id="modal-add-btn">Add to meal</button>
+  </div>
+</div>
+
+<!-- EDIT INGREDIENT MODAL -->
+<div id="edit-modal" class="modal-overlay" style="display:none">
+  <div class="modal-sheet">
+    <div class="modal-header">
+      <span class="modal-title">Edit Ingredient</span>
+      <button class="modal-close" id="edit-modal-close-btn">✕</button>
+    </div>
+    <div class="modal-panel">
+      <div class="custom-form">
+        <input type="hidden" id="edit-ing-id">
+        <div class="custom-field-group" style="margin-bottom:10px;">
+          <div class="custom-field-label">Food name</div>
+          <input type="text" class="custom-input" id="edit-name" placeholder="Food name">
+        </div>
+        <div class="custom-field-group" style="margin-bottom:10px;">
+          <div class="custom-field-label">Quantity (g) — leave blank for custom</div>
+          <input type="number" class="custom-input" id="edit-weight" placeholder="e.g. 150" min="0">
+        </div>
+        <div class="custom-label-row" style="margin-bottom:10px;">
+          <div class="custom-field-group">
+            <div class="custom-field-label">Calories (kcal)</div>
+            <input type="number" class="custom-input" id="edit-kcal" placeholder="0" min="0">
+          </div>
+          <div class="custom-field-group">
+            <div class="custom-field-label">Protein (g)</div>
+            <input type="number" class="custom-input" id="edit-protein" placeholder="0" min="0" step="0.1">
+          </div>
+        </div>
+        <div class="custom-label-row">
+          <div class="custom-field-group">
+            <div class="custom-field-label">Carbs (g)</div>
+            <input type="number" class="custom-input" id="edit-carbs" placeholder="0" min="0" step="0.1">
+          </div>
+          <div class="custom-field-group">
+            <div class="custom-field-label">Fat (g)</div>
+            <input type="number" class="custom-input" id="edit-fat" placeholder="0" min="0" step="0.1">
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="btn-row" style="margin-top:14px;">
+      <button class="btn-danger" id="edit-delete-btn"><i class="ti ti-trash" style="vertical-align:-2px;font-size:14px;"></i> Delete</button>
+      <button class="btn-primary" id="edit-save-btn" style="flex:2;">Save changes</button>
+    </div>
+  </div>
+</div>
+
+<!-- Chart.js CDN -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4/dist/chart.umd.min.js"></script>
+
+<!-- App scripts — load order matters -->
+<script src="js/theme.js"></script>
+<script src="js/storage.js"></script>
+<script src="js/core/totals.js"></script>
+<script src="js/food-data.js"></script>
+<script src="js/parser.js"></script>
+<script src="js/speech.js"></script>
+<script src="js/history.js"></script>
+<script src="js/profile.js"></script>
+<script src="js/recipes.js"></script>
+<script src="js/app.js"></script>
+
+</body>
+</html>

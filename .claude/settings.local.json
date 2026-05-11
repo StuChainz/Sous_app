@@ -1,0 +1,26 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python3 -c ' *)",
+      "Bash(python3)",
+      "Bash(cp \"/Users/stu/Downloads/Sous_full_latest.html\" \"/Users/stu/Downloads/Sous App/Sous_backup_before_refactor.html\" && echo \"Backup created\" && mkdir -p \"/Users/stu/Downloads/Sous App/Sous/css\" \"/Users/stu/Downloads/Sous App/Sous/js\" && echo \"Folders created\")",
+      "Bash(node --input-type=module)",
+      "Bash(node -e ' *)",
+      "Bash(which node *)",
+      "Bash(find \"/Users/stu/Downloads\" -name \"README.md\" -path \"*redesign*\" 2>/dev/null | head -5; find \"/Users/stu/Downloads\" -name \"*design_handoff*\" -o -name \"*redesign*\" 2>/dev/null | head -20)",
+      "Bash(unzip -o \"Sous redesign.zip\" -d \"design_handoff_sous_redesign\")",
+      "mcp__Claude_Preview__preview_start",
+      "Bash(python3 -m http.server 8732)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:8732/index.html)",
+      "mcp__Claude_in_Chrome__tabs_context_mcp",
+      "Bash(xxd \"/Users/stu/Downloads/Sous App/Sous/css/styles.css\")",
+      "Bash(rtk grep *)",
+      "Bash(rtk ls *)",
+      "Bash(rtk read *)",
+      "Read(//Users/stu/Downloads/**)",
+      "Bash(unzip -o \"Sous redesign.zip\" -d \"Sous redesign\")",
+      "Bash(kill 1073)",
+      "Bash(rtk wc *)"
+    ]
+  }
+}
