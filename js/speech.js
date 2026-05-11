@@ -133,8 +133,12 @@ function renderCurrentMeal(){
      </div>`+
     meal.map(i=>
       `<div style="display:flex;justify-content:space-between;align-items:center;padding:7px 12px;border-bottom:.5px solid var(--border);">
-         <span style="font-size:13px;color:var(--text);">${i.name}${i.weight?' <span style="color:var(--text-muted);">'+i.weight+'g</span>':''}</span>
-         <span style="font-size:12px;color:var(--text-muted);font-family:'Geist Mono',monospace;">${i.kcal} kcal · ${i.protein}g P</span>
+         <span style="font-size:13px;color:var(--text);flex:1;min-width:0;">${i.name}${i.weight?' <span style="color:var(--text-muted);">'+i.weight+'g</span>':''}</span>
+         <span style="font-size:12px;color:var(--text-muted);font-family:'Geist Mono',monospace;margin-right:10px;">${i.kcal} kcal · ${i.protein}g P</span>
+         <span style="display:flex;gap:6px;flex-shrink:0;">
+           <button onclick="openEditModal(${i.id})" style="background:none;border:none;padding:2px 4px;cursor:pointer;color:var(--text-muted);font-size:14px;" title="Edit"><i class="ti ti-pencil"></i></button>
+           <button onclick="deleteFromCurrentMeal(${i.id})" style="background:none;border:none;padding:2px 4px;cursor:pointer;color:var(--red);font-size:14px;" title="Remove"><i class="ti ti-trash"></i></button>
+         </span>
        </div>`
     ).join('');
 }
@@ -474,9 +478,14 @@ function openEditModal(id){
   document.getElementById('edit-protein').value=item.protein;
   document.getElementById('edit-carbs').value=item.carbs;
   document.getElementById('edit-fat').value=item.fat;
+  document.getElementById('edit-fibre').value=item.fibre??'';
   document.getElementById('edit-modal').style.display='flex';
 }
 function closeEditModal(){document.getElementById('edit-modal').style.display='none';}
+function _refreshAfterEdit(){
+  const active=document.querySelector('.log-screen.active')?.id;
+  if(active==='ls-listening') renderCurrentMeal(); else showSummary(false);
+}
 function saveEdit(){
   const id=parseInt(document.getElementById('edit-ing-id').value);
   const name=document.getElementById('edit-name').value.trim();
@@ -486,18 +495,26 @@ function saveEdit(){
   const protein=parseFloat(document.getElementById('edit-protein').value)||0;
   const carbs=parseFloat(document.getElementById('edit-carbs').value)||0;
   const fat=parseFloat(document.getElementById('edit-fat').value)||0;
+  const fibre=parseFloat(document.getElementById('edit-fibre').value)||0;
   if(!name){showToast('Food name required');return;}
   const item=meal.find(i=>i.id===id);
   if(!item) return;
-  item.name=name; item.weight=weight; item.kcal=kcal; item.protein=protein; item.carbs=carbs; item.fat=fat;
-  closeEditModal(); showSummary(false); showToast('Updated ✓');
+  item.name=name; item.weight=weight; item.kcal=kcal; item.protein=protein; item.carbs=carbs; item.fat=fat; item.fibre=fibre;
+  closeEditModal(); _refreshAfterEdit(); showToast('Updated ✓');
 }
 function deleteIngredient(id){
   const idx=meal.findIndex(i=>i.id===id);
   if(idx===-1) return;
   const name=meal[idx].name;
   meal.splice(idx,1);
-  closeEditModal(); showSummary(false); showToast(name+' removed');
+  closeEditModal(); _refreshAfterEdit(); showToast(name+' removed');
+}
+function deleteFromCurrentMeal(id){
+  const idx=meal.findIndex(i=>i.id===id);
+  if(idx===-1) return;
+  const name=meal[idx].name;
+  meal.splice(idx,1);
+  renderCurrentMeal(); showToast(name+' removed');
 }
 
 // ═══════════════════════════════════════════
