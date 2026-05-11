@@ -343,7 +343,7 @@ function resolveAmbig(food,amount){
   const r=amount?amount/food.w:1;
   const resolved={name:food.name,weight:amount?Math.round(amount):food.w,kcal:Math.round(food.kcal*r),protein:Math.round(food.p*r*10)/10,carbs:Math.round(food.c*r*10)/10,fat:Math.round(food.f*r*10)/10,fibre:Math.round(food.fi*r*10)/10,icon:food.icon,rawFood:food,weightSpecified:amount!=null};
   currentAmbig=null;
-  showConfirm(resolved);
+  if(!amount){askQuantity(resolved);}else{showConfirm(resolved);}
 }
 
 // ═══════════════════════════════════════════
