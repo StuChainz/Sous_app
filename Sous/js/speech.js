@@ -115,9 +115,29 @@ function updateQueueDisplay(){
 // ═══════════════════════════════════════════
 // LOG SCREEN NAVIGATION
 // ═══════════════════════════════════════════
+function renderCurrentMeal(){
+  const container=document.getElementById('current-meal-list');
+  if(!container) return;
+  if(!meal.length){container.style.display='none';return;}
+  const t=sumMacros(meal);
+  container.style.display='block';
+  container.innerHTML=
+    `<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 12px;border-bottom:.5px solid var(--border);">
+       <span style="font-size:12px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:.04em;">Added so far</span>
+       <span style="font-size:12px;color:var(--accent);font-family:'Geist Mono',monospace;">${Math.round(t.kcal)} kcal · ${Math.round(t.protein)}g P</span>
+     </div>`+
+    meal.map(i=>
+      `<div style="display:flex;justify-content:space-between;align-items:center;padding:7px 12px;border-bottom:.5px solid var(--border);">
+         <span style="font-size:13px;color:var(--text);">${i.name}${i.weight?' <span style="color:var(--text-muted);">'+i.weight+'g</span>':''}</span>
+         <span style="font-size:12px;color:var(--text-muted);font-family:'Geist Mono',monospace;">${i.kcal} kcal · ${i.protein}g P</span>
+       </div>`
+    ).join('');
+}
+
 function showLogScreen(id){
   document.querySelectorAll('.log-screen').forEach(s=>s.classList.remove('active'));
   document.getElementById('ls-'+id).classList.add('active');
+  if(id==='listening') renderCurrentMeal();
 }
 
 // ═══════════════════════════════════════════
