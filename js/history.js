@@ -40,6 +40,8 @@ function renderHistoryDay(){
     meals.forEach((m,mIdx)=>{
       const time=new Date(m.time).toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'});
       const ings=m.ingredients||[];
+      const curSection=typeof homeMealSectionKey==='function'?homeMealSectionKey(m):(m.section||'dinner');
+      const sectionOpts=[['breakfast','Breakfast'],['lunch','Lunch'],['dinner','Dinner'],['snacks','Snacks'],['supplements','Supplements']].map(([v,l])=>`<option value="${v}"${curSection===v?' selected':''}>${l}</option>`).join('');
       const ingHtml=ings.map((ing,iIdx)=>`
         <div style="font-size:12px;color:var(--text-muted);padding:6px 14px;border-top:.5px solid var(--border);display:flex;justify-content:space-between;align-items:center;">
           <span>${ing.name}${ing.weight?' · '+ing.weight+'g':''} · ${ing.kcal} kcal</span>
@@ -52,7 +54,7 @@ function renderHistoryDay(){
       wrap.style.cssText='background:var(--card);border:.5px solid var(--border);border-radius:var(--radius-sm);margin-bottom:8px;overflow:hidden;';
       wrap.innerHTML=`
         <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 14px;">
-          <div><div style="font-size:14px;font-weight:500;color:var(--text);">${m.name}</div><div style="font-size:11px;color:var(--text-muted);">${time} · ${ings.length} ingredient${ings.length!==1?'s':''}</div></div>
+          <div><div style="font-size:14px;font-weight:500;color:var(--text);">${m.name}</div><div style="font-size:11px;color:var(--text-muted);">${time} · ${ings.length} ingredient${ings.length!==1?'s':''} · <select onchange="changeHistoryMealSection('${ds}',${mIdx},this.value)" style="background:none;border:none;color:var(--text-muted);font-size:11px;font-family:inherit;cursor:pointer;padding:0;">${sectionOpts}</select></div></div>
           <div style="display:flex;align-items:center;gap:10px;">
             <div style="font-size:15px;font-weight:500;color:var(--accent);font-family:'Geist Mono',monospace;">${Math.round(m.totals.kcal)} kcal</div>
             <button onclick="deleteHistoryMeal('${ds}',${mIdx})" style="background:none;border:none;cursor:pointer;color:var(--red);font-size:16px;padding:2px 4px;opacity:.7;" title="Delete meal"><i class="ti ti-trash"></i></button>
@@ -64,6 +66,15 @@ function renderHistoryDay(){
   // Render charts (debounced)
   clearTimeout(window._chartTimer);
   window._chartTimer=setTimeout(renderCharts,100);
+}
+
+function changeHistoryMealSection(dateStr,mealIdx,section){
+  const log=getLog();
+  if(!log[dateStr]?.meals?.[mealIdx]) return;
+  log[dateStr].meals[mealIdx].section=section;
+  saveLog(log);
+  renderHistoryDay();
+  if(typeof updateHome==='function') updateHome();
 }
 
 function deleteHistoryMeal(dateStr,mealIdx){
