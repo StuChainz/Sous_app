@@ -13,7 +13,7 @@ function switchTab(tab,opts={}){
   if(tab==='recipes') { if(typeof renderRecipeList==='function') renderRecipeList(); }
   if(tab==='log'){
     if(opts.fresh){
-      if(opts.silent&&typeof startSilentLog==='function') startSilentLog(opts.section||null);
+      if(opts.silent&&typeof startSilentLog==='function') startSilentLog(opts.section||null,opts.quick||false);
       else if(typeof startFreshLog==='function') startFreshLog(opts.section||null);
     }
     else { if(typeof resumeLog==='function') resumeLog(); }
@@ -48,6 +48,7 @@ function formatDisplayDate(dateStr){
 }
 let selectedLogDate=localDateStr();
 let currentEditMealId=null, currentEditMealDate=null;
+let currentQuickMode=false;
 
 function shiftDate(days){
   const d=new Date(selectedLogDate+'T12:00:00');
@@ -257,12 +258,12 @@ function startLogWithRecentIngredient(recent, section=null){
   currentEditMealId=null; currentEditMealDate=null;
   const logDateKey=selectedLogDate;
   const resolvedSection=(section!=null&&section!=='')?section:getDefaultQuickAddSection(logDateKey);
-  switchTab('log',{fresh:true,silent:true,section:resolvedSection});
+  switchTab('log',{fresh:true,silent:true,section:resolvedSection,quick:true});
   if(typeof addIngredientFromRecent==='function') addIngredientFromRecent(recent);
 }
 function repeatLastMealForSection(section){
   currentEditMealId=null; currentEditMealDate=null;
-  switchTab('log',{fresh:true,silent:true,section});
+  switchTab('log',{fresh:true,silent:true,section,quick:true});
   addMealToCurrent(getLastMealBySection(section));
 }
 function addMealToCurrent(sourceMeal){

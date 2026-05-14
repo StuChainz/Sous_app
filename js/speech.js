@@ -138,6 +138,22 @@ function renderCurrentMeal(){
   const t=sumMacros(meal);
   container.style.display='block';
   container.innerHTML='';
+  if(typeof currentQuickMode!=='undefined'&&currentQuickMode){
+    const qsRow=document.createElement('div');
+    qsRow.style.cssText='padding:8px 12px;border-bottom:.5px solid var(--border);display:flex;justify-content:flex-end;';
+    const qsBtn=document.createElement('button');
+    qsBtn.style.cssText='background:var(--accent);color:#fff;border:none;border-radius:8px;padding:6px 14px;font-size:13px;font-weight:600;cursor:pointer;';
+    qsBtn.textContent='Quick Save';
+    qsBtn.addEventListener('click',()=>{
+      if(!meal.length){showToast('Add some ingredients first!');return;}
+      saveMealToLog();
+      showToast('Meal saved! 🎉',2500);
+      currentQuickMode=false;
+      setTimeout(()=>{meal=[];itemQueue=[];nextIngId=1;stopAllRec();switchTab('home');},1800);
+    });
+    qsRow.appendChild(qsBtn);
+    container.appendChild(qsRow);
+  }
   const header=document.createElement('div');
   header.style.cssText='display:flex;justify-content:space-between;align-items:center;padding:8px 12px;border-bottom:.5px solid var(--border);';
   header.innerHTML=`<span style="font-size:12px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:.04em;">Added so far</span><span style="font-size:12px;color:var(--accent);font-family:'Geist Mono',monospace;">${Math.round(t.kcal)} kcal · ${Math.round(t.protein)}g P</span>`;
@@ -739,14 +755,14 @@ function stopAllRec(){
 // LOG ENTRY POINTS
 // ═══════════════════════════════════════════
 function startFreshLog(presetSection=null){
-  meal=[]; itemQueue=[]; pendingFood=null; currentAmbig=null; undoSnapshot=null; updateUndoBtn(); currentMealSection=presetSection;
+  meal=[]; itemQueue=[]; pendingFood=null; currentAmbig=null; undoSnapshot=null; updateUndoBtn(); currentMealSection=presetSection; currentQuickMode=false;
   stopAllRec();
   showLogScreen('listening');
   const el=document.getElementById('transcript-text'); if(el) el.textContent='—';
   const pw=document.getElementById('perm-warn'); if(pw) pw.style.display='none';
   speak('Ready.',()=>setTimeout(startAlwaysOn,200));
 }
-function startSilentLog(presetSection=null){
+function startSilentLog(presetSection=null,quick=false){
   meal=[];
   itemQueue=[];
   pendingFood=null;
@@ -754,6 +770,7 @@ function startSilentLog(presetSection=null){
   undoSnapshot=null;
   updateUndoBtn();
   currentMealSection=presetSection;
+  currentQuickMode=quick;
 
   stopAllRec();
   showLogScreen('listening');
@@ -776,7 +793,7 @@ function resumeLog(){
 // LOG BUTTON WIRING (done after DOM ready)
 // ═══════════════════════════════════════════
 function wireLogButtons(){
-  document.getElementById('log-cancel-btn').addEventListener('click',()=>{currentEditMealId=null;currentEditMealDate=null;stopAllRec();setMicState('idle');switchTab('home');});
+  document.getElementById('log-cancel-btn').addEventListener('click',()=>{currentEditMealId=null;currentEditMealDate=null;currentQuickMode=false;stopAllRec();setMicState('idle');switchTab('home');});
   document.getElementById('finished-meal-btn').addEventListener('click',()=>{if(!meal.length){showToast('Add some ingredients first!');return;}stopAllRec();showSummary();});
   document.getElementById('mic-btn').addEventListener('click',()=>{if(isSpeaking){window.speechSynthesis&&window.speechSynthesis.cancel();isSpeaking=false;}if(isRecording){try{tapRec&&tapRec.stop();}catch(e){}}else startTapRec();});
   document.getElementById('send-btn').addEventListener('click',submitText);
@@ -789,7 +806,7 @@ function wireLogButtons(){
   document.getElementById('add-custom-btn').addEventListener('click',()=>openCustomEntry());
   document.getElementById('add-more-btn').addEventListener('click',()=>openAddModal());
   document.getElementById('sum-section-select').addEventListener('change',e=>{currentMealSection=e.target.value;});
-  document.getElementById('save-meal-btn').addEventListener('click',()=>{saveMealToLog();showToast('Meal saved! 🎉',2500);setTimeout(()=>{meal=[];itemQueue=[];nextIngId=1;stopAllRec();switchTab('home');},1800);});
+  document.getElementById('save-meal-btn').addEventListener('click',()=>{saveMealToLog();showToast('Meal saved! 🎉',2500);currentQuickMode=false;setTimeout(()=>{meal=[];itemQueue=[];nextIngId=1;stopAllRec();switchTab('home');},1800);});
   // Add modal
   document.getElementById('modal-close-btn').addEventListener('click',closeAddModal);
   document.getElementById('add-modal').addEventListener('click',e=>{if(e.target===document.getElementById('add-modal'))closeAddModal();});
