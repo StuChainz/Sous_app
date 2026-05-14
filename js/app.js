@@ -105,6 +105,7 @@ function homeMealRowHtml(m){
   return`<div class="meal-item"><div class="meal-item-left"><div class="meal-item-name">${m.name}</div><div class="meal-item-detail">${time} · ${n} ingredient${n!==1?'s':''}</div></div><div class="meal-item-kcal">${Math.round(m.totals.kcal)} kcal</div></div>`;
 }
 function renderHomeMealSections(meals){
+  const esc=s=>String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
   const buckets={breakfast:[],lunch:[],dinner:[],snacks:[],supplements:[]};
   meals.forEach(m=>{
     const sk=homeMealSectionKey(m);
@@ -115,7 +116,14 @@ function renderHomeMealSections(meals){
     const arr=buckets[key];
     const inner=arr.length?arr.map(homeMealRowHtml).join(''):'<div class="meal-item-detail" style="padding:6px 4px 14px;">Nothing logged yet</div>';
     const mb=i<HOME_MEAL_SECTIONS.length-1?'16px':'0';
-    return`<div style="margin-bottom:${mb}"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;"><div class="section-label" style="margin-bottom:0;">${label}</div><button onclick="startLogWithSection('${key}')" style="background:none;border:none;color:var(--accent);font-size:12px;font-weight:600;cursor:pointer;padding:2px 0;">+ Add</button></div>${inner}</div>`;
+    const last=getLastMealBySection(key);
+    let lastLine='Nothing logged yet';
+    if(last){
+      const nm=(last.name||'').trim();
+      lastLine=nm?esc(nm):'Last meal';
+    }
+    const lastRow=`<div class="home-section-last-row"><span class="home-section-last-meal">${lastLine}</span><button type="button" class="home-section-repeat" onclick="repeatLastMealForSection('${key}')" aria-label="Repeat last ${label}">+</button></div>`;
+    return`<div style="margin-bottom:${mb}"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;"><div class="section-label" style="margin-bottom:0;">${label}</div><button onclick="startLogWithSection('${key}')" style="background:none;border:none;color:var(--accent);font-size:12px;font-weight:600;cursor:pointer;padding:2px 0;">+ Add</button></div>${lastRow}${inner}</div>`;
   }).join('');
 }
 
@@ -170,6 +178,10 @@ function homeLogWeight(){
 
 function startCookingLog(){ switchTab('log',{fresh:true}); }
 function startLogWithSection(key){ switchTab('log',{fresh:true,section:key}); }
+function repeatLastMealForSection(section){
+  switchTab('log',{fresh:true,section});
+  addMealToCurrent(getLastMealBySection(section));
+}
 function addMealToCurrent(sourceMeal){
   if(!sourceMeal||!sourceMeal.ingredients||!sourceMeal.ingredients.length) return;
   snapshotMeal();
