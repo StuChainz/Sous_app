@@ -440,6 +440,8 @@ function showSummary(announce=true){
   if(!currentMealSection) currentMealSection=defaultSectionFromTime();
   const sel=document.getElementById('sum-section-select');
   if(sel) sel.value=currentMealSection;
+  const nameInput=document.getElementById('sum-meal-name');
+  if(nameInput) nameInput.value=generateMealNameFromIngredients(meal,currentMealSection);
   const t=sumMacros(meal);
   document.getElementById('sum-kcal').textContent=Math.round(t.kcal);
   document.getElementById('sum-protein').textContent=Math.round(t.protein)+'g';
@@ -620,13 +622,24 @@ function getMealName(){
   if(h<15) return 'Lunch'; if(h<18) return 'Afternoon snack';
   if(h<21) return 'Dinner'; return 'Evening snack';
 }
+function generateMealNameFromIngredients(ingredients,fallbackSection){
+  const sectionLabels={breakfast:'Breakfast',lunch:'Lunch',dinner:'Dinner',snacks:'Snacks',supplements:'Supplements'};
+  const fallback=sectionLabels[fallbackSection]||getMealName();
+  const names=(ingredients||[]).map(i=>(i.name||'').trim()).filter(Boolean);
+  if(names.length===0) return fallback;
+  if(names.length===1) return names[0];
+  if(names.length===2) return names[0]+' + '+names[1];
+  if(names.length===3) return names[0]+', '+names[1]+' + '+names[2];
+  return names[0]+' + '+(names.length-1)+' items';
+}
 function saveMealToLog(){
   const date=(typeof selectedLogDate!=='undefined'?selectedLogDate:todayStr()),log=getLog();
   if(!log[date]) log[date]={meals:[],totals:{kcal:0,protein:0,carbs:0,fat:0,fibre:0}};
   const mt=sumMacros(meal);
   const section=currentMealSection||defaultSectionFromTime();
-  const sectionLabels={breakfast:'Breakfast',lunch:'Lunch',dinner:'Dinner',snacks:'Snacks',supplements:'Supplements'};
-  const name=sectionLabels[section]||getMealName();
+  const nameInput=document.getElementById('sum-meal-name');
+  const typedName=nameInput?(nameInput.value.trim()||''):'';
+  const name=typedName||generateMealNameFromIngredients(meal,section);
   log[date].meals.push({id:Date.now(),name,time:new Date().toISOString(),section,ingredients:meal.slice(),totals:{kcal:Math.round(mt.kcal),protein:Math.round(mt.protein*10)/10,carbs:Math.round(mt.carbs*10)/10,fat:Math.round(mt.fat*10)/10,fibre:Math.round(mt.fibre*10)/10}});
   log[date].totals=sumMacros(log[date].meals.map(m=>m.totals));
   saveLog(log);

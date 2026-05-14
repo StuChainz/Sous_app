@@ -124,7 +124,8 @@ function getDefaultQuickAddSection(forDateStr){
 function homeMealRowHtml(m){
   const time=new Date(m.time).toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'});
   const n=m.ingredients?m.ingredients.length:0;
-  return`<div class="meal-item"><div class="meal-item-left"><div class="meal-item-name">${m.name}</div><div class="meal-item-detail">${time} · ${n} ingredient${n!==1?'s':''}</div></div><div class="meal-item-kcal">${Math.round(m.totals.kcal)} kcal</div></div>`;
+  const id=m.id;
+  return`<div class="meal-item" style="cursor:pointer;" onclick="startEditMeal(${id})"><div class="meal-item-left"><div class="meal-item-name">${m.name}</div><div class="meal-item-detail">${time} · ${n} ingredient${n!==1?'s':''}</div></div><div class="meal-item-kcal">${Math.round(m.totals.kcal)} kcal</div><button class="meal-delete-btn" onclick="event.stopPropagation();deleteMealFromHome(${id})" aria-label="Delete meal" title="Delete">×</button></div>`;
 }
 function renderHomeMealSections(meals){
   const esc=s=>String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
@@ -269,6 +270,26 @@ function addMealToCurrent(sourceMeal){
   });
   currentMealSection=sourceMeal.section||currentMealSection;
   renderCurrentMeal();
+}
+
+function deleteMealFromHome(id){
+  const log=getLog();
+  const day=log[selectedLogDate];
+  if(!day) return;
+  day.meals=day.meals.filter(m=>m.id!==id);
+  day.totals=sumMacros(day.meals.map(m=>m.totals));
+  saveLog(log);
+  renderHome();
+}
+
+function startEditMeal(id){
+  const log=getLog();
+  const day=log[selectedLogDate];
+  if(!day) return;
+  const m=day.meals.find(m=>m.id===id);
+  if(!m) return;
+  switchTab('log',{silent:true,section:m.section});
+  addMealToCurrent(m);
 }
 
 // ═══════════════════════════════════════════

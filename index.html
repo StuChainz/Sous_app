@@ -190,6 +190,8 @@ html,body{height:100%;font-family:'Geist',sans-serif;background:var(--bg);oversc
 .meal-item-name{font-size:14px;font-weight:500;color:var(--text);}
 .meal-item-detail{font-size:11px;color:var(--text-muted);margin-top:2px;}
 .meal-item-kcal{font-size:15px;font-weight:500;color:var(--accent);font-family:'Geist Mono',monospace;}
+.meal-delete-btn{background:none;border:none;color:var(--text-muted);font-size:18px;line-height:1;cursor:pointer;padding:0 0 0 10px;opacity:0.5;flex-shrink:0;}
+.meal-delete-btn:hover{opacity:1;color:var(--danger,#e53e3e);}
 .empty-state{text-align:center;padding:32px 16px;color:var(--text-muted);font-size:13px;}
 .empty-state i{font-size:36px;color:var(--border-strong);display:block;margin-bottom:8px;}
 .log-screen{position:absolute;inset:0;display:none;flex-direction:column;overflow-y:auto;-webkit-overflow-scrolling:touch;}
@@ -693,6 +695,10 @@ html,body{height:100%;font-family:'Geist',sans-serif;background:var(--bg);oversc
       <div class="log-screen" id="ls-summary">
         <div style="font-size:22px;font-weight:500;color:var(--text);margin-bottom:2px;" id="sum-title">Meal summary</div>
         <div style="font-size:13px;color:var(--text-muted);margin-bottom:14px;" id="sum-sub">0 ingredients</div>
+        <div style="margin-bottom:14px;">
+          <label style="font-size:12px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:.04em;display:block;margin-bottom:6px;">Meal name</label>
+          <input id="sum-meal-name" type="text" placeholder="e.g. Chicken &amp; rice" style="width:100%;box-sizing:border-box;background:var(--card);color:var(--text);border:.5px solid var(--border);border-radius:8px;padding:9px 12px;font-size:14px;font-family:inherit;">
+        </div>
         <div class="total-card">
           <div class="total-lbl">Total calories</div>
           <div class="total-kcal" id="sum-kcal">0</div>
