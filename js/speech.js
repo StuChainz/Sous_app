@@ -6,6 +6,7 @@ let tapRec=null, alwaysOnRec=null, isRecording=false, alwaysOnActive=false, isSp
 let nextIngId=1;
 let modalSelectedFood=null, modalActiveTab='search';
 let undoSnapshot=null;
+let currentMealSection=null;
 
 function snapshotMeal(){undoSnapshot=meal.map(i=>({...i}));updateUndoBtn();}
 function updateUndoBtn(){const r=document.getElementById('undo-row');if(r)r.style.display=undoSnapshot?'flex':'none';}
@@ -376,7 +377,17 @@ function resolveAmbig(food,amount){
 // ═══════════════════════════════════════════
 // SUMMARY SCREEN
 // ═══════════════════════════════════════════
+function defaultSectionFromTime(){
+  const h=new Date().getHours();
+  if(h<11) return 'breakfast';
+  if(h<15) return 'lunch';
+  if(h<21) return 'dinner';
+  return 'snacks';
+}
 function showSummary(announce=true){
+  if(!currentMealSection) currentMealSection=defaultSectionFromTime();
+  const sel=document.getElementById('sum-section-select');
+  if(sel) sel.value=currentMealSection;
   const t=sumMacros(meal);
   document.getElementById('sum-kcal').textContent=Math.round(t.kcal);
   document.getElementById('sum-protein').textContent=Math.round(t.protein)+'g';
@@ -561,7 +572,8 @@ function saveMealToLog(){
   const date=(typeof selectedLogDate!=='undefined'?selectedLogDate:todayStr()),log=getLog();
   if(!log[date]) log[date]={meals:[],totals:{kcal:0,protein:0,carbs:0,fat:0,fibre:0}};
   const mt=sumMacros(meal);
-  log[date].meals.push({id:Date.now(),name:getMealName(),time:new Date().toISOString(),ingredients:meal.slice(),totals:{kcal:Math.round(mt.kcal),protein:Math.round(mt.protein*10)/10,carbs:Math.round(mt.carbs*10)/10,fat:Math.round(mt.fat*10)/10,fibre:Math.round(mt.fibre*10)/10}});
+  const section=currentMealSection||defaultSectionFromTime();
+  log[date].meals.push({id:Date.now(),name:getMealName(),time:new Date().toISOString(),section,ingredients:meal.slice(),totals:{kcal:Math.round(mt.kcal),protein:Math.round(mt.protein*10)/10,carbs:Math.round(mt.carbs*10)/10,fat:Math.round(mt.fat*10)/10,fibre:Math.round(mt.fibre*10)/10}});
   log[date].totals=sumMacros(log[date].meals.map(m=>m.totals));
   saveLog(log);
 }
@@ -646,7 +658,7 @@ function stopAllRec(){
 // LOG ENTRY POINTS
 // ═══════════════════════════════════════════
 function startFreshLog(){
-  meal=[]; itemQueue=[]; pendingFood=null; currentAmbig=null; undoSnapshot=null; updateUndoBtn();
+  meal=[]; itemQueue=[]; pendingFood=null; currentAmbig=null; undoSnapshot=null; updateUndoBtn(); currentMealSection=null;
   stopAllRec();
   showLogScreen('listening');
   const el=document.getElementById('transcript-text'); if(el) el.textContent='—';
@@ -675,6 +687,7 @@ function wireLogButtons(){
   document.getElementById('ambig-skip').addEventListener('click',()=>{currentAmbig=null;showLogScreen('listening');setTimeout(restartAlwaysOn,400);});
   document.getElementById('add-custom-btn').addEventListener('click',()=>openCustomEntry());
   document.getElementById('add-more-btn').addEventListener('click',()=>openAddModal());
+  document.getElementById('sum-section-select').addEventListener('change',e=>{currentMealSection=e.target.value;});
   document.getElementById('save-meal-btn').addEventListener('click',()=>{saveMealToLog();showToast('Meal saved! 🎉',2500);setTimeout(()=>{meal=[];itemQueue=[];nextIngId=1;stopAllRec();switchTab('home');},1800);});
   // Add modal
   document.getElementById('modal-close-btn').addEventListener('click',closeAddModal);
