@@ -77,6 +77,48 @@ function calcStreak(){
   return streak;
 }
 
+const HOME_MEAL_SECTIONS=[
+  {key:'breakfast',label:'Breakfast'},
+  {key:'lunch',label:'Lunch'},
+  {key:'dinner',label:'Dinner'},
+  {key:'snacks',label:'Snacks'},
+  {key:'supplements',label:'Supplements'}
+];
+function homeMealSectionKey(m){
+  const k=String(m.section||'').toLowerCase().trim();
+  if(['breakfast','lunch','dinner','snacks','supplements'].includes(k)) return k;
+  const n=String(m.name||'').toLowerCase();
+  if(n.includes('supplement')) return 'supplements';
+  if(n.includes('breakfast')) return 'breakfast';
+  if(n.includes('lunch')) return 'lunch';
+  if(n.includes('dinner')) return 'dinner';
+  if(n.includes('snack')) return 'snacks';
+  const h=new Date(m.time).getHours();
+  if(h<11) return 'breakfast';
+  if(h<15) return 'lunch';
+  if(h<21) return 'dinner';
+  return 'snacks';
+}
+function homeMealRowHtml(m){
+  const time=new Date(m.time).toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'});
+  const n=m.ingredients?m.ingredients.length:0;
+  return`<div class="meal-item"><div class="meal-item-left"><div class="meal-item-name">${m.name}</div><div class="meal-item-detail">${time} · ${n} ingredient${n!==1?'s':''}</div></div><div class="meal-item-kcal">${Math.round(m.totals.kcal)} kcal</div></div>`;
+}
+function renderHomeMealSections(meals){
+  const buckets={breakfast:[],lunch:[],dinner:[],snacks:[],supplements:[]};
+  meals.forEach(m=>{
+    const sk=homeMealSectionKey(m);
+    (buckets[sk]||buckets.snacks).push(m);
+  });
+  Object.keys(buckets).forEach(k=>buckets[k].sort((a,b)=>new Date(a.time)-new Date(b.time)));
+  return HOME_MEAL_SECTIONS.map(({key,label},i)=>{
+    const arr=buckets[key];
+    const inner=arr.length?arr.map(homeMealRowHtml).join(''):'<div class="meal-item-detail" style="padding:6px 4px 14px;">Nothing logged yet</div>';
+    const mb=i<HOME_MEAL_SECTIONS.length-1?'16px':'0';
+    return`<div style="margin-bottom:${mb}"><div class="section-label">${label}</div>${inner}</div>`;
+  }).join('');
+}
+
 function renderHome(){
   updateDateNav();
   const profile=getProfile();
@@ -106,15 +148,7 @@ function renderHome(){
   });
   const meals=dayData.meals||[];
   const listEl=document.getElementById('home-meals-list');
-  if(!meals.length){
-    listEl.innerHTML='<div class="empty-state"><i class="ti ti-bowl-spoon"></i>No meals logged yet</div>';
-  } else {
-    listEl.innerHTML=meals.map(m=>{
-      const time=new Date(m.time).toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'});
-      const n=m.ingredients?m.ingredients.length:0;
-      return`<div class="meal-item"><div class="meal-item-left"><div class="meal-item-name">${m.name}</div><div class="meal-item-detail">${time} · ${n} ingredient${n!==1?'s':''}</div></div><div class="meal-item-kcal">${Math.round(m.totals.kcal)} kcal</div></div>`;
-    }).join('');
-  }
+  listEl.innerHTML=renderHomeMealSections(meals);
 }
 
 function homeLogWeight(){
