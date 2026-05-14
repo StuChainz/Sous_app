@@ -12,7 +12,7 @@ function switchTab(tab,opts={}){
   if(tab==='history') { if(typeof renderHistoryDay==='function') renderHistoryDay(); }
   if(tab==='recipes') { if(typeof renderRecipeList==='function') renderRecipeList(); }
   if(tab==='log'){
-    if(opts.fresh){ if(typeof startFreshLog==='function') startFreshLog(); }
+    if(opts.fresh){ if(typeof startFreshLog==='function') startFreshLog(opts.section||null); }
     else { if(typeof resumeLog==='function') resumeLog(); }
   }
 }
@@ -115,7 +115,7 @@ function renderHomeMealSections(meals){
     const arr=buckets[key];
     const inner=arr.length?arr.map(homeMealRowHtml).join(''):'<div class="meal-item-detail" style="padding:6px 4px 14px;">Nothing logged yet</div>';
     const mb=i<HOME_MEAL_SECTIONS.length-1?'16px':'0';
-    return`<div style="margin-bottom:${mb}"><div class="section-label">${label}</div>${inner}</div>`;
+    return`<div style="margin-bottom:${mb}"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;"><div class="section-label" style="margin-bottom:0;">${label}</div><button onclick="startLogWithSection('${key}')" style="background:none;border:none;color:var(--accent);font-size:12px;font-weight:600;cursor:pointer;padding:2px 0;">+ Add</button></div>${inner}</div>`;
   }).join('');
 }
 
@@ -169,6 +169,7 @@ function homeLogWeight(){
 }
 
 function startCookingLog(){ switchTab('log',{fresh:true}); }
+function startLogWithSection(key){ switchTab('log',{fresh:true,section:key}); }
 
 // ═══════════════════════════════════════════
 // HOME UPDATER (called from speech.js)

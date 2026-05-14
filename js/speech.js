@@ -657,8 +657,8 @@ function stopAllRec(){
 // ═══════════════════════════════════════════
 // LOG ENTRY POINTS
 // ═══════════════════════════════════════════
-function startFreshLog(){
-  meal=[]; itemQueue=[]; pendingFood=null; currentAmbig=null; undoSnapshot=null; updateUndoBtn(); currentMealSection=null;
+function startFreshLog(presetSection=null){
+  meal=[]; itemQueue=[]; pendingFood=null; currentAmbig=null; undoSnapshot=null; updateUndoBtn(); currentMealSection=presetSection;
   stopAllRec();
   showLogScreen('listening');
   const el=document.getElementById('transcript-text'); if(el) el.textContent='—';
