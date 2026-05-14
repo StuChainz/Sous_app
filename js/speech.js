@@ -578,6 +578,7 @@ function saveMealToLog(){
   log[date].meals.push({id:Date.now(),name,time:new Date().toISOString(),section,ingredients:meal.slice(),totals:{kcal:Math.round(mt.kcal),protein:Math.round(mt.protein*10)/10,carbs:Math.round(mt.carbs*10)/10,fat:Math.round(mt.fat*10)/10,fibre:Math.round(mt.fibre*10)/10}});
   log[date].totals=sumMacros(log[date].meals.map(m=>m.totals));
   saveLog(log);
+  meal.forEach(i=>addToRecentIngredients(i));
 }
 
 // ═══════════════════════════════════════════
