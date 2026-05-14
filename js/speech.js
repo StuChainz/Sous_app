@@ -167,10 +167,62 @@ function renderCurrentMeal(){
   });
 }
 
+function renderRecentIngredients(){
+  const panel=document.getElementById('recent-ing-panel');
+  if(!panel) return;
+  const recent=(typeof getRecentIngredients==='function'?getRecentIngredients():[]).slice(0,5);
+  if(!recent.length){panel.style.display='none';panel.innerHTML='';return;}
+  panel.style.display='block';
+  panel.style.margin='8px 20px 10px';
+  panel.style.background='var(--card)';
+  panel.style.border='.5px solid var(--border)';
+  panel.style.borderRadius='var(--radius-sm)';
+  panel.style.overflow='hidden';
+  panel.innerHTML='';
+  const header=document.createElement('div');
+  header.style.cssText='display:flex;justify-content:space-between;align-items:center;padding:8px 12px;border-bottom:.5px solid var(--border);';
+  header.innerHTML='<span style="font-size:12px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:.04em;">Recent</span>';
+  panel.appendChild(header);
+  recent.forEach(r=>{
+    const row=document.createElement('div');
+    row.style.cssText='display:flex;justify-content:space-between;align-items:center;padding:7px 12px;border-bottom:.5px solid var(--border);cursor:pointer;';
+    row.addEventListener('click',()=>addIngredientFromRecent(r));
+    const label=document.createElement('span');
+    label.style.cssText='font-size:13px;color:var(--text);flex:1;min-width:0;';
+    label.textContent=r.name||'—';
+    const meta=document.createElement('span');
+    meta.style.cssText='font-size:12px;color:var(--text-muted);font-family:\'Geist Mono\',monospace;margin-left:8px;flex-shrink:0;';
+    const bits=[];
+    if(r.kcal!=null&&r.kcal!=='') bits.push(Math.round(Number(r.kcal))+' kcal');
+    if(r.protein!=null&&r.protein!=='') bits.push(Math.round(Number(r.protein)*10)/10+'g P');
+    meta.textContent=bits.join(' · ');
+    row.appendChild(label);
+    row.appendChild(meta);
+    panel.appendChild(row);
+  });
+}
+function addIngredientFromRecent(r){
+  if(!r||!r.name) return;
+  snapshotMeal();
+  meal.push({
+    id:nextIngId++,
+    name:r.name,
+    kcal:Math.round(Number(r.kcal))||0,
+    protein:Math.round(Number(r.protein||0)*10)/10,
+    carbs:Math.round(Number(r.carbs||0)*10)/10,
+    fat:Math.round(Number(r.fat||0)*10)/10,
+    fibre:Math.round(Number(r.fibre||0)*10)/10,
+    icon:r.icon||'ti-clipboard',
+  });
+  showToast('Added '+r.name+' ✓');
+  renderCurrentMeal();
+  updateHome();
+}
+
 function showLogScreen(id){
   document.querySelectorAll('.log-screen').forEach(s=>s.classList.remove('active'));
   document.getElementById('ls-'+id).classList.add('active');
-  if(id==='listening') renderCurrentMeal();
+  if(id==='listening'){renderCurrentMeal();renderRecentIngredients();}
 }
 
 // ═══════════════════════════════════════════
@@ -578,7 +630,7 @@ function saveMealToLog(){
   log[date].meals.push({id:Date.now(),name,time:new Date().toISOString(),section,ingredients:meal.slice(),totals:{kcal:Math.round(mt.kcal),protein:Math.round(mt.protein*10)/10,carbs:Math.round(mt.carbs*10)/10,fat:Math.round(mt.fat*10)/10,fibre:Math.round(mt.fibre*10)/10}});
   log[date].totals=sumMacros(log[date].meals.map(m=>m.totals));
   saveLog(log);
-  meal.forEach(i=>addToRecentIngredients(i));
+  meal.forEach(i=>window.addToRecentIngredients(i));
 }
 
 // ═══════════════════════════════════════════
