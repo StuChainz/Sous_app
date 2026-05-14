@@ -720,6 +720,26 @@ function startFreshLog(presetSection=null){
   const pw=document.getElementById('perm-warn'); if(pw) pw.style.display='none';
   speak('Ready.',()=>setTimeout(startAlwaysOn,200));
 }
+function startSilentLog(presetSection=null){
+  meal=[];
+  itemQueue=[];
+  pendingFood=null;
+  currentAmbig=null;
+  undoSnapshot=null;
+  updateUndoBtn();
+  currentMealSection=presetSection;
+
+  stopAllRec();
+  showLogScreen('listening');
+
+  const el=document.getElementById('transcript-text');
+  if(el) el.textContent='—';
+
+  const pw=document.getElementById('perm-warn');
+  if(pw) pw.style.display='none';
+
+  setMicState('idle');
+}
 function resumeLog(){
   stopAllRec();
   const active=document.querySelector('.log-screen.active');

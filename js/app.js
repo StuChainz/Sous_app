@@ -12,7 +12,10 @@ function switchTab(tab,opts={}){
   if(tab==='history') { if(typeof renderHistoryDay==='function') renderHistoryDay(); }
   if(tab==='recipes') { if(typeof renderRecipeList==='function') renderRecipeList(); }
   if(tab==='log'){
-    if(opts.fresh){ if(typeof startFreshLog==='function') startFreshLog(opts.section||null); }
+    if(opts.fresh){
+      if(opts.silent&&typeof startSilentLog==='function') startSilentLog(opts.section||null);
+      else if(typeof startFreshLog==='function') startFreshLog(opts.section||null);
+    }
     else { if(typeof resumeLog==='function') resumeLog(); }
   }
 }
@@ -99,6 +102,25 @@ function homeMealSectionKey(m){
   if(h<21) return 'dinner';
   return 'snacks';
 }
+function hasMealForSectionOnSelectedDate(section, meals){
+  const list=meals||[];
+  return list.some(m=>homeMealSectionKey(m)===section);
+}
+function getMealsForLogDate(dateStr){
+  if(!dateStr) return [];
+  return (getLog()[dateStr]||{}).meals||[];
+}
+function getDefaultQuickAddSection(forDateStr){
+  const meals=getMealsForLogDate(forDateStr);
+  const h=new Date().getHours();
+  let candidate;
+  if(h<11) candidate='breakfast';
+  else if(h<16) candidate='lunch';
+  else if(h<21) candidate='dinner';
+  else candidate='snacks';
+  if(hasMealForSectionOnSelectedDate(candidate,meals)) return 'snacks';
+  return candidate;
+}
 function homeMealRowHtml(m){
   const time=new Date(m.time).toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'});
   const n=m.ingredients?m.ingredients.length:0;
@@ -112,19 +134,69 @@ function renderHomeMealSections(meals){
     (buckets[sk]||buckets.snacks).push(m);
   });
   Object.keys(buckets).forEach(k=>buckets[k].sort((a,b)=>new Date(a.time)-new Date(b.time)));
-  return HOME_MEAL_SECTIONS.map(({key,label},i)=>{
+  return HOME_MEAL_SECTIONS.map(({key,label})=>{
     const arr=buckets[key];
-    const inner=arr.length?arr.map(homeMealRowHtml).join(''):'<div class="meal-item-detail" style="padding:6px 4px 14px;">Nothing logged yet</div>';
-    const mb=i<HOME_MEAL_SECTIONS.length-1?'16px':'0';
-    const last=getLastMealBySection(key);
-    let lastLine='Nothing logged yet';
-    if(last){
-      const nm=(last.name||'').trim();
-      lastLine=nm?esc(nm):'Last meal';
+    const inner=arr.length?arr.map(homeMealRowHtml).join(''):'<div class="home-meal-empty">Nothing logged yet</div>';
+    let lastRow='';
+    if(hasMealForSectionOnSelectedDate(key, meals)){
+      // hide repeat option for this section on this selected date
+    }else{
+      const last=getLastMealBySection(key);
+      let repeatBody;
+      if(last){
+        const nm=(last.name||'').trim();
+        repeatBody=`<span class="home-section-last-meal">${nm?esc(nm):esc('Unnamed meal')}</span>`;
+      }else{
+        repeatBody='<span class="home-section-repeat-empty">No recent meal to repeat</span>';
+      }
+      lastRow=`<div class="home-section-repeat-card" role="group" aria-label="Last ${label.toLowerCase()}"><div class="home-section-repeat-label">Last ${label.toLowerCase()}</div><div class="home-section-repeat-row">${repeatBody}<button type="button" class="home-section-repeat" onclick="repeatLastMealForSection('${key}')" aria-label="Repeat last ${label}">+</button></div></div>`;
     }
-    const lastRow=`<div class="home-section-last-row"><span class="home-section-last-meal">${lastLine}</span><button type="button" class="home-section-repeat" onclick="repeatLastMealForSection('${key}')" aria-label="Repeat last ${label}">+</button></div>`;
-    return`<div style="margin-bottom:${mb}"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;"><div class="section-label" style="margin-bottom:0;">${label}</div><button onclick="startLogWithSection('${key}')" style="background:none;border:none;color:var(--accent);font-size:12px;font-weight:600;cursor:pointer;padding:2px 0;">+ Add</button></div>${lastRow}${inner}</div>`;
+    const loggedBlock=`<div class="home-meal-logged-block"><div class="home-meal-logged-hint">Logged</div>${inner}</div>`;
+    return`<div class="home-meal-section"><div class="home-meal-section-header"><div class="home-meal-section-title">${label}</div><button type="button" class="home-meal-section-add" onclick="startLogWithSection('${key}')">+ Add</button></div>${lastRow}${loggedBlock}</div>`;
   }).join('');
+}
+
+function ensureHomeRecentIngredientsMount(){
+  let el=document.getElementById('home-recent-ingredients');
+  if(el) return el;
+  const label=document.getElementById('home-meals-label');
+  if(!label||!label.parentNode) return null;
+  el=document.createElement('div');
+  el.id='home-recent-ingredients';
+  label.parentNode.insertBefore(el, label);
+  return el;
+}
+function renderHomeRecentIngredients(){
+  const mount=ensureHomeRecentIngredientsMount();
+  if(!mount) return;
+  const recent=(typeof getRecentIngredients==='function'?getRecentIngredients():[]).slice(0,6);
+  mount.innerHTML='';
+  if(!recent.length){ mount.style.display='none'; return; }
+  mount.style.display='block';
+  const lab=document.createElement('div');
+  lab.className='section-label';
+  lab.textContent='Recent ingredients';
+  mount.appendChild(lab);
+  const wrap=document.createElement('div');
+  wrap.style.display='flex';
+  wrap.style.flexWrap='wrap';
+  wrap.style.gap='6px';
+  wrap.style.padding='0 4px 10px';
+  recent.forEach(r=>{
+    const btn=document.createElement('button');
+    btn.type='button';
+    btn.className='toggle-pill inactive';
+    btn.textContent=r.name||'—';
+    btn.style.cursor='pointer';
+    btn.style.flexShrink='0';
+    btn.style.maxWidth='100%';
+    btn.style.overflow='hidden';
+    btn.style.textOverflow='ellipsis';
+    btn.style.whiteSpace='nowrap';
+    btn.addEventListener('click',()=>startLogWithRecentIngredient(r,null));
+    wrap.appendChild(btn);
+  });
+  mount.appendChild(wrap);
 }
 
 function renderHome(){
@@ -157,6 +229,7 @@ function renderHome(){
   const meals=dayData.meals||[];
   const listEl=document.getElementById('home-meals-list');
   listEl.innerHTML=renderHomeMealSections(meals);
+  renderHomeRecentIngredients();
 }
 
 function homeLogWeight(){
@@ -177,9 +250,15 @@ function homeLogWeight(){
 }
 
 function startCookingLog(){ switchTab('log',{fresh:true}); }
-function startLogWithSection(key){ switchTab('log',{fresh:true,section:key}); }
+function startLogWithSection(key){ switchTab('log',{fresh:true,silent:true,section:key}); }
+function startLogWithRecentIngredient(recent, section=null){
+  const logDateKey=selectedLogDate;
+  const resolvedSection=(section!=null&&section!=='')?section:getDefaultQuickAddSection(logDateKey);
+  switchTab('log',{fresh:true,silent:true,section:resolvedSection});
+  if(typeof addIngredientFromRecent==='function') addIngredientFromRecent(recent);
+}
 function repeatLastMealForSection(section){
-  switchTab('log',{fresh:true,section});
+  switchTab('log',{fresh:true,silent:true,section});
   addMealToCurrent(getLastMealBySection(section));
 }
 function addMealToCurrent(sourceMeal){
