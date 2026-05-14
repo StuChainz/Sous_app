@@ -170,6 +170,15 @@ function homeLogWeight(){
 
 function startCookingLog(){ switchTab('log',{fresh:true}); }
 function startLogWithSection(key){ switchTab('log',{fresh:true,section:key}); }
+function addMealToCurrent(sourceMeal){
+  if(!sourceMeal||!sourceMeal.ingredients||!sourceMeal.ingredients.length) return;
+  snapshotMeal();
+  sourceMeal.ingredients.forEach(ing=>{
+    meal.push({...ing,id:nextIngId++});
+  });
+  currentMealSection=sourceMeal.section||currentMealSection;
+  renderCurrentMeal();
+}
 
 // ═══════════════════════════════════════════
 // HOME UPDATER (called from speech.js)

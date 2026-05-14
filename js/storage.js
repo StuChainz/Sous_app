@@ -21,3 +21,15 @@ function addToRecentIngredients(ingredient){
 window.getRecentIngredients=getRecentIngredients;
 window.saveRecentIngredients=saveRecentIngredients;
 window.addToRecentIngredients=addToRecentIngredients;
+function getLastMealBySection(section){
+  const log=getLog();
+  const dates=Object.keys(log).sort().reverse();
+  for(const date of dates){
+    const meals=(log[date].meals||[]).slice().reverse();
+    for(const m of meals){
+      if((m.section||'').toLowerCase()===section.toLowerCase()) return m;
+    }
+  }
+  return null;
+}
+window.getLastMealBySection=getLastMealBySection;
