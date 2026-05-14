@@ -129,33 +129,89 @@ function homeMealRowHtml(m){
   const id=m.id;
   return`<div class="meal-item" style="cursor:pointer;" onclick="startEditMeal(${id})"><div class="meal-item-left"><div class="meal-item-name">${m.name}</div><div class="meal-item-detail">${time} · ${n} ingredient${n!==1?'s':''}</div></div><div class="meal-item-kcal">${Math.round(m.totals.kcal)} kcal</div><button class="meal-delete-btn" onclick="event.stopPropagation();deleteMealFromHome(${id})" aria-label="Delete meal" title="Delete">×</button></div>`;
 }
+function getRecentIngredientsForSection(section){
+  const log=getLog();
+  const names=new Set();
+  Object.values(log).forEach(day=>{
+    (day.meals||[]).forEach(m=>{
+      if(homeMealSectionKey(m)===section){
+        (m.ingredients||[]).forEach(i=>{if(i.name)names.add(i.name.toLowerCase().trim());});
+      }
+    });
+  });
+  return(typeof getRecentIngredients==='function'?getRecentIngredients():[])
+    .filter(r=>names.has((r.name||'').toLowerCase().trim()))
+    .slice(0,6);
+}
+function startLogWithRecentIngredientByName(name,section){
+  const r=(typeof getRecentIngredients==='function'?getRecentIngredients():[]).find(x=>x.name===name);
+  if(r) startLogWithRecentIngredient(r,section);
+}
+function logUsualMealByIndex(section,idx){
+  const usuals=(typeof getUsualMeals==='function'?getUsualMeals():{})[section]||[];
+  const u=usuals[idx];
+  if(!u||!u.ingredients||!u.ingredients.length) return;
+  meal.length=0;
+  itemQueue.length=0;
+  u.ingredients.forEach(i=>meal.push({...i,id:nextIngId++}));
+  currentMealSection=u.section||section;
+  currentEditMealId=null; currentEditMealDate=null; currentQuickMode=false;
+  saveMealToLog();
+  meal.length=0;
+  const mt=sumMacros(u.ingredients);
+  showToast(`${u.name} · ${Math.round(mt.kcal)} kcal saved`,2500);
+  renderHome();
+}
+
 function renderHomeMealSections(meals){
   const esc=s=>String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  const jsEsc=s=>String(s).replace(/\\/g,'\\\\').replace(/'/g,"\\'");
   const buckets={breakfast:[],lunch:[],dinner:[],snacks:[],supplements:[]};
   meals.forEach(m=>{
     const sk=homeMealSectionKey(m);
     (buckets[sk]||buckets.snacks).push(m);
   });
   Object.keys(buckets).forEach(k=>buckets[k].sort((a,b)=>new Date(a.time)-new Date(b.time)));
+  const usualsBySection=typeof getUsualMeals==='function'?getUsualMeals():{};
+
   return HOME_MEAL_SECTIONS.map(({key,label})=>{
     const arr=buckets[key];
     const inner=arr.length?arr.map(homeMealRowHtml).join(''):'<div class="home-meal-empty">Nothing logged yet</div>';
-    let lastRow='';
-    if(hasMealForSectionOnSelectedDate(key, meals)){
-      // hide repeat option for this section on this selected date
-    }else{
-      const last=getLastMealBySection(key);
-      let repeatBody;
-      if(last){
-        const nm=(last.name||'').trim();
-        repeatBody=`<span class="home-section-last-meal">${nm?esc(nm):esc('Unnamed meal')}</span>`;
-      }else{
-        repeatBody='<span class="home-section-repeat-empty">No recent meal to repeat</span>';
+    const hasLogged=hasMealForSectionOnSelectedDate(key,meals);
+
+    let quickBlocks='';
+    if(!hasLogged){
+      // 1. Usual meals grid (up to 3)
+      const usuals=(usualsBySection[key]||[]).slice(0,3);
+      if(usuals.length){
+        const cards=usuals.map((u,i)=>{
+          const span=usuals.length===3&&i===2?' style="grid-column:1/-1;min-height:auto;"':'';
+          const cls=i===0?'usual-card most-used':'usual-card';
+          const mt=sumMacros(u.ingredients||[]);
+          const kcal=Math.round(mt.kcal||0);
+          const ingCount=(u.ingredients||[]).length;
+          return`<button type="button" class="${cls}"${span} onclick="logUsualMealByIndex('${key}',${i})"><span class="usual-card-count">×${u.useCount||1}</span><div class="usual-card-name">${esc(u.name)}</div><div class="usual-card-meta">${ingCount} ingredient${ingCount!==1?'s':''} · <span class="kcal">${kcal} kcal</span></div></button>`;
+        }).join('');
+        quickBlocks+=`<div class="block-eyebrow"><span class="dot"></span>Your usuals · 1 tap</div><div class="usuals-grid">${cards}</div>`;
       }
-      lastRow=`<div class="home-section-repeat-card" role="group" aria-label="Last ${label.toLowerCase()}"><div class="home-section-repeat-label">Last ${label.toLowerCase()}</div><div class="home-section-repeat-row">${repeatBody}<button type="button" class="home-section-repeat" onclick="repeatLastMealForSection('${key}')" aria-label="Repeat last ${label}">+</button></div></div>`;
+
+      // 2. Repeat last meal
+      const last=getLastMealBySection(key);
+      if(last){
+        const nm=esc((last.name||'').trim()||'Unnamed meal');
+        quickBlocks+=`<div class="home-section-repeat-card" onclick="repeatLastMealForSection('${key}')"><div class="home-section-repeat-row"><div class="repeat-icon"><i class="ti ti-rotate-clockwise-2"></i></div><div class="home-section-last-meal">Repeat last — <strong>${nm}</strong></div><i class="ti ti-chevron-right repeat-chevron"></i></div></div>`;
+      }
+
+      // 3. Per-section recent ingredient chips
+      const sectionRecent=getRecentIngredientsForSection(key);
+      if(sectionRecent.length){
+        const chips=sectionRecent.map(r=>`<button type="button" class="recent-chip" onclick="startLogWithRecentIngredientByName('${jsEsc(r.name)}','${key}')"><span class="plus">+</span>${esc(r.name)}</button>`).join('');
+        quickBlocks+=`<div class="recent-chips">${chips}</div>`;
+      }
     }
+
     const loggedBlock=`<div class="home-meal-logged-block"><div class="home-meal-logged-hint">Logged</div>${inner}</div>`;
-    return`<div class="home-meal-section"><div class="home-meal-section-header"><div class="home-meal-section-title">${label}</div><button type="button" class="home-meal-section-add" onclick="startLogWithSection('${key}')">+ Add</button></div>${lastRow}${loggedBlock}</div>`;
+    return`<div class="home-meal-section"><div class="home-meal-section-header"><div class="home-meal-section-title">${label}</div><button type="button" class="home-meal-section-add" onclick="startLogWithSection('${key}')">+ Add</button></div>${quickBlocks}${loggedBlock}</div>`;
   }).join('');
 }
 
@@ -170,36 +226,9 @@ function ensureHomeRecentIngredientsMount(){
   return el;
 }
 function renderHomeRecentIngredients(){
+  // Recent ingredients are now rendered per-section inside renderHomeMealSections
   const mount=ensureHomeRecentIngredientsMount();
-  if(!mount) return;
-  const recent=(typeof getRecentIngredients==='function'?getRecentIngredients():[]).slice(0,6);
-  mount.innerHTML='';
-  if(!recent.length){ mount.style.display='none'; return; }
-  mount.style.display='block';
-  const lab=document.createElement('div');
-  lab.className='section-label';
-  lab.textContent='Recent ingredients';
-  mount.appendChild(lab);
-  const wrap=document.createElement('div');
-  wrap.style.display='flex';
-  wrap.style.flexWrap='wrap';
-  wrap.style.gap='6px';
-  wrap.style.padding='0 4px 10px';
-  recent.forEach(r=>{
-    const btn=document.createElement('button');
-    btn.type='button';
-    btn.className='toggle-pill inactive';
-    btn.textContent=r.name||'—';
-    btn.style.cursor='pointer';
-    btn.style.flexShrink='0';
-    btn.style.maxWidth='100%';
-    btn.style.overflow='hidden';
-    btn.style.textOverflow='ellipsis';
-    btn.style.whiteSpace='nowrap';
-    btn.addEventListener('click',()=>startLogWithRecentIngredient(r,null));
-    wrap.appendChild(btn);
-  });
-  mount.appendChild(wrap);
+  if(mount){mount.innerHTML='';mount.style.display='none';}
 }
 
 function renderHome(){

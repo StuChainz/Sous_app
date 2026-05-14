@@ -672,6 +672,7 @@ function saveMealToLog(){
     log[date].totals=sumMacros(log[date].meals.map(m=>m.totals));
   }
   saveLog(log);
+  window.updateUsualMeals(mealObj,typedName);
   meal.forEach(i=>window.addToRecentIngredients(i));
 }
 

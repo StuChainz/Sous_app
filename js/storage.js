@@ -1,7 +1,7 @@
 // ═══════════════════════════════════════════
 // STORAGE
 // ═══════════════════════════════════════════
-const KEYS={profile:'sous_profile',weights:'sous_weights',log:'sous_log',recipes:'sous_recipes',recalDismissed:'sous_recal_dismissed',recentIngredients:'sous_recent_ingredients'};
+const KEYS={profile:'sous_profile',weights:'sous_weights',log:'sous_log',recipes:'sous_recipes',recalDismissed:'sous_recal_dismissed',recentIngredients:'sous_recent_ingredients',usualMeals:'sous_usual_meals'};
 const getProfile=()=>{try{return JSON.parse(localStorage.getItem(KEYS.profile)||'null')||{};}catch(e){return{};}};
 const getWeights=()=>{try{return JSON.parse(localStorage.getItem(KEYS.weights)||'[]');}catch(e){return[];}};
 const getLog=()=>{try{return JSON.parse(localStorage.getItem(KEYS.log)||'{}');}catch(e){return{};}};
@@ -33,3 +33,31 @@ function getLastMealBySection(section){
   return null;
 }
 window.getLastMealBySection=getLastMealBySection;
+
+// ═══════════════════════════════════════════
+// USUAL MEALS
+// ═══════════════════════════════════════════
+function getUsualMeals(){try{return JSON.parse(localStorage.getItem(KEYS.usualMeals)||'{}');}catch(e){return{};}}
+function saveUsualMeals(u){localStorage.setItem(KEYS.usualMeals,JSON.stringify(u));}
+function updateUsualMeals(mealObj,typedName=''){
+  if(!mealObj.ingredients||!mealObj.ingredients.length) return;
+  const section=mealObj.section||'snacks';
+  const usual=getUsualMeals();
+  if(!usual[section]) usual[section]=[];
+  const fp=mealObj.ingredients.map(i=>i.name.toLowerCase().trim()).sort().join('|');
+  const now=Date.now();
+  const existing=usual[section].find(u=>u.ingredients.map(i=>i.name.toLowerCase().trim()).sort().join('|')===fp);
+  if(existing){
+    existing.useCount=(existing.useCount||1)+1;
+    existing.lastUsed=now;
+    if(typedName) existing.name=typedName;
+    existing.ingredients=mealObj.ingredients;
+  } else {
+    usual[section].push({id:'usual_'+now+'_'+Math.random().toString(36).slice(2,7),section,name:mealObj.name,ingredients:mealObj.ingredients,useCount:1,lastUsed:now});
+  }
+  usual[section].sort((a,b)=>b.useCount-a.useCount||b.lastUsed-a.lastUsed);
+  usual[section]=usual[section].slice(0,5);
+  saveUsualMeals(usual);
+}
+window.getUsualMeals=getUsualMeals;
+window.updateUsualMeals=updateUsualMeals;
