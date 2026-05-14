@@ -640,8 +640,21 @@ function saveMealToLog(){
   const nameInput=document.getElementById('sum-meal-name');
   const typedName=nameInput?(nameInput.value.trim()||''):'';
   const name=typedName||generateMealNameFromIngredients(meal,section);
-  log[date].meals.push({id:Date.now(),name,time:new Date().toISOString(),section,ingredients:meal.slice(),totals:{kcal:Math.round(mt.kcal),protein:Math.round(mt.protein*10)/10,carbs:Math.round(mt.carbs*10)/10,fat:Math.round(mt.fat*10)/10,fibre:Math.round(mt.fibre*10)/10}});
-  log[date].totals=sumMacros(log[date].meals.map(m=>m.totals));
+  const mealObj={name,time:new Date().toISOString(),section,ingredients:meal.slice(),totals:{kcal:Math.round(mt.kcal),protein:Math.round(mt.protein*10)/10,carbs:Math.round(mt.carbs*10)/10,fat:Math.round(mt.fat*10)/10,fibre:Math.round(mt.fibre*10)/10}};
+  if(typeof currentEditMealId!=='undefined'&&currentEditMealId&&typeof currentEditMealDate!=='undefined'&&currentEditMealDate){
+    const editDate=currentEditMealDate;
+    if(!log[editDate]) log[editDate]={meals:[],totals:{kcal:0,protein:0,carbs:0,fat:0,fibre:0}};
+    const idx=log[editDate].meals.findIndex(m=>m.id===currentEditMealId);
+    mealObj.id=currentEditMealId;
+    if(idx!==-1) log[editDate].meals[idx]=mealObj;
+    else log[editDate].meals.push(mealObj);
+    log[editDate].totals=sumMacros(log[editDate].meals.map(m=>m.totals));
+    currentEditMealId=null; currentEditMealDate=null;
+  } else {
+    mealObj.id=Date.now();
+    log[date].meals.push(mealObj);
+    log[date].totals=sumMacros(log[date].meals.map(m=>m.totals));
+  }
   saveLog(log);
   meal.forEach(i=>window.addToRecentIngredients(i));
 }
@@ -763,7 +776,7 @@ function resumeLog(){
 // LOG BUTTON WIRING (done after DOM ready)
 // ═══════════════════════════════════════════
 function wireLogButtons(){
-  document.getElementById('log-cancel-btn').addEventListener('click',()=>{stopAllRec();setMicState('idle');switchTab('home');});
+  document.getElementById('log-cancel-btn').addEventListener('click',()=>{currentEditMealId=null;currentEditMealDate=null;stopAllRec();setMicState('idle');switchTab('home');});
   document.getElementById('finished-meal-btn').addEventListener('click',()=>{if(!meal.length){showToast('Add some ingredients first!');return;}stopAllRec();showSummary();});
   document.getElementById('mic-btn').addEventListener('click',()=>{if(isSpeaking){window.speechSynthesis&&window.speechSynthesis.cancel();isSpeaking=false;}if(isRecording){try{tapRec&&tapRec.stop();}catch(e){}}else startTapRec();});
   document.getElementById('send-btn').addEventListener('click',submitText);

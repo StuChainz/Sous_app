@@ -47,6 +47,7 @@ function formatDisplayDate(dateStr){
   return d+'-'+months[parseInt(m,10)-1]+'-'+y.slice(2);
 }
 let selectedLogDate=localDateStr();
+let currentEditMealId=null, currentEditMealDate=null;
 
 function shiftDate(days){
   const d=new Date(selectedLogDate+'T12:00:00');
@@ -250,15 +251,17 @@ function homeLogWeight(){
   showToast('Weight logged + targets updated ✓');
 }
 
-function startCookingLog(){ switchTab('log',{fresh:true}); }
-function startLogWithSection(key){ switchTab('log',{fresh:true,silent:true,section:key}); }
+function startCookingLog(){ currentEditMealId=null; currentEditMealDate=null; switchTab('log',{fresh:true}); }
+function startLogWithSection(key){ currentEditMealId=null; currentEditMealDate=null; switchTab('log',{fresh:true,silent:true,section:key}); }
 function startLogWithRecentIngredient(recent, section=null){
+  currentEditMealId=null; currentEditMealDate=null;
   const logDateKey=selectedLogDate;
   const resolvedSection=(section!=null&&section!=='')?section:getDefaultQuickAddSection(logDateKey);
   switchTab('log',{fresh:true,silent:true,section:resolvedSection});
   if(typeof addIngredientFromRecent==='function') addIngredientFromRecent(recent);
 }
 function repeatLastMealForSection(section){
+  currentEditMealId=null; currentEditMealDate=null;
   switchTab('log',{fresh:true,silent:true,section});
   addMealToCurrent(getLastMealBySection(section));
 }
@@ -288,7 +291,9 @@ function startEditMeal(id){
   if(!day) return;
   const m=day.meals.find(m=>m.id===id);
   if(!m) return;
-  switchTab('log',{silent:true,section:m.section});
+  currentEditMealId=id;
+  currentEditMealDate=selectedLogDate;
+  switchTab('log',{fresh:true,silent:true,section:m.section});
   addMealToCurrent(m);
 }
 
