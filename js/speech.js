@@ -573,7 +573,9 @@ function saveMealToLog(){
   if(!log[date]) log[date]={meals:[],totals:{kcal:0,protein:0,carbs:0,fat:0,fibre:0}};
   const mt=sumMacros(meal);
   const section=currentMealSection||defaultSectionFromTime();
-  log[date].meals.push({id:Date.now(),name:getMealName(),time:new Date().toISOString(),section,ingredients:meal.slice(),totals:{kcal:Math.round(mt.kcal),protein:Math.round(mt.protein*10)/10,carbs:Math.round(mt.carbs*10)/10,fat:Math.round(mt.fat*10)/10,fibre:Math.round(mt.fibre*10)/10}});
+  const sectionLabels={breakfast:'Breakfast',lunch:'Lunch',dinner:'Dinner',snacks:'Snacks',supplements:'Supplements'};
+  const name=sectionLabels[section]||getMealName();
+  log[date].meals.push({id:Date.now(),name,time:new Date().toISOString(),section,ingredients:meal.slice(),totals:{kcal:Math.round(mt.kcal),protein:Math.round(mt.protein*10)/10,carbs:Math.round(mt.carbs*10)/10,fat:Math.round(mt.fat*10)/10,fibre:Math.round(mt.fibre*10)/10}});
   log[date].totals=sumMacros(log[date].meals.map(m=>m.totals));
   saveLog(log);
 }
