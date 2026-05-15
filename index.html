@@ -259,6 +259,9 @@ html,body{height:100%;font-family:'Geist',sans-serif;background:var(--bg);oversc
 .send-btn{width:46px;height:46px;border-radius:12px;background:var(--accent);border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;box-shadow:0 0 0 1px rgba(255,255,255,0.08) inset,0 6px 14px var(--accent-glow);}
 .send-btn i{font-size:18px;color:#14110D;}
 .listen-hint{font-size:10px;color:var(--text-dim);text-align:center;line-height:1.5;padding:0 20px 14px;font-weight:500;text-transform:uppercase;letter-spacing:0.14em;flex-shrink:0;}
+#voice-correct-bar{display:none;align-items:center;justify-content:space-between;gap:8px;margin:0 22px 8px;padding:9px 12px;background:var(--card);border:0.5px solid var(--border);border-radius:10px;flex-shrink:0;}
+#voice-correct-msg{font-size:13px;color:var(--text);flex:1;min-width:0;}
+#voice-retry-btn{background:none;border:0.5px solid var(--border);border-radius:8px;padding:5px 12px;font-size:12px;font-weight:600;color:var(--accent);cursor:pointer;white-space:nowrap;flex-shrink:0;font-family:inherit;}
 .conf-row{display:flex;align-items:center;gap:6px;justify-content:center;margin-bottom:10px;}
 .conf-dot{width:7px;height:7px;border-radius:50%;}
 .conf-dot.high{background:var(--sage);box-shadow:0 0 8px rgba(181,197,111,0.5);}
@@ -574,7 +577,7 @@ html,body{height:100%;font-family:'Geist',sans-serif;background:var(--bg);oversc
           <div style="width:56px;"></div>
         </div>
         <div id="recent-ing-panel" style="display:none;"></div>
-        <div class="perm-warn" id="perm-warn">Microphone access denied. Please allow mic access in your browser settings and reload.</div>
+        <div class="perm-warn" id="perm-warn">Mic access needed — allow microphone in your browser settings and reload.</div>
         <div class="always-on-bar">
           <div class="aob-dot" id="aob-dot"></div>
           <div class="aob-text" id="aob-text">Starting mic…</div>
@@ -599,6 +602,10 @@ html,body{height:100%;font-family:'Geist',sans-serif;background:var(--bg);oversc
         <div class="transcript-box">
           <div class="transcript-label">Heard</div>
           <div class="transcript-text" id="transcript-text">—</div>
+        </div>
+        <div id="voice-correct-bar">
+          <span id="voice-correct-msg"></span>
+          <button id="voice-retry-btn" type="button">Try again</button>
         </div>
         <div class="text-input-row">
           <input class="voice-text-input" id="text-input" type="text" placeholder='e.g. "150g chicken and 80g rice" or "casserole 600 cal 45g protein"'>

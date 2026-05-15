@@ -3,6 +3,7 @@
 // ═══════════════════════════════════════════
 let meal=[], itemQueue=[], pendingFood=null, currentAmbig=null;
 let tapRec=null, alwaysOnRec=null, isRecording=false, alwaysOnActive=false, isSpeaking=false;
+let _voiceMode=false;
 let nextIngId=1;
 let modalSelectedFood=null, modalActiveTab='search';
 let undoSnapshot=null;
@@ -59,8 +60,32 @@ function announceAutoAdded(items,after){
   showToast(msg,2600);
   speak(msg,after);
 }
+function hideVoiceCorrectBar(){const b=document.getElementById('voice-correct-bar');if(b)b.style.display='none';}
+function showVoiceCorrectBar(msg){
+  const b=document.getElementById('voice-correct-bar'),m=document.getElementById('voice-correct-msg');
+  if(!b) return;
+  if(m) m.textContent=msg;
+  b.style.display='flex';
+}
+function showVoiceCorrection(text){
+  const inp=document.getElementById('text-input');
+  if(inp) inp.value=text;
+  showVoiceCorrectBar('Did you say this? Edit and send, or tap mic.');
+  if(inp) requestAnimationFrame(()=>{inp.focus();inp.select();});
+}
+function showVoiceRetry(msg){
+  const inp=document.getElementById('text-input');
+  if(inp) inp.value='';
+  showVoiceCorrectBar(msg||"Didn't catch that — try again");
+}
+
 function handleParsed(results){
-  if(!results||!results.length){showToast("Didn't catch that — try again!");return;}
+  if(!results||!results.length){
+    if(_voiceMode) showVoiceRetry("Didn't catch that — try again");
+    else showToast("Didn't catch that — try again!");
+    _voiceMode=false; return;
+  }
+  _voiceMode=false;
   if(results.length===1 && results[0].command && !['summary'].includes(results[0].command)){
     const handled=applyCorrectionCommand(results[0]);
     refreshSummaryIfVisible();
@@ -837,13 +862,24 @@ function buildTapRec(){
   const r=new SR(); r.lang='en-GB'; r.interimResults=true; r.continuous=false; r.maxAlternatives=3;
   r.onstart=()=>{isRecording=true;setMicState('recording');};
   r.onresult=e=>{
-    let interim='',final='';
-    for(let i=e.resultIndex;i<e.results.length;i++){const t=e.results[i][0].transcript;if(e.results[i].isFinal)final+=t;else interim+=t;}
+    let interim='',final='',finalConf=null;
+    for(let i=e.resultIndex;i<e.results.length;i++){const res=e.results[i];if(res.isFinal){final+=res[0].transcript;if(finalConf===null)finalConf=res[0].confidence;}else interim+=res[0].transcript;}
     const el=document.getElementById('transcript-text');
     if(el) el.textContent='"'+(final||interim)+'"';
-    if(final){stopTapRec();handleParsed(parseText(final.trim()));}
+    if(final){
+      stopTapRec();
+      const isLow=typeof finalConf==='number'&&finalConf>0&&finalConf<0.75;
+      _voiceMode=true;
+      if(isLow) showVoiceCorrection(final.trim());
+      else handleParsed(parseText(final.trim()));
+    }
   };
-  r.onerror=e=>{stopTapRec();if(e.error==='not-allowed')document.getElementById('perm-warn').style.display='block';else if(e.error!=='aborted')showToast('Mic error: '+e.error);};
+  r.onerror=e=>{
+    stopTapRec();
+    if(e.error==='not-allowed') document.getElementById('perm-warn').style.display='block';
+    else if(e.error==='no-speech') showVoiceRetry("Didn't catch that — try again");
+    else if(e.error!=='aborted') showVoiceRetry("Couldn't understand that");
+  };
   r.onend=()=>stopTapRec();
   return r;
 }
@@ -851,9 +887,11 @@ function stopTapRec(){isRecording=false;if(!isSpeaking)setMicState(alwaysOnActiv
 function startTapRec(){
   if(!SR){showToast('Speech not supported — use text input');return;}
   if(!tapRec) tapRec=buildTapRec();
+  hideVoiceCorrectBar();
   if(isRecording){try{tapRec.stop();}catch(e){}return;}
   pauseAlwaysOn();
   const el=document.getElementById('transcript-text'); if(el) el.textContent='—';
+  const inp=document.getElementById('text-input'); if(inp) inp.value='';
   try{tapRec.start();}catch(e){tapRec=buildTapRec();try{tapRec.start();}catch(e2){}}
 }
 function startClarificationListen(onResult){
@@ -951,6 +989,7 @@ function wireLogButtons(){
   document.getElementById('finished-meal-btn').addEventListener('click',()=>{if(!meal.length){showToast('Add some ingredients first!');return;}stopAllRec();showSummary();});
   document.getElementById('mic-btn').addEventListener('click',()=>{if(isSpeaking){window.speechSynthesis&&window.speechSynthesis.cancel();isSpeaking=false;}if(isRecording){try{tapRec&&tapRec.stop();}catch(e){}}else startTapRec();});
   document.getElementById('send-btn').addEventListener('click',submitText);
+  document.getElementById('voice-retry-btn').addEventListener('click',()=>{hideVoiceCorrectBar();startTapRec();});
   document.getElementById('text-input').addEventListener('keydown',e=>{if(e.key==='Enter')submitText();});
   document.getElementById('confirm-btn').addEventListener('click',doConfirm);
   document.getElementById('change-btn').addEventListener('click',doChange);
@@ -1010,6 +1049,8 @@ function wireLogButtons(){
 function submitText(){
   const inp=document.getElementById('text-input'),val=inp.value.trim();
   if(!val) return;
+  hideVoiceCorrectBar();
+  _voiceMode=false;
   const el=document.getElementById('transcript-text'); if(el) el.textContent='"'+val+'"';
   inp.value=''; handleParsed(parseText(val));
 }
