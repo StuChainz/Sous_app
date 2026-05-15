@@ -724,6 +724,12 @@ function addManualIngredient(){
     snapshotMeal(); meal.push(newItem);
     _persistDraft();
     showToast('Added '+modalSelectedFood.name+' ✓');
+    // Offer to update override if one is already set for this food
+    if(typeof getFoodOverride==='function'&&getFoodOverride(modalSelectedFood.name)){
+      const r2=100/Math.round(grams);
+      _pendingOverride={key:modalSelectedFood.name,name:modalSelectedFood.name,macros:{kcal:Math.round(newItem.kcal*r2),protein:Math.round(newItem.protein*r2*10)/10,carbs:Math.round(newItem.carbs*r2*10)/10,fat:Math.round(newItem.fat*r2*10)/10,fibre:Math.round((newItem.fibre||0)*r2*10)/10}};
+      setTimeout(()=>_showOverridePrompt(modalSelectedFood.name),350);
+    }
   } else {
     const name=document.getElementById('custom-name').value.trim();
     if(!name){showToast('Enter a food name');return;}
@@ -876,6 +882,20 @@ function commitInlineEdit(id){
   item.name=newName; item.weight=newWeight;
   _persistDraft();
   _inlineEditId=null; renderCurrentMeal(); showToast('Updated ✓');
+  // Show override prompt if macros differ from base DB values at the new weight
+  if(item.weight&&!item.customMacro){
+    const food=item.rawFood||(typeof findFoodByText==='function'?findFoodByText(item.name):null);
+    if(food){
+      const r=item.weight/100;
+      const base={kcal:Math.round(food.kcal*r),protein:Math.round(food.p*r*10)/10,carbs:Math.round(food.c*r*10)/10,fat:Math.round(food.f*r*10)/10};
+      const changed=item.kcal!==base.kcal||Math.abs(item.protein-base.protein)>0.05||Math.abs(item.carbs-base.carbs)>0.05||Math.abs(item.fat-base.fat)>0.05;
+      if(changed){
+        const r2=100/item.weight;
+        _pendingOverride={key:food.name,name:item.name,macros:{kcal:Math.round(item.kcal*r2),protein:Math.round(item.protein*r2*10)/10,carbs:Math.round(item.carbs*r2*10)/10,fat:Math.round(item.fat*r2*10)/10,fibre:Math.round((item.fibre||0)*r2*10)/10}};
+        setTimeout(()=>_showOverridePrompt(item.name),200);
+      }
+    }
+  }
 }
 
 // ═══════════════════════════════════════════
