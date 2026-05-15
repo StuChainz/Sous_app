@@ -73,6 +73,7 @@ function handleParsed(results){
     stopAllRec(); showSummary(); return;
   }
   showBatchHeard(results);
+  if(batchNeedsMultiConfirm(results)){showMultiConfirm(results);return;}
   itemQueue.push(...results);
   processQueue([]);
 }
@@ -93,16 +94,6 @@ function processQueue(autoAdded=[]){
   const next=itemQueue.shift();
   if(next && next.command){ applyCorrectionCommand(next); refreshSummaryIfVisible(); processQueue(autoAdded); return; }
   updateQueueDisplay();
-  if(next.ambiguous){
-    if(autoAdded.length){
-      const msg='Added '+batchPhrase(autoAdded)+'. Need one check.';
-      const transcript=document.getElementById('transcript-text');
-      if(transcript) transcript.textContent=msg;
-      showToast(msg,2200);
-    }
-    showAmbiguous(next.matches,next.amount,next.label,next.question);
-    return;
-  }
   if(shouldAutoAdd(next)){
     if(!next.weightSpecified && next.rawFood){
       if(autoAdded.length) showToast('Added '+batchPhrase(autoAdded)+'. One more thing.',2200);
@@ -168,7 +159,15 @@ function renderCurrentMeal(){
       nameIn.style.cssText='flex:1;min-width:0;font-size:13px;color:var(--text);background:var(--card);border:.5px solid var(--accent);border-radius:6px;padding:4px 7px;outline:none;font-family:inherit;';
       const wtIn=document.createElement('input');
       wtIn.type='number'; wtIn.value=i.weight??''; wtIn.placeholder='g'; wtIn.id='ile-weight';
-      wtIn.style.cssText='width:58px;font-size:13px;color:var(--text);background:var(--card);border:.5px solid var(--border);border-radius:6px;padding:4px 7px;outline:none;font-family:inherit;';
+      wtIn.style.cssText='width:52px;font-size:13px;color:var(--text);background:var(--card);border:.5px solid var(--border);border-radius:6px;padding:4px 6px;outline:none;font-family:inherit;text-align:center;';
+      const minusBtn=document.createElement('button');
+      minusBtn.textContent='−'; minusBtn.type='button';
+      minusBtn.style.cssText='background:var(--card);border:.5px solid var(--border);border-radius:6px;min-width:38px;height:34px;font-size:20px;line-height:1;cursor:pointer;color:var(--text);flex-shrink:0;padding:0;';
+      minusBtn.addEventListener('click',()=>stepIngWeight(i.id,-10));
+      const plusBtn=document.createElement('button');
+      plusBtn.textContent='+'; plusBtn.type='button';
+      plusBtn.style.cssText='background:var(--card);border:.5px solid var(--border);border-radius:6px;min-width:38px;height:34px;font-size:20px;line-height:1;cursor:pointer;color:var(--text);flex-shrink:0;padding:0;';
+      plusBtn.addEventListener('click',()=>stepIngWeight(i.id,+10));
       const confirmBtn=document.createElement('button');
       confirmBtn.textContent='✓';
       confirmBtn.style.cssText='background:var(--accent);color:#fff;border:none;border-radius:6px;padding:4px 9px;font-size:13px;font-weight:600;cursor:pointer;flex-shrink:0;';
@@ -183,7 +182,7 @@ function renderCurrentMeal(){
       };
       nameIn.addEventListener('keydown',handleKey);
       wtIn.addEventListener('keydown',handleKey);
-      row.appendChild(nameIn); row.appendChild(wtIn); row.appendChild(confirmBtn); row.appendChild(delBtn);
+      row.appendChild(nameIn); row.appendChild(minusBtn); row.appendChild(wtIn); row.appendChild(plusBtn); row.appendChild(confirmBtn); row.appendChild(delBtn);
       container.appendChild(row);
       requestAnimationFrame(()=>{const w=document.getElementById('ile-weight');if(w){w.focus();w.select();}});
     } else {
@@ -197,7 +196,7 @@ function renderCurrentMeal(){
       const editBtn=document.createElement('button');
       editBtn.title='Edit'; editBtn.innerHTML='<i class="ti ti-pencil"></i>';
       editBtn.style.cssText='background:none;border:none;padding:2px 5px;cursor:pointer;color:var(--text-muted);font-size:14px;';
-      editBtn.addEventListener('click',()=>{_inlineEditId=i.id;renderCurrentMeal();});
+      editBtn.addEventListener('click',()=>{snapshotMeal();_inlineEditId=i.id;renderCurrentMeal();});
       const delBtn=document.createElement('button');
       delBtn.textContent='✕'; delBtn.title='Remove';
       delBtn.style.cssText='background:none;border:none;padding:2px 6px;cursor:pointer;color:var(--text-muted);font-size:15px;';
@@ -468,6 +467,100 @@ function resolveAmbig(food,amount){
 }
 
 // ═══════════════════════════════════════════
+// MULTI-CONFIRM (batch ingredient review)
+// ═══════════════════════════════════════════
+let pendingBatch=[];
+function batchNeedsMultiConfirm(results){
+  const food=results.filter(r=>!r.command);
+  if(!food.length) return false;
+  if(food.some(r=>r.ambiguous)) return true;
+  if(food.length>1&&food.some(r=>!r.weightSpecified)) return true;
+  return false;
+}
+function showMultiConfirm(results){
+  pendingBatch=results.filter(r=>!r.command).map(r=>{
+    if(r.ambiguous) return{ambiguous:true,label:r.label,options:r.matches,selectedIdx:0,weight:r.amount||100};
+    return{ambiguous:false,label:r.name,options:null,food:r.rawFood||null,weight:r.weight||r.rawFood?.w||100,rawItem:r};
+  });
+  renderMultiConfirm();
+  showLogScreen('multi-confirm');
+}
+function renderMultiConfirm(){
+  const list=document.getElementById('mc-list');
+  if(!list) return;
+  list.innerHTML='';
+  pendingBatch.forEach((entry,idx)=>{
+    const card=document.createElement('div');
+    card.style.cssText='background:var(--card);border:.5px solid var(--border);border-radius:10px;padding:10px 12px;margin-bottom:8px;';
+    if(entry.ambiguous){
+      const wrap=document.createElement('div');
+      wrap.style.cssText='display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px;';
+      entry.options.forEach((food,fi)=>{
+        const chip=document.createElement('button');
+        chip.type='button'; chip.textContent=food.name;
+        const sel=fi===entry.selectedIdx;
+        chip.style.cssText='font-size:12px;padding:5px 11px;border-radius:20px;cursor:pointer;font-family:inherit;border:.5px solid '+(sel?'var(--accent);background:var(--accent);color:#fff;':'var(--border);background:var(--card-2);color:var(--text);');
+        chip.addEventListener('click',()=>{entry.selectedIdx=fi;renderMultiConfirm();});
+        wrap.appendChild(chip);
+      });
+      card.appendChild(wrap);
+    } else {
+      const nm=document.createElement('div');
+      nm.style.cssText='font-size:14px;font-weight:500;color:var(--text);margin-bottom:8px;';
+      nm.textContent=entry.label; card.appendChild(nm);
+    }
+    const qRow=document.createElement('div');
+    qRow.style.cssText='display:flex;align-items:center;gap:6px;';
+    const btnStyle='border:.5px solid var(--border);border-radius:6px;min-width:38px;height:34px;font-size:20px;line-height:1;cursor:pointer;color:var(--text);flex-shrink:0;padding:0;background:var(--card-2);';
+    const minusBtn=document.createElement('button');
+    minusBtn.textContent='−'; minusBtn.type='button'; minusBtn.style.cssText=btnStyle;
+    minusBtn.addEventListener('click',()=>{entry.weight=Math.max(1,(entry.weight||10)-10);renderMultiConfirm();});
+    const wtIn=document.createElement('input');
+    wtIn.type='number'; wtIn.value=Math.round(entry.weight); wtIn.min=1;
+    wtIn.style.cssText='width:60px;text-align:center;font-size:14px;background:var(--card);border:.5px solid var(--border);border-radius:6px;padding:5px 6px;color:var(--text);font-family:inherit;outline:none;';
+    wtIn.addEventListener('change',()=>{entry.weight=Math.max(1,parseFloat(wtIn.value)||1);});
+    const plusBtn=document.createElement('button');
+    plusBtn.textContent='+'; plusBtn.type='button'; plusBtn.style.cssText=btnStyle;
+    plusBtn.addEventListener('click',()=>{entry.weight=(entry.weight||0)+10;renderMultiConfirm();});
+    const gLbl=document.createElement('span');
+    gLbl.textContent='g'; gLbl.style.cssText='font-size:13px;color:var(--text-muted);margin-right:auto;';
+    const rmBtn=document.createElement('button');
+    rmBtn.textContent='×'; rmBtn.type='button';
+    rmBtn.style.cssText='background:none;border:none;font-size:20px;color:var(--text-muted);cursor:pointer;padding:2px 4px;flex-shrink:0;';
+    rmBtn.addEventListener('click',()=>{pendingBatch.splice(idx,1);if(!pendingBatch.length){showLogScreen('listening');return;}renderMultiConfirm();});
+    qRow.appendChild(minusBtn); qRow.appendChild(wtIn); qRow.appendChild(plusBtn); qRow.appendChild(gLbl); qRow.appendChild(rmBtn);
+    card.appendChild(qRow);
+    list.appendChild(card);
+  });
+  const addBtn=document.getElementById('mc-add-btn');
+  if(addBtn) addBtn.textContent='Add '+pendingBatch.length+' ingredient'+(pendingBatch.length!==1?'s':'')+' to meal';
+}
+function commitMultiConfirm(){
+  if(!pendingBatch.length){showLogScreen('listening');return;}
+  snapshotMeal();
+  pendingBatch.forEach(entry=>{
+    const food=entry.ambiguous?entry.options[entry.selectedIdx]:entry.food;
+    const w=Math.max(1,Math.round(entry.weight));
+    let item;
+    if(food){
+      const r=w/food.w;
+      item={name:food.name,weight:w,kcal:Math.round(food.kcal*r),protein:Math.round(food.p*r*10)/10,carbs:Math.round(food.c*r*10)/10,fat:Math.round(food.f*r*10)/10,fibre:Math.round((food.fi||0)*r*10)/10,icon:food.icon,rawFood:food};
+    } else {
+      const ri=entry.rawItem||{};
+      const origW=ri.weight||w;
+      const r=origW>0?w/origW:1;
+      item={...ri,weight:w,kcal:Math.round((ri.kcal||0)*r),protein:Math.round((ri.protein||0)*r*10)/10,carbs:Math.round((ri.carbs||0)*r*10)/10,fat:Math.round((ri.fat||0)*r*10)/10,fibre:Math.round((ri.fibre||0)*r*10)/10};
+    }
+    item.id=nextIngId++; meal.push(item);
+  });
+  const count=pendingBatch.length; pendingBatch=[];
+  renderCurrentMeal(); updateHome();
+  showLogScreen('listening');
+  showToast('Added '+count+' ingredient'+(count!==1?'s':'')+' ✓');
+  setTimeout(restartAlwaysOn,400);
+}
+
+// ═══════════════════════════════════════════
 // SUMMARY SCREEN
 // ═══════════════════════════════════════════
 function defaultSectionFromTime(){
@@ -652,6 +745,24 @@ function deleteFromCurrentMeal(id){
   snapshotMeal(); meal.splice(idx,1);
   renderCurrentMeal(); showToast(name+' removed');
 }
+function stepIngWeight(id,delta){
+  const item=meal.find(i=>i.id===id);
+  if(!item) return;
+  const wtInput=document.getElementById('ile-weight');
+  const cur=parseFloat(wtInput?.value)||0;
+  const next=Math.max(1,cur+delta);
+  if(next===cur) return;
+  if(cur>0){
+    const r=next/cur;
+    item.kcal=Math.round(item.kcal*r*10)/10;
+    item.protein=Math.round(item.protein*r*10)/10;
+    item.carbs=Math.round(item.carbs*r*10)/10;
+    item.fat=Math.round(item.fat*r*10)/10;
+    item.fibre=Math.round((item.fibre||0)*r*10)/10;
+  }
+  item.weight=next;
+  renderCurrentMeal();
+}
 function commitInlineEdit(id){
   const item=meal.find(i=>i.id===id);
   if(!item){_inlineEditId=null;renderCurrentMeal();return;}
@@ -659,7 +770,6 @@ function commitInlineEdit(id){
   if(!newName){showToast('Name required');return;}
   const wtVal=document.getElementById('ile-weight')?.value;
   const newWeight=wtVal!=null&&wtVal!==''?parseFloat(wtVal)||null:null;
-  snapshotMeal();
   if(newWeight!==null&&item.weight&&item.weight>0&&newWeight!==item.weight){
     const r=newWeight/item.weight;
     item.kcal=Math.round(item.kcal*r*10)/10;
@@ -847,6 +957,8 @@ function wireLogButtons(){
   document.getElementById('summary-btn-conf').addEventListener('click',()=>{if(meal.length){stopAllRec();showSummary();}else showToast('Add ingredients first!');});
   document.getElementById('ambig-custom').addEventListener('click',()=>{currentAmbig=null;openCustomEntry();});
   document.getElementById('ambig-skip').addEventListener('click',()=>{currentAmbig=null;showLogScreen('listening');setTimeout(restartAlwaysOn,400);});
+  document.getElementById('mc-add-btn').addEventListener('click',commitMultiConfirm);
+  document.getElementById('mc-cancel-btn').addEventListener('click',()=>{pendingBatch=[];showLogScreen('listening');setTimeout(restartAlwaysOn,400);});
   document.getElementById('add-custom-btn').addEventListener('click',()=>openCustomEntry());
   document.getElementById('add-more-btn').addEventListener('click',()=>openAddModal());
   document.getElementById('sum-section-select').addEventListener('change',e=>{currentMealSection=e.target.value;});

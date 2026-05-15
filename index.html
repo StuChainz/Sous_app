@@ -199,7 +199,7 @@ html,body{height:100%;font-family:'Geist',sans-serif;background:var(--bg);oversc
 #ls-listening{background:var(--bg);position:relative;overflow:hidden;}
 #ls-listening::before{content:"";position:absolute;inset:0;pointer-events:none;background:radial-gradient(60% 40% at 50% 38%, var(--accent-soft), transparent 70%);z-index:0;transition:opacity 0.4s;}
 #ls-listening > *{position:relative;z-index:1;}
-#ls-confirm,#ls-ambiguous,#ls-summary{background:var(--bg);padding:16px 20px calc(var(--tab-h) + 24px);}
+#ls-confirm,#ls-ambiguous,#ls-summary,#ls-multi-confirm{background:var(--bg);padding:16px 20px calc(var(--tab-h) + 24px);}
 .listen-topbar{display:flex;justify-content:space-between;align-items:center;padding:14px 22px;flex-shrink:0;}
 .listen-cancel{font-size:12px;color:var(--text-muted);cursor:pointer;display:flex;align-items:center;gap:4px;text-transform:uppercase;letter-spacing:0.1em;font-weight:500;}
 .listen-cancel:hover{color:var(--text);}
@@ -675,6 +675,17 @@ html,body{height:100%;font-family:'Geist',sans-serif;background:var(--bg);oversc
         <div style="display:flex;justify-content:center;gap:24px;margin-top:4px;">
           <span class="ambig-cancel" id="ambig-custom">Add custom ingredient</span>
           <span class="ambig-cancel" id="ambig-skip">Skip</span>
+        </div>
+      </div>
+
+      <!-- MULTI-CONFIRM -->
+      <div class="log-screen" id="ls-multi-confirm">
+        <div style="font-size:18px;font-weight:600;color:var(--text);margin-bottom:4px;">Review ingredients</div>
+        <div style="font-size:13px;color:var(--text-muted);margin-bottom:14px;">Tap to choose each food, then add.</div>
+        <div id="mc-list" style="flex:1;overflow-y:auto;min-height:0;margin-bottom:12px;"></div>
+        <div class="action-stack">
+          <button class="btn-primary" id="mc-add-btn">Add to meal</button>
+          <button class="btn-secondary" id="mc-cancel-btn">Cancel</button>
         </div>
       </div>
 
