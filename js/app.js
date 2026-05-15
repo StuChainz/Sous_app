@@ -156,7 +156,9 @@ function logUsualMealByIndex(section,idx){
   u.ingredients.forEach(i=>meal.push({...i,id:nextIngId++}));
   currentMealSection=u.section||section;
   currentEditMealId=null; currentEditMealDate=null; currentQuickMode=false;
-  saveMealToLog();
+  // Clear name input so saveMealToLog doesn't pick up a stale typed name
+  const _ni=document.getElementById('sum-meal-name'); if(_ni) _ni.value='';
+  saveMealToLog();  // updates useCount+lastUsed via updateUsualMeals, then re-sorts in storage
   meal.length=0;
   const mt=sumMacros(u.ingredients);
   showToast(`${u.name} · ${Math.round(mt.kcal)} kcal saved`,2500);
