@@ -196,6 +196,19 @@ function doRemoveUsualMeal(){
   removeUsualMeal(section,idx);
   renderHome();
 }
+function doEditCopyUsualMeal(){
+  const section=_usualMenuSection,idx=_usualMenuIdx;
+  closeUsualMealMenu();
+  editCopyUsualMeal(section,idx);
+}
+function editCopyUsualMeal(section,idx){
+  const usuals=typeof getUsualMealsForSection==='function'?getUsualMealsForSection(section):[];
+  const u=usuals[idx];
+  if(!u||!u.ingredients||!u.ingredients.length) return;
+  currentEditMealId=null; currentEditMealDate=null;
+  switchTab('log',{fresh:true,silent:true,section:u.section||section,quick:true});
+  addMealToCurrent(u);
+}
 
 function renderHomeMealSections(meals){
   const esc=s=>String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
