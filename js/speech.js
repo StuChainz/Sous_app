@@ -723,10 +723,11 @@ function addManualIngredient(){
     applyFoodOverride(newItem);
     snapshotMeal(); meal.push(newItem);
     _persistDraft();
-    showToast('Added '+modalSelectedFood.name+' ✓');
+    const foodName=modalSelectedFood.name;
+    showToast('Added '+foodName+' ✓');
     const r2=100/Math.round(grams);
-    _pendingOverride={key:modalSelectedFood.name,name:modalSelectedFood.name,macros:{kcal:Math.round(newItem.kcal*r2),protein:Math.round(newItem.protein*r2*10)/10,carbs:Math.round(newItem.carbs*r2*10)/10,fat:Math.round(newItem.fat*r2*10)/10,fibre:Math.round((newItem.fibre||0)*r2*10)/10}};
-    setTimeout(()=>_showOverridePrompt(modalSelectedFood.name),350);
+    _pendingOverride={key:foodName,name:foodName,macros:{kcal:Math.round(newItem.kcal*r2),protein:Math.round(newItem.protein*r2*10)/10,carbs:Math.round(newItem.carbs*r2*10)/10,fat:Math.round(newItem.fat*r2*10)/10,fibre:Math.round((newItem.fibre||0)*r2*10)/10}};
+    setTimeout(()=>_showOverridePrompt(foodName),350);
   } else {
     const name=document.getElementById('custom-name').value.trim();
     if(!name){showToast('Enter a food name');return;}
