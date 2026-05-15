@@ -64,6 +64,20 @@ function getUsualMealsForSection(section){
   const usual=getUsualMeals();
   return (usual[section]||[]).filter(u=>!u.section||u.section===section);
 }
+function renameUsualMeal(section,idx,newName){
+  const usual=getUsualMeals();
+  if(!usual[section]||!usual[section][idx]) return;
+  usual[section][idx].name=newName;
+  saveUsualMeals(usual);
+}
+function removeUsualMeal(section,idx){
+  const usual=getUsualMeals();
+  if(!usual[section]) return;
+  usual[section].splice(idx,1);
+  saveUsualMeals(usual);
+}
 window.getUsualMeals=getUsualMeals;
 window.getUsualMealsForSection=getUsualMealsForSection;
 window.updateUsualMeals=updateUsualMeals;
+window.renameUsualMeal=renameUsualMeal;
+window.removeUsualMeal=removeUsualMeal;

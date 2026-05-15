@@ -165,6 +165,38 @@ function logUsualMealByIndex(section,idx){
   renderHome();
 }
 
+let _usualMenuSection=null,_usualMenuIdx=null;
+function openUsualMealMenu(section,idx){
+  _usualMenuSection=section; _usualMenuIdx=idx;
+  const usuals=typeof getUsualMealsForSection==='function'?getUsualMealsForSection(section):[];
+  const u=usuals[idx];
+  const el=document.getElementById('usual-meal-menu-title');
+  if(el&&u) el.textContent=u.name;
+  document.getElementById('usual-meal-menu-modal')?.classList.add('show');
+}
+function closeUsualMealMenu(){
+  document.getElementById('usual-meal-menu-modal')?.classList.remove('show');
+  _usualMenuSection=null; _usualMenuIdx=null;
+}
+function doRenameUsualMeal(){
+  const section=_usualMenuSection,idx=_usualMenuIdx;
+  const usuals=typeof getUsualMealsForSection==='function'?getUsualMealsForSection(section):[];
+  const u=usuals[idx];
+  closeUsualMealMenu();
+  if(!u) return;
+  const newName=window.prompt('New name for this usual meal:',u.name);
+  if(newName&&newName.trim()&&newName.trim()!==u.name){
+    renameUsualMeal(section,idx,newName.trim());
+    renderHome();
+  }
+}
+function doRemoveUsualMeal(){
+  const section=_usualMenuSection,idx=_usualMenuIdx;
+  closeUsualMealMenu();
+  removeUsualMeal(section,idx);
+  renderHome();
+}
+
 function renderHomeMealSections(meals){
   const esc=s=>String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
   const jsEsc=s=>String(s).replace(/\\/g,'\\\\').replace(/'/g,"\\'");
@@ -190,7 +222,7 @@ function renderHomeMealSections(meals){
           const mt=sumMacros(u.ingredients||[]);
           const kcal=Math.round(mt.kcal||0);
           const ingCount=(u.ingredients||[]).length;
-          return`<button type="button" class="${cls}"${span} onclick="logUsualMealByIndex('${key}',${i})"><div class="usual-card-name">${esc(u.name)}</div><div class="usual-card-meta">${ingCount} ingredient${ingCount!==1?'s':''} · <span class="kcal">${kcal} kcal</span></div></button>`;
+          return`<div role="button" tabindex="0" class="${cls}"${span} onclick="logUsualMealByIndex('${key}',${i})"><div class="usual-card-name">${esc(u.name)}</div><div class="usual-card-meta">${ingCount} ingredient${ingCount!==1?'s':''} · <span class="kcal">${kcal} kcal</span></div><button type="button" class="usual-card-menu-btn" onclick="event.stopPropagation();openUsualMealMenu('${jsEsc(key)}',${i})" aria-label="Manage usual meal">⋯</button></div>`;
         }).join('');
         quickBlocks+=`<div class="usuals-grid">${cards}</div>`;
       }

@@ -287,3 +287,6 @@ html,body{height:100%;font-family:'Geist',sans-serif;background:var(--bg);oversc
 .recent-chips{display:flex;flex-wrap:wrap;gap:5px;padding:0 2px;margin-bottom:4px;}
 .recent-chip{font-size:11px;color:var(--text-muted);background:transparent;border:.5px solid var(--border);border-radius:100px;padding:4px 10px;cursor:pointer;font-family:inherit;transition:all .12s;}
 .recent-chip:hover{color:var(--text);border-color:var(--border-strong);}
+.usual-card-menu-btn{position:absolute;top:7px;right:7px;background:transparent;border:none;color:var(--text-dim);font-size:15px;cursor:pointer;padding:2px 5px;border-radius:6px;line-height:1;font-family:inherit;transition:color .12s,background .12s;z-index:1;}
+.usual-card-menu-btn:hover{color:var(--text-muted);background:var(--bg-2);}
+.usual-meal-remove-btn{color:#d95f5f !important;}
