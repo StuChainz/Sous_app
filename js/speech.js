@@ -12,10 +12,18 @@ let _inlineEditId=null;
 
 function snapshotMeal(){undoSnapshot=meal.map(i=>({...i}));updateUndoBtn();}
 function updateUndoBtn(){const r=document.getElementById('undo-row');if(r)r.style.display=undoSnapshot?'flex':'none';}
+function _persistDraft(){
+  if(typeof saveDraft!=='function') return;
+  const quick=typeof currentQuickMode!=='undefined'&&currentQuickMode;
+  const editing=typeof currentEditMealId!=='undefined'&&currentEditMealId;
+  if(quick||editing) return;
+  saveDraft({meal:meal.map(i=>({...i})),section:currentMealSection||null,savedAt:Date.now()});
+}
 function undoLastAction(){
   if(!undoSnapshot) return;
   meal.length=0; undoSnapshot.forEach(i=>meal.push(i));
   undoSnapshot=null; updateUndoBtn(); renderCurrentMeal(); showToast('Undone');
+  _persistDraft();
 }
 
 // ═══════════════════════════════════════════
@@ -49,7 +57,7 @@ function showBatchHeard(results){
   }
 }
 function autoAddItem(item){
-  snapshotMeal(); meal.push(item);
+  snapshotMeal(); meal.push(item); _persistDraft();
 }
 function announceAutoAdded(items,after){
   if(!items.length){ if(after) after(); return; }
@@ -279,6 +287,7 @@ function addIngredientFromRecent(r){
     fibre:Math.round(Number(r.fibre||0)*10)/10,
     icon:r.icon||'ti-clipboard',
   });
+  _persistDraft();
   showToast('Added '+r.name+' ✓');
   renderCurrentMeal();
   updateHome();
@@ -404,7 +413,7 @@ function doConfirm(){
       pendingFood.fibre=Math.round((food.fi||0)*r*10)/10;
     }
   }
-  snapshotMeal(); meal.push(pendingFood);
+  snapshotMeal(); meal.push(pendingFood); _persistDraft();
   const name=pendingFood.name;
   speak(itemQueue.length ? 'Added. Next.' : 'Added.',()=>{
     pendingFood=null;
@@ -429,7 +438,7 @@ function commitQuantity(grams){
   const food=pendingFood.rawFood;
   const r=grams/food.w;
   const item={id:nextIngId++,name:food.name,weight:Math.round(grams),kcal:Math.round(food.kcal*r),protein:Math.round(food.p*r*10)/10,carbs:Math.round(food.c*r*10)/10,fat:Math.round(food.f*r*10)/10,fibre:Math.round((food.fi||0)*r*10)/10,icon:food.icon};
-  snapshotMeal(); meal.push(item);
+  snapshotMeal(); meal.push(item); _persistDraft();
   showToast('Added '+item.name+' '+Math.round(grams)+'g ✓');
   pendingFood=null;
   showLogScreen('listening');
@@ -578,6 +587,7 @@ function commitMultiConfirm(){
     }
     item.id=nextIngId++; meal.push(item);
   });
+  _persistDraft();
   const count=pendingBatch.length; pendingBatch=[];
   renderCurrentMeal(); updateHome();
   showLogScreen('listening');
@@ -693,6 +703,7 @@ function addManualIngredient(){
     if(grams<=0){showToast('Enter a valid amount');return;}
     const r=grams/(modalSelectedFood.w||100);
     snapshotMeal(); meal.push({id:nextIngId++,name:modalSelectedFood.name,weight:Math.round(grams),kcal:Math.round(modalSelectedFood.kcal*r),protein:Math.round(modalSelectedFood.p*r*10)/10,carbs:Math.round(modalSelectedFood.c*r*10)/10,fat:Math.round(modalSelectedFood.f*r*10)/10,fibre:Math.round((modalSelectedFood.fi||0)*r*10)/10,icon:modalSelectedFood.icon});
+    _persistDraft();
     showToast('Added '+modalSelectedFood.name+' ✓');
   } else {
     const name=document.getElementById('custom-name').value.trim();
@@ -705,6 +716,7 @@ function addManualIngredient(){
     const fat=parseFloat(document.getElementById('custom-fat').value)||0;
     const fibre=parseFloat(document.getElementById('custom-fibre').value)||0;
     snapshotMeal(); meal.push({id:nextIngId++,name,weight,kcal,protein,carbs,fat,fibre,icon:'ti-clipboard'});
+    _persistDraft();
     showToast('Added '+name+' ✓');
   }
   closeAddModal();
@@ -754,20 +766,21 @@ function saveEdit(){
   if(!item) return;
   snapshotMeal();
   item.name=name; item.weight=weight; item.kcal=kcal; item.protein=protein; item.carbs=carbs; item.fat=fat; item.fibre=fibre;
+  _persistDraft();
   closeEditModal(); _refreshAfterEdit(); showToast('Updated ✓');
 }
 function deleteIngredient(id){
   const idx=meal.findIndex(i=>i.id===id);
   if(idx===-1) return;
   const name=meal[idx].name;
-  snapshotMeal(); meal.splice(idx,1);
+  snapshotMeal(); meal.splice(idx,1); _persistDraft();
   closeEditModal(); _refreshAfterEdit(); showToast(name+' removed');
 }
 function deleteFromCurrentMeal(id){
   const idx=meal.findIndex(i=>i.id===id);
   if(idx===-1) return;
   const name=meal[idx].name;
-  snapshotMeal(); meal.splice(idx,1);
+  snapshotMeal(); meal.splice(idx,1); _persistDraft();
   renderCurrentMeal(); showToast(name+' removed');
 }
 function stepIngWeight(id,delta){
@@ -804,6 +817,7 @@ function commitInlineEdit(id){
     item.fibre=Math.round((item.fibre||0)*r*10)/10;
   }
   item.name=newName; item.weight=newWeight;
+  _persistDraft();
   _inlineEditId=null; renderCurrentMeal(); showToast('Updated ✓');
 }
 
@@ -850,6 +864,7 @@ function saveMealToLog(){
     log[date].totals=sumMacros(log[date].meals.map(m=>m.totals));
   }
   saveLog(log);
+  if(typeof clearDraft==='function') clearDraft();
   window.updateUsualMeals(mealObj,typedName);
   meal.forEach(i=>window.addToRecentIngredients(i));
 }
@@ -947,12 +962,22 @@ function stopAllRec(){
 // LOG ENTRY POINTS
 // ═══════════════════════════════════════════
 function startFreshLog(presetSection=null){
-  meal=[]; itemQueue=[]; pendingFood=null; currentAmbig=null; undoSnapshot=null; updateUndoBtn(); currentMealSection=presetSection; currentQuickMode=false;
+  const draft=typeof getDraft==='function'?getDraft():null;
+  const hasDraft=draft&&Array.isArray(draft.meal)&&draft.meal.length>0;
+  meal=[]; itemQueue=[]; pendingFood=null; currentAmbig=null; undoSnapshot=null; updateUndoBtn();
+  currentMealSection=hasDraft?(draft.section||presetSection):presetSection;
+  currentQuickMode=false; currentEditMealId=null; currentEditMealDate=null;
+  if(hasDraft) draft.meal.forEach(i=>meal.push({...i,id:i.id||nextIngId++}));
   stopAllRec();
   showLogScreen('listening');
   const el=document.getElementById('transcript-text'); if(el) el.textContent='—';
   const pw=document.getElementById('perm-warn'); if(pw) pw.style.display='none';
-  speak('Ready.',()=>setTimeout(startAlwaysOn,200));
+  if(hasDraft){
+    showToast('Restored your in-progress meal',2800);
+    speak('Picked up where you left off.',()=>setTimeout(startAlwaysOn,200));
+  } else {
+    speak('Ready.',()=>setTimeout(startAlwaysOn,200));
+  }
 }
 function startSilentLog(presetSection=null,quick=false){
   meal=[];
@@ -985,7 +1010,7 @@ function resumeLog(){
 // LOG BUTTON WIRING (done after DOM ready)
 // ═══════════════════════════════════════════
 function wireLogButtons(){
-  document.getElementById('log-cancel-btn').addEventListener('click',()=>{currentEditMealId=null;currentEditMealDate=null;currentQuickMode=false;stopAllRec();setMicState('idle');switchTab('home');});
+  document.getElementById('log-cancel-btn').addEventListener('click',()=>{currentEditMealId=null;currentEditMealDate=null;currentQuickMode=false;if(typeof clearDraft==='function')clearDraft();stopAllRec();setMicState('idle');switchTab('home');});
   document.getElementById('finished-meal-btn').addEventListener('click',()=>{if(!meal.length){showToast('Add some ingredients first!');return;}stopAllRec();showSummary();});
   document.getElementById('mic-btn').addEventListener('click',()=>{if(isSpeaking){window.speechSynthesis&&window.speechSynthesis.cancel();isSpeaking=false;}if(isRecording){try{tapRec&&tapRec.stop();}catch(e){}}else startTapRec();});
   document.getElementById('send-btn').addEventListener('click',submitText);
@@ -1027,7 +1052,7 @@ function wireLogButtons(){
   document.getElementById('qty-input').addEventListener('keydown',e=>{if(e.key==='Enter'){const g=parseFloat(e.target.value);if(g&&g>0)commitQuantity(g);}});
   document.getElementById('qty-default-btn').addEventListener('click',()=>{
     if(!pendingFood) return;
-    snapshotMeal(); meal.push({...pendingFood,id:nextIngId++});
+    snapshotMeal(); meal.push({...pendingFood,id:nextIngId++}); _persistDraft();
     showToast('Added '+pendingFood.name+' ✓');
     pendingFood=null;
     showLogScreen('listening');

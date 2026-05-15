@@ -347,6 +347,7 @@ function addMealToCurrent(sourceMeal){
     meal.push({...ing,id:nextIngId++});
   });
   currentMealSection=sourceMeal.section||currentMealSection;
+  if(typeof _persistDraft==='function') _persistDraft();
   renderCurrentMeal();
 }
 

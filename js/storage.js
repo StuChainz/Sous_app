@@ -1,7 +1,7 @@
 // ═══════════════════════════════════════════
 // STORAGE
 // ═══════════════════════════════════════════
-const KEYS={profile:'sous_profile',weights:'sous_weights',log:'sous_log',recipes:'sous_recipes',recalDismissed:'sous_recal_dismissed',recentIngredients:'sous_recent_ingredients',usualMeals:'sous_usual_meals'};
+const KEYS={profile:'sous_profile',weights:'sous_weights',log:'sous_log',recipes:'sous_recipes',recalDismissed:'sous_recal_dismissed',recentIngredients:'sous_recent_ingredients',usualMeals:'sous_usual_meals',draft:'sous_draft'};
 const getProfile=()=>{try{return JSON.parse(localStorage.getItem(KEYS.profile)||'null')||{};}catch(e){return{};}};
 const getWeights=()=>{try{return JSON.parse(localStorage.getItem(KEYS.weights)||'[]');}catch(e){return[];}};
 const getLog=()=>{try{return JSON.parse(localStorage.getItem(KEYS.log)||'{}');}catch(e){return{};}};
@@ -21,6 +21,16 @@ function addToRecentIngredients(ingredient){
 window.getRecentIngredients=getRecentIngredients;
 window.saveRecentIngredients=saveRecentIngredients;
 window.addToRecentIngredients=addToRecentIngredients;
+
+// ═══════════════════════════════════════════
+// DRAFT (in-progress cooking log)
+// ═══════════════════════════════════════════
+function getDraft(){try{return JSON.parse(localStorage.getItem(KEYS.draft)||'null');}catch(e){return null;}}
+function saveDraft(d){localStorage.setItem(KEYS.draft,JSON.stringify(d));}
+function clearDraft(){localStorage.removeItem(KEYS.draft);}
+window.getDraft=getDraft;
+window.saveDraft=saveDraft;
+window.clearDraft=clearDraft;
 function getLastMealBySection(section){
   const log=getLog();
   const dates=Object.keys(log).sort().reverse();
