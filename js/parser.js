@@ -1,6 +1,14 @@
 // ═══════════════════════════════════════════
 // FOOD PARSER
 // ═══════════════════════════════════════════
+const UNIT_TO_GRAMS={
+  g:1,kg:1000,ml:1,l:1000,oz:28.35,tbsp:15,tsp:5,cup:240
+};
+const UNIT_PATTERN='g\\b|kg\\b|ml\\b|l\\b|oz\\b|tbsp\\b|tsp\\b|cups?\\b';
+const COUNT_UNIT_PATTERN='pieces?|slices?|servings?|portions?|cans?|tins?';
+function normalizeUnit(unit){
+  return String(unit||'g').toLowerCase().replace(/s$/,'');
+}
 function normaliseLogText(text){
   return String(text||'')
     .toLowerCase()
@@ -14,6 +22,16 @@ function normaliseLogText(text){
     .replace(/\bgram\b/g,'g')
     .replace(/\bkilograms\b/g,'kg')
     .replace(/\bkilogram\b/g,'kg')
+    .replace(/\bounces\b/g,'oz')
+    .replace(/\bounce\b/g,'oz')
+    .replace(/\bmillilitres\b/g,'ml')
+    .replace(/\bmilliliters\b/g,'ml')
+    .replace(/\bmillilitre\b/g,'ml')
+    .replace(/\bmilliliter\b/g,'ml')
+    .replace(/\blitres\b/g,'l')
+    .replace(/\bliters\b/g,'l')
+    .replace(/\blitre\b/g,'l')
+    .replace(/\bliter\b/g,'l')
     .replace(/\btablespoons\b/g,'tbsp')
     .replace(/\btablespoon\b/g,'tbsp')
     .replace(/\bteaspoons\b/g,'tsp')
@@ -23,11 +41,10 @@ function normaliseLogText(text){
 }
 function parseAmount(text){
   text=normaliseLogText(text);
-  const m=text.match(/(\d+(?:\.\d+)?)\s*(g\b|kg\b|ml\b|litres?\b|oz\b|ounces?\b|tbsp\b|tsp\b|cups?\b)?/i);
+  const m=text.match(new RegExp('(\\d+(?:\\.\\d+)?)\\s*('+UNIT_PATTERN+')?','i'));
   if(!m) return null;
-  const num=parseFloat(m[1]),unit=(m[2]||'g').toLowerCase().replace(/s$/,'');
-  const map={g:1,kg:1000,ml:1,litre:1000,oz:28.35,ounce:28.35,tbsp:15,tsp:5,cup:240};
-  return num*(map[unit]||1);
+  const num=parseFloat(m[1]),unit=normalizeUnit(m[2]);
+  return num*(UNIT_TO_GRAMS[unit]||1);
 }
 // Structured quantity extraction for parseSingleSegment.
 // Returns one of:
@@ -37,15 +54,17 @@ function parseAmount(text){
 //   null             no quantity found
 function extractQuantity(seg){
   const s=normaliseLogText(seg);
-  const unitMap={g:1,kg:1000,ml:1,litre:1000,oz:28.35,ounce:28.35,tbsp:15,tsp:5,cup:240};
   // "half [food]" → half the food's default serving
   if(/\bhalf\b/i.test(s)) return{multiplier:0.5};
   // Number + explicit unit → grams
-  let m=s.match(/(\d+(?:\.\d+)?)\s*(g\b|kg\b|ml\b|litres?\b|oz\b|ounces?\b|tbsp\b|tsp\b|cups?\b)/i);
-  if(m){const unit=m[2].toLowerCase().replace(/s$/,'');return{grams:parseFloat(m[1])*(unitMap[unit]||1)};}
+  let m=s.match(new RegExp('(\\d+(?:\\.\\d+)?)\\s*('+UNIT_PATTERN+')','i'));
+  if(m){const unit=normalizeUnit(m[2]);return{grams:parseFloat(m[1])*(UNIT_TO_GRAMS[unit]||1)};}
+  // Number + count word → count ("1 slice bread"); caller scales by food.w
+  m=s.match(new RegExp('\\b(\\d+(?:\\.\\d+)?)\\s*(?:'+COUNT_UNIT_PATTERN+')\\b','i'));
+  if(m) return{count:parseFloat(m[1])};
   // Unit alone, no leading number → implied 1 of that unit ("tablespoon olive oil")
-  m=s.match(/\b(tbsp|tsp|cups?|oz|ml)\b/i);
-  if(m){const unit=m[1].toLowerCase().replace(/s$/,'');return{grams:unitMap[unit]};}
+  m=s.match(new RegExp('\\b('+UNIT_PATTERN+')','i'));
+  if(m){const unit=normalizeUnit(m[1]);return{grams:UNIT_TO_GRAMS[unit]};}
   // Bare integer, no unit → count ("2 eggs"); caller scales by food.w
   m=s.match(/\b(\d+(?:\.\d+)?)\b/);
   if(m) return{count:parseFloat(m[1])};
@@ -53,12 +72,13 @@ function extractQuantity(seg){
 }
 function foodScale(food,grams){
   const r=grams?grams/food.w:1;
-  return{name:food.name,weight:grams?Math.round(grams):food.w,kcal:Math.round(food.kcal*r),protein:Math.round(food.p*r*10)/10,carbs:Math.round(food.c*r*10)/10,fat:Math.round(food.f*r*10)/10,fibre:Math.round(food.fi*r*10)/10,icon:food.icon};
+  return{name:food.name,weight:grams?Math.round(grams):food.w,kcal:Math.round(food.kcal*r),protein:Math.round(food.p*r*10)/10,carbs:Math.round(food.c*r*10)/10,fat:Math.round(food.f*r*10)/10,fibre:Math.round(food.fi*r*10)/10,icon:food.icon,type:food.type||'solid'};
 }
 function itemWeightLabel(item){
   if(!item) return '—';
   if(item.customMacro) return 'manual macro entry';
-  return (item.weight||0)+'g';
+  const unit=item.type==='liquid'?'ml':'g';
+  return (item.weight||0)+unit;
 }
 function parseMacroNumber(text,keys){
   const keyPattern=keys.join('|');
@@ -225,7 +245,7 @@ function splitOnSeparators(text){
 }
 // Split parts further where a new quantity begins mid-segment.
 function splitOnNewQuantity(parts){
-  const re=/(?=\b\d+(?:\.\d+)?\s*(?:g\b|kg\b|ml\b|tbsp\b|tsp\b|oz\b|cups?\b|calories\b|kcal\b))/i;
+  const re=/(?=\b\d+(?:\.\d+)?\s*(?:g\b|kg\b|ml\b|l\b|tbsp\b|tsp\b|oz\b|cups?\b|calories\b|kcal\b))/i;
   return parts.flatMap(part=>{
     const chunks=part.split(re).map(s=>s.trim()).filter(Boolean);
     return chunks.length>1?chunks:[part];
@@ -258,7 +278,8 @@ function parseSingleSegment(seg){
         const specificMatch=FOODS.find(f=>f.kw.some(kw=>kw!==trig&&kw.length>trig.length&&seg.includes(kw)));
         if(!specificMatch){
           const options=FOODS.filter(f=>ag.options.includes(f.name));
-          return{ambiguous:true,matches:options,amount:explicitGrams||100,label:trig,question:ag.question};
+          const countAmount=qty&&qty.count!=null&&options[0]?Math.round(options[0].w*qty.count):null;
+          return{ambiguous:true,matches:options,amount:explicitGrams!=null?explicitGrams:(countAmount||100),label:trig,question:ag.question};
         }
       }
     }
@@ -306,7 +327,7 @@ function parseRecipeText(text){
   const ingredients=[];
   const steps=[];
   const stepPattern=/^(?:\d+[\.\):\s]|step\s+\d+|•|-|\*)\s*/i;
-  const amountPattern=/\d+(?:[.,]\d+)?\s*(?:g|kg|ml|l|oz|tbsp|tsp|cups?|medium|large|small|piece|slice|can|tin)/i;
+  const amountPattern=/\d+(?:[.,]\d+)?\s*(?:g|grams?|kg|kilograms?|ml|millilit(?:re|er)s?|l|lit(?:re|er)s?|oz|ounces?|tbsp|tablespoons?|tsp|teaspoons?|cups?|medium|large|small|pieces?|slices?|cans?|tins?)/i;
 
   for(const line of lines){
     const cleanLine=line.replace(stepPattern,'').trim();

@@ -375,6 +375,9 @@ html,body{height:100%;font-family:'Geist',sans-serif;background:var(--bg);oversc
 .custom-field-group{flex:1;display:flex;flex-direction:column;gap:4px;}
 .custom-field-label{font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.06em;}
 .modal-add-btn{flex-shrink:0;margin-top:14px;}
+.custom-type-toggle{display:flex;gap:6px;margin-top:2px;}
+.custom-type-btn{flex:1;padding:7px 0;border-radius:10px;border:.5px solid var(--border);background:var(--bg);font-size:13px;font-weight:500;color:var(--text-muted);cursor:pointer;font-family:'Geist',sans-serif;transition:background .15s,color .15s,border-color .15s;}
+.custom-type-btn.active{background:var(--accent-soft);color:var(--accent);border-color:var(--accent);}
 .fri-custom-badge{font-size:10px;background:var(--accent-soft);color:var(--accent);border-radius:4px;padding:1px 5px;margin-left:5px;font-weight:500;white-space:nowrap;}
 .create-custom-food-btn{width:100%;padding:12px 14px;border-radius:12px;border:1px dashed var(--border);background:var(--bg);font-size:13px;font-weight:500;color:var(--accent);cursor:pointer;text-align:left;font-family:'Geist',sans-serif;transition:background .15s;}
 .create-custom-food-btn:hover{background:var(--accent-soft);}
@@ -1163,31 +1166,38 @@ html,body{height:100%;font-family:'Geist',sans-serif;background:var(--bg);oversc
       <div class="custom-form">
         <input type="text" class="custom-input" id="custom-name" placeholder="Food name (e.g. Brand X protein bar)">
         <div class="custom-field-group" style="margin-bottom:10px;">
-          <div class="custom-field-label">Default serving size (g) — optional</div>
+          <div class="custom-field-label">Food type</div>
+          <div class="custom-type-toggle">
+            <button type="button" class="custom-type-btn active" id="custom-type-solid" onclick="setCustomFoodType('solid')">Solid</button>
+            <button type="button" class="custom-type-btn" id="custom-type-liquid" onclick="setCustomFoodType('liquid')">Liquid</button>
+          </div>
+        </div>
+        <div class="custom-field-group" style="margin-bottom:10px;">
+          <div class="custom-field-label" id="custom-serving-lbl">Default serving size (g) — optional</div>
           <input type="number" class="custom-input" id="custom-weight" placeholder="e.g. 45" min="0">
         </div>
         <div class="custom-label-row">
           <div class="custom-field-group">
-            <div class="custom-field-label">Calories per 100g</div>
+            <div class="custom-field-label custom-per100-lbl" data-macro="Calories">Calories per 100g</div>
             <input type="number" class="custom-input" id="custom-kcal" placeholder="0" min="0">
           </div>
           <div class="custom-field-group">
-            <div class="custom-field-label">Protein per 100g</div>
+            <div class="custom-field-label custom-per100-lbl" data-macro="Protein">Protein per 100g</div>
             <input type="number" class="custom-input" id="custom-protein" placeholder="0" min="0" step="0.1">
           </div>
         </div>
         <div class="custom-label-row">
           <div class="custom-field-group">
-            <div class="custom-field-label">Carbs per 100g</div>
+            <div class="custom-field-label custom-per100-lbl" data-macro="Carbs">Carbs per 100g</div>
             <input type="number" class="custom-input" id="custom-carbs" placeholder="0" min="0" step="0.1">
           </div>
           <div class="custom-field-group">
-            <div class="custom-field-label">Fat per 100g</div>
+            <div class="custom-field-label custom-per100-lbl" data-macro="Fat">Fat per 100g</div>
             <input type="number" class="custom-input" id="custom-fat" placeholder="0" min="0" step="0.1">
           </div>
         </div>
         <div class="custom-field-group">
-          <div class="custom-field-label">Fibre per 100g</div>
+          <div class="custom-field-label custom-per100-lbl" data-macro="Fibre">Fibre per 100g</div>
           <input type="number" class="custom-input" id="custom-fibre" placeholder="0" min="0" step="0.1">
         </div>
       </div>

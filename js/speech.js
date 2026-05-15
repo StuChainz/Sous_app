@@ -796,9 +796,18 @@ function openCustomEntry(){
   switchModalTab('custom');
   setTimeout(()=>document.getElementById('custom-name').focus(),150);
 }
+function setCustomFoodType(type){
+  document.getElementById('custom-type-solid').classList.toggle('active',type==='solid');
+  document.getElementById('custom-type-liquid').classList.toggle('active',type==='liquid');
+  const servingLbl=document.getElementById('custom-serving-lbl');
+  if(servingLbl) servingLbl.textContent='Default serving size ('+(type==='liquid'?'ml':'g')+') — optional';
+  const per100Labels=document.querySelectorAll('.custom-per100-lbl');
+  per100Labels.forEach(el=>{el.textContent=el.dataset.macro+' per 100'+(type==='liquid'?'ml':'g');});
+}
 function openCreateCustomFood(query){
   openAddModal();
   switchModalTab('custom');
+  setCustomFoodType('solid');
   setTimeout(()=>{
     const nameEl=document.getElementById('custom-name');
     if(nameEl){nameEl.value=query||'';nameEl.focus();}
@@ -874,7 +883,7 @@ function addManualIngredient(){
     const grams=parseFloat(document.getElementById('gram-input').value)||100;
     if(grams<=0){showToast('Enter a valid amount');return;}
     const r=grams/(modalSelectedFood.w||100);
-    const newItem={id:nextIngId++,name:modalSelectedFood.name,weight:Math.round(grams),kcal:Math.round(modalSelectedFood.kcal*r),protein:Math.round(modalSelectedFood.p*r*10)/10,carbs:Math.round(modalSelectedFood.c*r*10)/10,fat:Math.round(modalSelectedFood.f*r*10)/10,fibre:Math.round((modalSelectedFood.fi||0)*r*10)/10,icon:modalSelectedFood.icon,rawFood:modalSelectedFood};
+    const newItem={id:nextIngId++,name:modalSelectedFood.name,weight:Math.round(grams),kcal:Math.round(modalSelectedFood.kcal*r),protein:Math.round(modalSelectedFood.p*r*10)/10,carbs:Math.round(modalSelectedFood.c*r*10)/10,fat:Math.round(modalSelectedFood.f*r*10)/10,fibre:Math.round((modalSelectedFood.fi||0)*r*10)/10,icon:modalSelectedFood.icon,type:modalSelectedFood.type||'solid',rawFood:modalSelectedFood};
     applyFoodOverride(newItem);
     snapshotMeal(); meal.push(newItem);
     _persistDraft();
@@ -893,13 +902,14 @@ function addManualIngredient(){
     const carbsPer100=parseFloat(document.getElementById('custom-carbs').value)||0;
     const fatPer100=parseFloat(document.getElementById('custom-fat').value)||0;
     const fibrePer100=parseFloat(document.getElementById('custom-fibre').value)||0;
+    const foodType=document.getElementById('custom-type-liquid').classList.contains('active')?'liquid':'solid';
     const customFood=typeof addCustomFood==='function'?addCustomFood({
       name,w:100,kcal:kcalPer100,p:proteinPer100,c:carbsPer100,f:fatPer100,fi:fibrePer100,
-      defaultServing:servingRaw!==''?serving:undefined,icon:'ti-clipboard'
+      defaultServing:servingRaw!==''?serving:undefined,icon:'ti-clipboard',type:foodType
     }):null;
     const r=serving/100;
     snapshotMeal();
-    meal.push({id:nextIngId++,name,weight:serving,kcal:Math.round(kcalPer100*r),protein:Math.round(proteinPer100*r*10)/10,carbs:Math.round(carbsPer100*r*10)/10,fat:Math.round(fatPer100*r*10)/10,fibre:Math.round(fibrePer100*r*10)/10,icon:'ti-clipboard',rawFood:customFood||undefined});
+    meal.push({id:nextIngId++,name,weight:serving,kcal:Math.round(kcalPer100*r),protein:Math.round(proteinPer100*r*10)/10,carbs:Math.round(carbsPer100*r*10)/10,fat:Math.round(fatPer100*r*10)/10,fibre:Math.round(fibrePer100*r*10)/10,icon:'ti-clipboard',type:foodType,rawFood:customFood||undefined});
     _persistDraft();
     showToast('Saved & added '+name+' ✓');
   }
