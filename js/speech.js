@@ -7,6 +7,7 @@ let nextIngId=1;
 let modalSelectedFood=null, modalActiveTab='search';
 let undoSnapshot=null;
 let currentMealSection=null;
+let _inlineEditId=null;
 
 function snapshotMeal(){undoSnapshot=meal.map(i=>({...i}));updateUndoBtn();}
 function updateUndoBtn(){const r=document.getElementById('undo-row');if(r)r.style.display=undoSnapshot?'flex':'none';}
@@ -160,26 +161,47 @@ function renderCurrentMeal(){
   container.appendChild(header);
   meal.forEach(i=>{
     const row=document.createElement('div');
-    row.style.cssText='display:flex;justify-content:space-between;align-items:center;padding:7px 12px;border-bottom:.5px solid var(--border);';
-    const label=document.createElement('span');
-    label.style.cssText='font-size:13px;color:var(--text);flex:1;min-width:0;';
-    label.textContent=i.name+(i.weight?' '+i.weight+'g':'');
-    const macros=document.createElement('span');
-    macros.style.cssText='font-size:12px;color:var(--text-muted);font-family:\'Geist Mono\',monospace;margin-right:10px;';
-    macros.textContent=i.kcal+' kcal · '+i.protein+'g P';
-    const btns=document.createElement('span');
-    btns.style.cssText='display:flex;gap:6px;flex-shrink:0;';
-    const editBtn=document.createElement('button');
-    editBtn.style.cssText='background:none;border:none;padding:2px 4px;cursor:pointer;color:var(--text-muted);font-size:14px;';
-    editBtn.title='Edit'; editBtn.innerHTML='<i class="ti ti-pencil"></i>';
-    editBtn.addEventListener('click',()=>openEditModal(i.id));
-    const delBtn=document.createElement('button');
-    delBtn.style.cssText='background:none;border:none;padding:2px 4px;cursor:pointer;color:var(--red);font-size:14px;';
-    delBtn.title='Remove'; delBtn.innerHTML='<i class="ti ti-trash"></i>';
-    delBtn.addEventListener('click',()=>deleteFromCurrentMeal(i.id));
-    btns.appendChild(editBtn); btns.appendChild(delBtn);
-    row.appendChild(label); row.appendChild(macros); row.appendChild(btns);
-    container.appendChild(row);
+    if(_inlineEditId===i.id){
+      row.style.cssText='display:flex;align-items:center;gap:6px;padding:6px 12px;border-bottom:.5px solid var(--border);background:var(--bg-2);';
+      const nameIn=document.createElement('input');
+      nameIn.type='text'; nameIn.value=i.name; nameIn.id='ile-name';
+      nameIn.style.cssText='flex:1;min-width:0;font-size:13px;color:var(--text);background:var(--card);border:.5px solid var(--accent);border-radius:6px;padding:4px 7px;outline:none;font-family:inherit;';
+      const wtIn=document.createElement('input');
+      wtIn.type='number'; wtIn.value=i.weight??''; wtIn.placeholder='g'; wtIn.id='ile-weight';
+      wtIn.style.cssText='width:58px;font-size:13px;color:var(--text);background:var(--card);border:.5px solid var(--border);border-radius:6px;padding:4px 7px;outline:none;font-family:inherit;';
+      const confirmBtn=document.createElement('button');
+      confirmBtn.textContent='✓';
+      confirmBtn.style.cssText='background:var(--accent);color:#fff;border:none;border-radius:6px;padding:4px 9px;font-size:13px;font-weight:600;cursor:pointer;flex-shrink:0;';
+      confirmBtn.addEventListener('click',()=>commitInlineEdit(i.id));
+      const delBtn=document.createElement('button');
+      delBtn.textContent='✕'; delBtn.title='Remove';
+      delBtn.style.cssText='background:none;border:none;padding:2px 6px;cursor:pointer;color:var(--text-muted);font-size:15px;flex-shrink:0;';
+      delBtn.addEventListener('click',()=>{_inlineEditId=null;deleteFromCurrentMeal(i.id);});
+      const handleKey=e=>{
+        if(e.key==='Enter'){e.preventDefault();commitInlineEdit(i.id);}
+        if(e.key==='Escape'){_inlineEditId=null;renderCurrentMeal();}
+      };
+      nameIn.addEventListener('keydown',handleKey);
+      wtIn.addEventListener('keydown',handleKey);
+      row.appendChild(nameIn); row.appendChild(wtIn); row.appendChild(confirmBtn); row.appendChild(delBtn);
+      container.appendChild(row);
+      requestAnimationFrame(()=>{const w=document.getElementById('ile-weight');if(w){w.focus();w.select();}});
+    } else {
+      row.style.cssText='display:flex;justify-content:space-between;align-items:center;padding:7px 12px;border-bottom:.5px solid var(--border);cursor:pointer;';
+      row.addEventListener('click',e=>{if(e.target.closest('button'))return;_inlineEditId=i.id;renderCurrentMeal();});
+      const label=document.createElement('span');
+      label.style.cssText='font-size:13px;color:var(--text);flex:1;min-width:0;';
+      label.textContent=i.name+(i.weight?' '+i.weight+'g':'');
+      const macros=document.createElement('span');
+      macros.style.cssText='font-size:12px;color:var(--text-muted);font-family:\'Geist Mono\',monospace;margin-right:10px;';
+      macros.textContent=i.kcal+' kcal · '+i.protein+'g P';
+      const delBtn=document.createElement('button');
+      delBtn.textContent='✕'; delBtn.title='Remove';
+      delBtn.style.cssText='background:none;border:none;padding:2px 6px;cursor:pointer;color:var(--text-muted);font-size:15px;';
+      delBtn.addEventListener('click',()=>deleteFromCurrentMeal(i.id));
+      row.appendChild(label); row.appendChild(macros); row.appendChild(delBtn);
+      container.appendChild(row);
+    }
   });
 }
 
@@ -574,8 +596,7 @@ function addManualIngredient(){
 // ═══════════════════════════════════════════
 function openEditModal(id){
   const item=meal.find(i=>i.id===id);
-  if(!item){showToast('Debug: item '+id+' not found (meal has '+meal.length+')');return;}
-  showToast('Debug: opening edit for '+item.name);
+  if(!item) return;
   document.getElementById('edit-ing-id').value=id;
   document.getElementById('edit-name').value=item.name;
   document.getElementById('edit-weight').value=item.weight??'';
@@ -627,6 +648,25 @@ function deleteFromCurrentMeal(id){
   const name=meal[idx].name;
   snapshotMeal(); meal.splice(idx,1);
   renderCurrentMeal(); showToast(name+' removed');
+}
+function commitInlineEdit(id){
+  const item=meal.find(i=>i.id===id);
+  if(!item){_inlineEditId=null;renderCurrentMeal();return;}
+  const newName=(document.getElementById('ile-name')?.value||'').trim();
+  if(!newName){showToast('Name required');return;}
+  const wtVal=document.getElementById('ile-weight')?.value;
+  const newWeight=wtVal!=null&&wtVal!==''?parseFloat(wtVal)||null:null;
+  snapshotMeal();
+  if(newWeight!==null&&item.weight&&item.weight>0&&newWeight!==item.weight){
+    const r=newWeight/item.weight;
+    item.kcal=Math.round(item.kcal*r*10)/10;
+    item.protein=Math.round(item.protein*r*10)/10;
+    item.carbs=Math.round(item.carbs*r*10)/10;
+    item.fat=Math.round(item.fat*r*10)/10;
+    item.fibre=Math.round((item.fibre||0)*r*10)/10;
+  }
+  item.name=newName; item.weight=newWeight;
+  _inlineEditId=null; renderCurrentMeal(); showToast('Updated ✓');
 }
 
 // ═══════════════════════════════════════════
