@@ -83,7 +83,22 @@ function announceAutoAdded(items,after){
   showToast(msg,2600);
   speak(msg,after);
 }
-function hideVoiceCorrectBar(){const b=document.getElementById('voice-correct-bar');if(b)b.style.display='none';}
+function hideVoiceCorrectBar(){
+  const b=document.getElementById('voice-correct-bar');if(b)b.style.display='none';
+  const cb=document.getElementById('voice-create-food-btn');if(cb)cb.style.display='none';
+}
+function showNoMatchFallback(rawText){
+  const msg=document.getElementById('voice-correct-msg');
+  const createBtn=document.getElementById('voice-create-food-btn');
+  if(msg) msg.textContent='No match — create custom food?';
+  if(createBtn){
+    createBtn.textContent='Create "'+rawText+'"';
+    createBtn.style.display='';
+    createBtn.onclick=()=>{hideVoiceCorrectBar();openCreateCustomFood(rawText);};
+  }
+  const bar=document.getElementById('voice-correct-bar');
+  if(bar) bar.style.display='flex';
+}
 function showVoiceCorrectBar(msg){
   const b=document.getElementById('voice-correct-bar'),m=document.getElementById('voice-correct-msg');
   if(!b) return;
@@ -102,10 +117,15 @@ function showVoiceRetry(msg){
   showVoiceCorrectBar(msg||"Didn't catch that — try again");
 }
 
-function handleParsed(results){
+function handleParsed(results,rawText=''){
   if(!results||!results.length){
-    if(_voiceMode) showVoiceRetry("Didn't catch that — try again");
-    else showToast("Didn't catch that — try again!");
+    const rt=(rawText||'').trim();
+    if(rt.length>1){
+      showNoMatchFallback(rt);
+    } else {
+      if(_voiceMode) showVoiceRetry("Didn't catch that — try again");
+      else showToast("Didn't catch that — try again!");
+    }
     _voiceMode=false; return;
   }
   _voiceMode=false;
@@ -1109,7 +1129,7 @@ function buildTapRec(){
       const isLow=typeof finalConf==='number'&&finalConf>0&&finalConf<0.75;
       _voiceMode=true;
       if(isLow) showVoiceCorrection(final.trim());
-      else handleParsed(parseText(final.trim()));
+      else handleParsed(parseText(final.trim()),final.trim());
     }
   };
   r.onerror=e=>{
@@ -1241,6 +1261,7 @@ function wireLogButtons(){
   document.getElementById('mic-btn').addEventListener('click',()=>{if(isSpeaking){window.speechSynthesis&&window.speechSynthesis.cancel();isSpeaking=false;}if(isRecording){try{tapRec&&tapRec.stop();}catch(e){}}else startTapRec();});
   document.getElementById('send-btn').addEventListener('click',submitText);
   document.getElementById('voice-retry-btn').addEventListener('click',()=>{hideVoiceCorrectBar();startTapRec();});
+  // voice-create-food-btn onclick is set dynamically in showNoMatchFallback with the raw text closure
   document.getElementById('text-input').addEventListener('keydown',e=>{if(e.key==='Enter')submitText();});
   document.getElementById('confirm-btn').addEventListener('click',doConfirm);
   document.getElementById('change-btn').addEventListener('click',doChange);
@@ -1303,5 +1324,5 @@ function submitText(){
   hideVoiceCorrectBar();
   _voiceMode=false;
   const el=document.getElementById('transcript-text'); if(el) el.textContent='"'+val+'"';
-  inp.value=''; handleParsed(parseText(val));
+  inp.value=''; handleParsed(parseText(val),val);
 }
