@@ -97,8 +97,10 @@ function handleParsed(results){
   if(results.length===1 && results[0].command && !['summary'].includes(results[0].command)){
     const handled=applyCorrectionCommand(results[0]);
     refreshSummaryIfVisible();
+    const _activeScr=document.querySelector('.log-screen.active')?.id;
+    if(handled && _activeScr==='ls-listening') renderCurrentMeal();
     updateHome();
-    if(handled && document.querySelector('.log-screen.active')?.id==='ls-listening') setTimeout(restartAlwaysOn,400);
+    if(handled && _activeScr==='ls-listening') setTimeout(restartAlwaysOn,400);
     return;
   }
   if(results[0].command==='summary'){
@@ -495,7 +497,7 @@ function showAmbiguous(matches,amount,label,question){
 }
 function resolveAmbig(food,amount){
   const r=amount?amount/food.w:1;
-  const resolved={name:food.name,weight:amount?Math.round(amount):food.w,kcal:Math.round(food.kcal*r),protein:Math.round(food.p*r*10)/10,carbs:Math.round(food.c*r*10)/10,fat:Math.round(food.f*r*10)/10,fibre:Math.round(food.fi*r*10)/10,icon:food.icon,rawFood:food,weightSpecified:amount!=null};
+  const resolved={name:food.name,weight:amount?Math.round(amount):food.w,kcal:Math.round(food.kcal*r),protein:Math.round(food.p*r*10)/10,carbs:Math.round(food.c*r*10)/10,fat:Math.round(food.f*r*10)/10,fibre:Math.round((food.fi||0)*r*10)/10,icon:food.icon,rawFood:food,weightSpecified:amount!=null};
   currentAmbig=null;
   if(!amount){askQuantity(resolved);}else{showConfirm(resolved);}
 }
@@ -610,7 +612,7 @@ function showSummary(announce=true){
   const sel=document.getElementById('sum-section-select');
   if(sel) sel.value=currentMealSection;
   const nameInput=document.getElementById('sum-meal-name');
-  if(nameInput) nameInput.value=generateMealNameFromIngredients(meal,currentMealSection);
+  if(nameInput&&(announce||!nameInput.value.trim())) nameInput.value=generateMealNameFromIngredients(meal,currentMealSection);
   const t=sumMacros(meal);
   document.getElementById('sum-kcal').textContent=Math.round(t.kcal);
   document.getElementById('sum-protein').textContent=Math.round(t.protein)+'g';
@@ -786,8 +788,7 @@ function deleteFromCurrentMeal(id){
 function stepIngWeight(id,delta){
   const item=meal.find(i=>i.id===id);
   if(!item) return;
-  const wtInput=document.getElementById('ile-weight');
-  const cur=parseFloat(wtInput?.value)||0;
+  const cur=item.weight||0;
   const next=Math.max(1,cur+delta);
   if(next===cur) return;
   if(cur>0){
@@ -967,7 +968,10 @@ function startFreshLog(presetSection=null){
   meal=[]; itemQueue=[]; pendingFood=null; currentAmbig=null; undoSnapshot=null; updateUndoBtn();
   currentMealSection=hasDraft?(draft.section||presetSection):presetSection;
   currentQuickMode=false; currentEditMealId=null; currentEditMealDate=null;
-  if(hasDraft) draft.meal.forEach(i=>meal.push({...i,id:i.id||nextIngId++}));
+  if(hasDraft){
+    draft.meal.forEach(i=>meal.push({...i,id:i.id||nextIngId++}));
+    if(meal.length) nextIngId=Math.max(...meal.map(i=>i.id||0))+1;
+  }
   stopAllRec();
   showLogScreen('listening');
   const el=document.getElementById('transcript-text'); if(el) el.textContent='—';
