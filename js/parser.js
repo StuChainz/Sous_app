@@ -102,12 +102,18 @@ function parseCustomMacroEntry(seg){
   };
 }
 
+function getAllFoods(){
+  const customs=typeof getCustomFoods==='function'?getCustomFoods():[];
+  return customs.length?[...customs,...FOODS]:FOODS;
+}
 function findFoodByText(text){
   const s=normaliseLogText(text||'');
   let bestFood=null,bestLen=0;
-  for(const food of FOODS){
-    for(const kw of food.kw){
-      if(s.includes(kw)&&kw.length>bestLen){bestFood=food;bestLen=kw.length;}
+  for(const food of getAllFoods()){
+    if(food.kw){
+      for(const kw of food.kw){
+        if(s.includes(kw)&&kw.length>bestLen){bestFood=food;bestLen=kw.length;}
+      }
     }
     const name=food.name.toLowerCase();
     if(s.includes(name)&&name.length>bestLen){bestFood=food;bestLen=name.length;}
@@ -257,11 +263,16 @@ function parseSingleSegment(seg){
       }
     }
   }
-  // Longest keyword match
+  // Longest keyword match — custom foods first (no kw, matched by name), then base foods
   let bestFood=null,bestLen=0;
-  for(const food of FOODS){
-    for(const kw of food.kw){
-      if(seg.includes(kw)&&kw.length>bestLen){bestFood=food;bestLen=kw.length;}
+  for(const food of getAllFoods()){
+    if(food.kw){
+      for(const kw of food.kw){
+        if(seg.includes(kw)&&kw.length>bestLen){bestFood=food;bestLen=kw.length;}
+      }
+    } else {
+      const name=food.name.toLowerCase();
+      if(seg.includes(name)&&name.length>bestLen){bestFood=food;bestLen=name.length;}
     }
   }
   if(!bestFood) return null;
