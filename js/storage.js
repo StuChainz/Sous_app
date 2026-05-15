@@ -55,7 +55,8 @@ function updateUsualMeals(mealObj,typedName=''){
   } else {
     usual[section].push({id:'usual_'+now+'_'+Math.random().toString(36).slice(2,7),section,name:mealObj.name,ingredients:mealObj.ingredients,useCount:1,lastUsed:now});
   }
-  usual[section].sort((a,b)=>b.useCount-a.useCount||b.lastUsed-a.lastUsed);
+  const recencyBoost=ts=>{const d=(Date.now()-ts)/86400000;return d<2?5:d<7?2:0;};
+  usual[section].sort((a,b)=>(b.useCount+recencyBoost(b.lastUsed))-(a.useCount+recencyBoost(a.lastUsed)));
   usual[section]=usual[section].slice(0,5);
   saveUsualMeals(usual);
 }
