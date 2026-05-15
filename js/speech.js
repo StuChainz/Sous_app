@@ -50,6 +50,9 @@ function batchPhrase(items){
 function shouldAutoAdd(item){
   return item && !item.ambiguous && (item.confidence==='high' || item.needsConfirm===false || item.customMacro);
 }
+function isClearIngredient(item){
+  return item && !item.command && !item.ambiguous && (item.customMacro || (item.rawFood && item.weightSpecified));
+}
 function showBatchHeard(results){
   const transcript=document.getElementById('transcript-text');
   const items=results.filter(r=>!r.command);
@@ -73,6 +76,18 @@ function applyFoodOverride(item){
 function autoAddItem(item){
   applyFoodOverride(item);
   snapshotMeal(); meal.push(item); _persistDraft();
+}
+function autoAddClearItems(items){
+  if(!items.length) return;
+  snapshotMeal();
+  items.forEach(item=>{
+    applyFoodOverride(item);
+    meal.push(item);
+  });
+  _persistDraft();
+  renderCurrentMeal();
+  updateHome();
+  showToast('Added '+batchPhrase(items)+' ✓',2400);
 }
 function announceAutoAdded(items,after){
   if(!items.length){ if(after) after(); return; }
@@ -143,6 +158,14 @@ function handleParsed(results,rawText=''){
     stopAllRec(); showSummary(); return;
   }
   showBatchHeard(results);
+  const foodResults=results.filter(r=>!r.command);
+  const reviewItems=foodResults.filter(r=>!isClearIngredient(r));
+  if(reviewItems.length){
+    const clearItems=foodResults.filter(isClearIngredient);
+    autoAddClearItems(clearItems);
+    showMultiConfirm(reviewItems);
+    return;
+  }
   if(batchNeedsMultiConfirm(results)){showMultiConfirm(results);return;}
   itemQueue.push(...results);
   processQueue([]);
@@ -620,8 +643,7 @@ function _updateEntryMacros(entry){
 function batchNeedsMultiConfirm(results){
   const food=results.filter(r=>!r.command);
   if(!food.length) return false;
-  if(food.some(r=>r.ambiguous)) return true;
-  if(food.length>1&&food.some(r=>!r.weightSpecified)) return true;
+  if(food.some(r=>!isClearIngredient(r))) return true;
   return false;
 }
 function showMultiConfirm(results){
