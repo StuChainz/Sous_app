@@ -7,6 +7,7 @@ let _voiceMode=false;
 let nextIngId=1;
 let modalSelectedFood=null, modalActiveTab='search';
 let undoSnapshot=null;
+let _editBaseValues=null,_editFoodKey=null,_pendingOverride=null;
 let currentMealSection=null;
 let _inlineEditId=null;
 
@@ -56,7 +57,21 @@ function showBatchHeard(results){
     transcript.textContent='Heard '+items.length+' items: '+items.map(i=>i.name||i.label||'unknown').join(', ');
   }
 }
+function applyFoodOverride(item){
+  if(!item||item.customMacro||!item.weight) return item;
+  const key=(item.rawFood?item.rawFood.name:item.name);
+  const override=typeof getFoodOverride==='function'?getFoodOverride(key):null;
+  if(!override) return item;
+  const r=item.weight/100;
+  item.kcal=Math.round(override.kcal*r);
+  item.protein=Math.round(override.protein*r*10)/10;
+  item.carbs=Math.round(override.carbs*r*10)/10;
+  item.fat=Math.round(override.fat*r*10)/10;
+  item.fibre=Math.round((override.fibre||0)*r*10)/10;
+  return item;
+}
 function autoAddItem(item){
+  applyFoodOverride(item);
   snapshotMeal(); meal.push(item); _persistDraft();
 }
 function announceAutoAdded(items,after){
@@ -704,7 +719,9 @@ function addManualIngredient(){
     const grams=parseFloat(document.getElementById('gram-input').value)||100;
     if(grams<=0){showToast('Enter a valid amount');return;}
     const r=grams/(modalSelectedFood.w||100);
-    snapshotMeal(); meal.push({id:nextIngId++,name:modalSelectedFood.name,weight:Math.round(grams),kcal:Math.round(modalSelectedFood.kcal*r),protein:Math.round(modalSelectedFood.p*r*10)/10,carbs:Math.round(modalSelectedFood.c*r*10)/10,fat:Math.round(modalSelectedFood.f*r*10)/10,fibre:Math.round((modalSelectedFood.fi||0)*r*10)/10,icon:modalSelectedFood.icon});
+    const newItem={id:nextIngId++,name:modalSelectedFood.name,weight:Math.round(grams),kcal:Math.round(modalSelectedFood.kcal*r),protein:Math.round(modalSelectedFood.p*r*10)/10,carbs:Math.round(modalSelectedFood.c*r*10)/10,fat:Math.round(modalSelectedFood.f*r*10)/10,fibre:Math.round((modalSelectedFood.fi||0)*r*10)/10,icon:modalSelectedFood.icon,rawFood:modalSelectedFood};
+    applyFoodOverride(newItem);
+    snapshotMeal(); meal.push(newItem);
     _persistDraft();
     showToast('Added '+modalSelectedFood.name+' ✓');
   } else {
@@ -740,6 +757,15 @@ function openEditModal(id){
   document.getElementById('edit-carbs').value=item.carbs;
   document.getElementById('edit-fat').value=item.fat;
   document.getElementById('edit-fibre').value=item.fibre??'';
+  _editBaseValues=null; _editFoodKey=null;
+  if(item.weight&&!item.customMacro){
+    const food=item.rawFood||(typeof findFoodByText==='function'?findFoodByText(item.name):null);
+    if(food){
+      const r=item.weight/100;
+      _editBaseValues={kcal:Math.round(food.kcal*r),protein:Math.round(food.p*r*10)/10,carbs:Math.round(food.c*r*10)/10,fat:Math.round(food.f*r*10)/10,fibre:Math.round((food.fi||0)*r*10)/10};
+      _editFoodKey=food.name;
+    }
+  }
   const m=document.getElementById('edit-modal');
   m.style.display='flex';
   requestAnimationFrame(()=>m.classList.add('show'));
@@ -770,6 +796,36 @@ function saveEdit(){
   item.name=name; item.weight=weight; item.kcal=kcal; item.protein=protein; item.carbs=carbs; item.fat=fat; item.fibre=fibre;
   _persistDraft();
   closeEditModal(); _refreshAfterEdit(); showToast('Updated ✓');
+  if(_editBaseValues&&weight&&_editFoodKey){
+    const changed=kcal!==_editBaseValues.kcal||Math.abs(protein-_editBaseValues.protein)>0.05||Math.abs(carbs-_editBaseValues.carbs)>0.05||Math.abs(fat-_editBaseValues.fat)>0.05;
+    if(changed){
+      const r=100/weight;
+      _pendingOverride={key:_editFoodKey,name:name,macros:{kcal:Math.round(kcal*r),protein:Math.round(protein*r*10)/10,carbs:Math.round(carbs*r*10)/10,fat:Math.round(fat*r*10)/10,fibre:Math.round(fibre*r*10)/10}};
+      _showOverridePrompt(name);
+    }
+  }
+}
+function _showOverridePrompt(foodName){
+  const el=document.getElementById('override-prompt');
+  if(!el) return;
+  const lbl=document.getElementById('override-prompt-label');
+  if(lbl) lbl.textContent='Use these values for '+foodName+' next time?';
+  el.style.display='flex';
+  requestAnimationFrame(()=>el.classList.add('show'));
+}
+function _closeOverridePrompt(){
+  const el=document.getElementById('override-prompt');
+  if(!el) return;
+  el.classList.remove('show');
+  setTimeout(()=>{el.style.display='none';},300);
+  _pendingOverride=null;
+}
+function _confirmOverride(){
+  if(_pendingOverride&&_pendingOverride.key&&typeof setFoodOverride==='function'){
+    setFoodOverride(_pendingOverride.key,_pendingOverride.macros);
+    showToast('Saved as default for '+_pendingOverride.name);
+  }
+  _closeOverridePrompt();
 }
 function deleteIngredient(id){
   const idx=meal.findIndex(i=>i.id===id);

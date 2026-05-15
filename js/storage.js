@@ -91,3 +91,14 @@ window.getUsualMealsForSection=getUsualMealsForSection;
 window.updateUsualMeals=updateUsualMeals;
 window.renameUsualMeal=renameUsualMeal;
 window.removeUsualMeal=removeUsualMeal;
+
+// ═══════════════════════════════════════════
+// USER FOOD OVERRIDES
+// ═══════════════════════════════════════════
+function getUserFoodOverrides(){try{return JSON.parse(localStorage.getItem('userFoodOverrides')||'{}');}catch(e){return{};}}
+function saveUserFoodOverrides(o){localStorage.setItem('userFoodOverrides',JSON.stringify(o));}
+function setFoodOverride(key,macros){const o=getUserFoodOverrides();o[key.toLowerCase().trim()]=macros;saveUserFoodOverrides(o);}
+function getFoodOverride(key){if(!key) return null;const o=getUserFoodOverrides();return o[key.toLowerCase().trim()]||null;}
+window.getUserFoodOverrides=getUserFoodOverrides;
+window.setFoodOverride=setFoodOverride;
+window.getFoodOverride=getFoodOverride;
