@@ -187,19 +187,22 @@ function renderCurrentMeal(){
       container.appendChild(row);
       requestAnimationFrame(()=>{const w=document.getElementById('ile-weight');if(w){w.focus();w.select();}});
     } else {
-      row.style.cssText='display:flex;justify-content:space-between;align-items:center;padding:7px 12px;border-bottom:.5px solid var(--border);cursor:pointer;';
-      row.addEventListener('click',e=>{if(e.target.closest('button'))return;_inlineEditId=i.id;renderCurrentMeal();});
+      row.style.cssText='display:flex;justify-content:space-between;align-items:center;padding:7px 12px;border-bottom:.5px solid var(--border);';
       const label=document.createElement('span');
       label.style.cssText='font-size:13px;color:var(--text);flex:1;min-width:0;';
       label.textContent=i.name+(i.weight?' '+i.weight+'g':'');
       const macros=document.createElement('span');
-      macros.style.cssText='font-size:12px;color:var(--text-muted);font-family:\'Geist Mono\',monospace;margin-right:10px;';
+      macros.style.cssText='font-size:12px;color:var(--text-muted);font-family:\'Geist Mono\',monospace;margin-right:6px;';
       macros.textContent=i.kcal+' kcal · '+i.protein+'g P';
+      const editBtn=document.createElement('button');
+      editBtn.title='Edit'; editBtn.innerHTML='<i class="ti ti-pencil"></i>';
+      editBtn.style.cssText='background:none;border:none;padding:2px 5px;cursor:pointer;color:var(--text-muted);font-size:14px;';
+      editBtn.addEventListener('click',()=>{_inlineEditId=i.id;renderCurrentMeal();});
       const delBtn=document.createElement('button');
       delBtn.textContent='✕'; delBtn.title='Remove';
       delBtn.style.cssText='background:none;border:none;padding:2px 6px;cursor:pointer;color:var(--text-muted);font-size:15px;';
       delBtn.addEventListener('click',()=>deleteFromCurrentMeal(i.id));
-      row.appendChild(label); row.appendChild(macros); row.appendChild(delBtn);
+      row.appendChild(label); row.appendChild(macros); row.appendChild(editBtn); row.appendChild(delBtn);
       container.appendChild(row);
     }
   });
