@@ -190,22 +190,22 @@ function renderHomeMealSections(meals){
           const mt=sumMacros(u.ingredients||[]);
           const kcal=Math.round(mt.kcal||0);
           const ingCount=(u.ingredients||[]).length;
-          return`<button type="button" class="${cls}"${span} onclick="logUsualMealByIndex('${key}',${i})"><span class="usual-card-count">×${u.useCount||1}</span><div class="usual-card-name">${esc(u.name)}</div><div class="usual-card-meta">${ingCount} ingredient${ingCount!==1?'s':''} · <span class="kcal">${kcal} kcal</span></div></button>`;
+          return`<button type="button" class="${cls}"${span} onclick="logUsualMealByIndex('${key}',${i})"><div class="usual-card-name">${esc(u.name)}</div><div class="usual-card-meta">${ingCount} ingredient${ingCount!==1?'s':''} · <span class="kcal">${kcal} kcal</span></div></button>`;
         }).join('');
-        quickBlocks+=`<div class="block-eyebrow"><span class="dot"></span>Your usuals · 1 tap</div><div class="usuals-grid">${cards}</div>`;
+        quickBlocks+=`<div class="usuals-grid">${cards}</div>`;
       }
 
       // 2. Repeat last meal
       const last=getLastMealBySection(key);
       if(last){
         const nm=esc((last.name||'').trim()||'Unnamed meal');
-        quickBlocks+=`<div class="home-section-repeat-card" onclick="repeatLastMealForSection('${key}')"><div class="home-section-repeat-row"><div class="repeat-icon"><i class="ti ti-rotate-clockwise-2"></i></div><div class="home-section-last-meal">Repeat last — <strong>${nm}</strong></div><i class="ti ti-chevron-right repeat-chevron"></i></div></div>`;
+        quickBlocks+=`<div class="home-section-repeat-card" onclick="repeatLastMealForSection('${key}')"><div class="home-section-repeat-row"><div class="home-section-last-meal">↻ Yesterday: <strong>${nm}</strong></div><i class="ti ti-chevron-right repeat-chevron"></i></div></div>`;
       }
 
       // 3. Per-section recent ingredient chips
       const sectionRecent=getRecentIngredientsForSection(key);
       if(sectionRecent.length){
-        const chips=sectionRecent.map(r=>`<button type="button" class="recent-chip" onclick="startLogWithRecentIngredientByName('${jsEsc(r.name)}','${key}')"><span class="plus">+</span>${esc(r.name)}</button>`).join('');
+        const chips=sectionRecent.map(r=>`<button type="button" class="recent-chip" onclick="startLogWithRecentIngredientByName('${jsEsc(r.name)}','${key}')">${esc(r.name)}</button>`).join('');
         quickBlocks+=`<div class="recent-chips">${chips}</div>`;
       }
     }
