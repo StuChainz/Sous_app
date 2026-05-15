@@ -282,6 +282,10 @@ html,body{height:100%;font-family:'Geist',sans-serif;background:var(--bg);oversc
 .macro-cell-val{font-size:15px;font-weight:500;color:var(--text);font-family:'Geist Mono',monospace;}
 .macro-cell-lbl{font-size:9px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.08em;font-weight:600;}
 .macro-cell.kcal .macro-cell-val{color:var(--accent);}
+.macro-val-inp{width:100%;text-align:center;border:none;background:transparent;color:var(--text);font-family:'Geist Mono',monospace;font-size:15px;font-weight:500;outline:none;padding:0;-moz-appearance:textfield;}
+.macro-val-inp::-webkit-outer-spin-button,.macro-val-inp::-webkit-inner-spin-button{-webkit-appearance:none;margin:0;}
+.macro-cell.kcal .macro-val-inp{color:var(--accent);}
+.macro-val-inp:not([readonly]){border-bottom:.5px solid var(--accent);background:var(--bg-2);border-radius:2px;cursor:text;}
 .cooked-row{display:flex;align-items:center;gap:8px;justify-content:center;margin-bottom:16px;}
 .cooked-lbl{font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.08em;}
 .toggle-pill{font-size:12px;border-radius:20px;padding:4px 14px;font-weight:500;cursor:pointer;transition:all .15s;border:none;font-family:'Geist',sans-serif;}
@@ -371,6 +375,9 @@ html,body{height:100%;font-family:'Geist',sans-serif;background:var(--bg);oversc
 .custom-field-group{flex:1;display:flex;flex-direction:column;gap:4px;}
 .custom-field-label{font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.06em;}
 .modal-add-btn{flex-shrink:0;margin-top:14px;}
+.fri-custom-badge{font-size:10px;background:var(--accent-soft);color:var(--accent);border-radius:4px;padding:1px 5px;margin-left:5px;font-weight:500;white-space:nowrap;}
+.create-custom-food-btn{width:100%;padding:12px 14px;border-radius:12px;border:1px dashed var(--border);background:var(--bg);font-size:13px;font-weight:500;color:var(--accent);cursor:pointer;text-align:left;font-family:'Geist',sans-serif;transition:background .15s;}
+.create-custom-food-btn:hover{background:var(--accent-soft);}
 .rs-screen{position:absolute;inset:0;display:none;flex-direction:column;overflow-y:auto;-webkit-overflow-scrolling:touch;padding-bottom:calc(var(--tab-h)+16px);}
 .rs-screen.active{display:flex;}
 .recipe-item{background:var(--card);border:.5px solid var(--border);border-radius:var(--radius-sm);padding:14px 16px;display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;cursor:pointer;transition:background .15s;}
@@ -647,10 +654,10 @@ html,body{height:100%;font-family:'Geist',sans-serif;background:var(--bg);oversc
             </div>
           </div>
           <div class="macro-grid">
-            <div class="macro-cell kcal"><div class="macro-cell-val" id="c-kcal">—</div><div class="macro-cell-lbl">kcal</div></div>
-            <div class="macro-cell"><div class="macro-cell-val" id="c-protein">—</div><div class="macro-cell-lbl">protein</div></div>
-            <div class="macro-cell"><div class="macro-cell-val" id="c-carbs">—</div><div class="macro-cell-lbl">carbs</div></div>
-            <div class="macro-cell"><div class="macro-cell-val" id="c-fat">—</div><div class="macro-cell-lbl">fat</div></div>
+            <div class="macro-cell kcal"><input class="macro-cell-val macro-val-inp" id="c-kcal" type="number" readonly tabindex="-1"><div class="macro-cell-lbl">kcal</div></div>
+            <div class="macro-cell"><input class="macro-cell-val macro-val-inp" id="c-protein" type="number" readonly tabindex="-1"><div class="macro-cell-lbl">protein</div></div>
+            <div class="macro-cell"><input class="macro-cell-val macro-val-inp" id="c-carbs" type="number" readonly tabindex="-1"><div class="macro-cell-lbl">carbs</div></div>
+            <div class="macro-cell"><input class="macro-cell-val macro-val-inp" id="c-fat" type="number" readonly tabindex="-1"><div class="macro-cell-lbl">fat</div></div>
           </div>
         </div>
         <div class="cooked-row">
@@ -1130,7 +1137,7 @@ html,body{height:100%;font-family:'Geist',sans-serif;background:var(--bg);oversc
     </div>
     <div class="modal-tabs">
       <button class="tab-btn active" id="tab-search-btn">Search food</button>
-      <button class="tab-btn" id="tab-custom-btn">Custom entry</button>
+      <button class="tab-btn" id="tab-custom-btn">Create food</button>
     </div>
     <div id="panel-search" class="modal-panel">
       <input type="text" class="modal-search" id="food-search" placeholder="Search e.g. chicken, broccoli…" autocomplete="off">
@@ -1153,33 +1160,33 @@ html,body{height:100%;font-family:'Geist',sans-serif;background:var(--bg);oversc
     </div>
     <div id="panel-custom" class="modal-panel" style="display:none">
       <div class="custom-form">
-        <input type="text" class="custom-input" id="custom-name" placeholder="Food name (e.g. chicken casserole)">
+        <input type="text" class="custom-input" id="custom-name" placeholder="Food name (e.g. Brand X protein bar)">
         <div class="custom-field-group" style="margin-bottom:10px;">
-          <div class="custom-field-label">Quantity (g) — leave blank if unknown</div>
-          <input type="number" class="custom-input" id="custom-weight" placeholder="e.g. 200" min="0">
+          <div class="custom-field-label">Default serving size (g) — optional</div>
+          <input type="number" class="custom-input" id="custom-weight" placeholder="e.g. 45" min="0">
         </div>
         <div class="custom-label-row">
           <div class="custom-field-group">
-            <div class="custom-field-label">Calories (kcal)</div>
+            <div class="custom-field-label">Calories per 100g</div>
             <input type="number" class="custom-input" id="custom-kcal" placeholder="0" min="0">
           </div>
           <div class="custom-field-group">
-            <div class="custom-field-label">Protein (g)</div>
+            <div class="custom-field-label">Protein per 100g</div>
             <input type="number" class="custom-input" id="custom-protein" placeholder="0" min="0" step="0.1">
           </div>
         </div>
         <div class="custom-label-row">
           <div class="custom-field-group">
-            <div class="custom-field-label">Carbs (g)</div>
+            <div class="custom-field-label">Carbs per 100g</div>
             <input type="number" class="custom-input" id="custom-carbs" placeholder="0" min="0" step="0.1">
           </div>
           <div class="custom-field-group">
-            <div class="custom-field-label">Fat (g)</div>
+            <div class="custom-field-label">Fat per 100g</div>
             <input type="number" class="custom-input" id="custom-fat" placeholder="0" min="0" step="0.1">
           </div>
         </div>
         <div class="custom-field-group">
-          <div class="custom-field-label">Fibre (g)</div>
+          <div class="custom-field-label">Fibre per 100g</div>
           <input type="number" class="custom-input" id="custom-fibre" placeholder="0" min="0" step="0.1">
         </div>
       </div>

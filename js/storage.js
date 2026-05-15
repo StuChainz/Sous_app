@@ -102,3 +102,22 @@ function getFoodOverride(key){if(!key) return null;const o=getUserFoodOverrides(
 window.getUserFoodOverrides=getUserFoodOverrides;
 window.setFoodOverride=setFoodOverride;
 window.getFoodOverride=getFoodOverride;
+
+// ═══════════════════════════════════════════
+// USER CUSTOM FOODS
+// ═══════════════════════════════════════════
+function getCustomFoods(){try{return JSON.parse(localStorage.getItem('userCustomFoods')||'[]');}catch(e){return[];}}
+function saveCustomFoods(foods){localStorage.setItem('userCustomFoods',JSON.stringify(foods));}
+function addCustomFood(food){
+  const foods=getCustomFoods();
+  // Check for existing food with same name (case-insensitive) and update instead
+  const idx=foods.findIndex(f=>f.name.toLowerCase()===food.name.toLowerCase());
+  if(idx!==-1){foods[idx]={...foods[idx],...food};saveCustomFoods(foods);return foods[idx];}
+  const id='cf_'+Date.now()+'_'+Math.random().toString(36).slice(2,6);
+  const entry={...food,id,createdAt:Date.now()};
+  foods.unshift(entry);
+  saveCustomFoods(foods);
+  return entry;
+}
+window.getCustomFoods=getCustomFoods;
+window.addCustomFood=addCustomFood;

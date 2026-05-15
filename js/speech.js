@@ -9,7 +9,7 @@ let modalSelectedFood=null, modalActiveTab='search';
 let undoSnapshot=null;
 let _editBaseValues=null,_editFoodKey=null,_pendingOverride=null;
 let currentMealSection=null;
-let _inlineEditId=null;
+let _inlineEditId=null,_inlineManualMacros=false,_confirmManualMacros=false;
 
 function snapshotMeal(){undoSnapshot=meal.map(i=>({...i}));updateUndoBtn();}
 function updateUndoBtn(){const r=document.getElementById('undo-row');if(r)r.style.display=undoSnapshot?'flex':'none';}
@@ -179,6 +179,7 @@ function renderCurrentMeal(){
   meal.forEach(i=>{if(!i.id)i.id=nextIngId++;});
   const t=sumMacros(meal);
   container.style.display='block';
+  container.style.overflow=_inlineEditId?'visible':'hidden';
   container.innerHTML='';
   if(typeof currentQuickMode!=='undefined'&&currentQuickMode){
     const qsRow=document.createElement('div');
@@ -203,20 +204,22 @@ function renderCurrentMeal(){
   meal.forEach(i=>{
     const row=document.createElement('div');
     if(_inlineEditId===i.id){
-      row.style.cssText='display:flex;align-items:center;gap:6px;padding:6px 12px;border-bottom:.5px solid var(--border);background:var(--bg-2);';
+      row.style.cssText='display:flex;flex-direction:column;padding:6px 12px;border-bottom:.5px solid var(--border);background:var(--bg-2);gap:6px;';
+      // Row 1: name + weight stepper
+      const topRow=document.createElement('div');
+      topRow.style.cssText='display:flex;align-items:center;gap:6px;';
       const nameIn=document.createElement('input');
       nameIn.type='text'; nameIn.value=i.name; nameIn.id='ile-name';
       nameIn.style.cssText='flex:1;min-width:0;font-size:13px;color:var(--text);background:var(--card);border:.5px solid var(--accent);border-radius:6px;padding:4px 7px;outline:none;font-family:inherit;';
       const wtIn=document.createElement('input');
       wtIn.type='number'; wtIn.value=i.weight??''; wtIn.placeholder='g'; wtIn.id='ile-weight';
       wtIn.style.cssText='width:52px;font-size:13px;color:var(--text);background:var(--card);border:.5px solid var(--border);border-radius:6px;padding:4px 6px;outline:none;font-family:inherit;text-align:center;';
+      const btnStyle='background:var(--card);border:.5px solid var(--border);border-radius:6px;min-width:38px;height:34px;font-size:20px;line-height:1;cursor:pointer;color:var(--text);flex-shrink:0;padding:0;';
       const minusBtn=document.createElement('button');
-      minusBtn.textContent='−'; minusBtn.type='button';
-      minusBtn.style.cssText='background:var(--card);border:.5px solid var(--border);border-radius:6px;min-width:38px;height:34px;font-size:20px;line-height:1;cursor:pointer;color:var(--text);flex-shrink:0;padding:0;';
+      minusBtn.textContent='−'; minusBtn.type='button'; minusBtn.style.cssText=btnStyle;
       minusBtn.addEventListener('click',()=>stepIngWeight(i.id,-10));
       const plusBtn=document.createElement('button');
-      plusBtn.textContent='+'; plusBtn.type='button';
-      plusBtn.style.cssText='background:var(--card);border:.5px solid var(--border);border-radius:6px;min-width:38px;height:34px;font-size:20px;line-height:1;cursor:pointer;color:var(--text);flex-shrink:0;padding:0;';
+      plusBtn.textContent='+'; plusBtn.type='button'; plusBtn.style.cssText=btnStyle;
       plusBtn.addEventListener('click',()=>stepIngWeight(i.id,+10));
       const confirmBtn=document.createElement('button');
       confirmBtn.textContent='✓';
@@ -232,7 +235,26 @@ function renderCurrentMeal(){
       };
       nameIn.addEventListener('keydown',handleKey);
       wtIn.addEventListener('keydown',handleKey);
-      row.appendChild(nameIn); row.appendChild(minusBtn); row.appendChild(wtIn); row.appendChild(plusBtn); row.appendChild(confirmBtn); row.appendChild(delBtn);
+      topRow.appendChild(nameIn); topRow.appendChild(minusBtn); topRow.appendChild(wtIn); topRow.appendChild(plusBtn); topRow.appendChild(confirmBtn); topRow.appendChild(delBtn);
+      // Row 2: macro inputs
+      const macroRow=document.createElement('div');
+      macroRow.style.cssText='display:flex;gap:4px;';
+      const ileMacroDefs=[{id:'ile-kcal',label:'kcal',val:i.kcal??0,accent:true},{id:'ile-protein',label:'P',val:i.protein??0},{id:'ile-carbs',label:'C',val:i.carbs??0},{id:'ile-fat',label:'F',val:i.fat??0}];
+      ileMacroDefs.forEach(({id,label,val,accent})=>{
+        const wrap=document.createElement('div');
+        wrap.style.cssText='flex:1;text-align:center;background:var(--card);border:.5px solid var(--border);border-radius:8px;padding:4px;';
+        const inp=document.createElement('input');
+        inp.type='number'; inp.id=id; inp.value=val;
+        inp.style.cssText='width:100%;text-align:center;border:none;background:transparent;font-family:"Geist Mono",monospace;font-size:13px;font-weight:500;outline:none;padding:0;color:'+(accent?'var(--accent)':'var(--text)')+';-moz-appearance:textfield;';
+        inp.addEventListener('keydown',handleKey);
+        inp.addEventListener('input',()=>{_inlineManualMacros=true;});
+        const lbl=document.createElement('div');
+        lbl.textContent=label;
+        lbl.style.cssText='font-size:9px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.08em;font-weight:600;margin-top:1px;';
+        wrap.appendChild(inp); wrap.appendChild(lbl);
+        macroRow.appendChild(wrap);
+      });
+      row.appendChild(topRow); row.appendChild(macroRow);
       container.appendChild(row);
       requestAnimationFrame(()=>{const w=document.getElementById('ile-weight');if(w){w.focus();w.select();}});
     } else {
@@ -246,7 +268,7 @@ function renderCurrentMeal(){
       const editBtn=document.createElement('button');
       editBtn.title='Edit'; editBtn.innerHTML='<i class="ti ti-pencil"></i>';
       editBtn.style.cssText='background:none;border:none;padding:2px 5px;cursor:pointer;color:var(--text-muted);font-size:14px;';
-      editBtn.addEventListener('click',()=>{snapshotMeal();_inlineEditId=i.id;renderCurrentMeal();});
+      editBtn.addEventListener('click',()=>{snapshotMeal();_inlineEditId=i.id;_inlineManualMacros=false;renderCurrentMeal();});
       const delBtn=document.createElement('button');
       delBtn.textContent='✕'; delBtn.title='Remove';
       delBtn.style.cssText='background:none;border:none;padding:2px 6px;cursor:pointer;color:var(--text-muted);font-size:15px;';
@@ -378,23 +400,41 @@ function setMicState(state){
 // ═══════════════════════════════════════════
 function showConfirm(parsed){
   pendingFood=parsed;
+  _confirmManualMacros=false;
   document.getElementById('confirm-name').textContent=parsed.name;
   document.getElementById('confirm-weight').textContent=itemWeightLabel(parsed)+(parsed.customMacro?'':' · raw');
   document.getElementById('confirm-icon').className='ti '+(parsed.icon||'ti-meat');
-  document.getElementById('c-kcal').textContent=parsed.kcal;
-  document.getElementById('c-protein').textContent=parsed.protein+'g';
-  document.getElementById('c-carbs').textContent=parsed.carbs+'g';
-  document.getElementById('c-fat').textContent=parsed.fat+'g';
+  const editable=!parsed.weightSpecified&&!!parsed.rawFood;
+  const cKcal=document.getElementById('c-kcal'),cProt=document.getElementById('c-protein'),cCarbs=document.getElementById('c-carbs'),cFat=document.getElementById('c-fat');
+  [cKcal,cProt,cCarbs,cFat].forEach((el,idx)=>{
+    if(!el) return;
+    const vals=[parsed.kcal,parsed.protein,parsed.carbs,parsed.fat];
+    el.value=vals[idx];
+    el.readOnly=!editable;
+    el.tabIndex=editable?0:-1;
+    el.oninput=editable?()=>{_confirmManualMacros=true;}:null;
+  });
   document.getElementById('pill-raw').className='toggle-pill active';
   document.getElementById('pill-cooked').className='toggle-pill inactive';
   const qtyRow=document.getElementById('confirm-qty-row');
   const qtyInput=document.getElementById('confirm-qty-input');
-  if(!parsed.weightSpecified&&parsed.rawFood){
+  if(editable){
     qtyRow.style.display='block';
     qtyInput.value=parsed.weight;
+    qtyInput.oninput=()=>{
+      if(_confirmManualMacros||!pendingFood?.rawFood) return;
+      const g=parseFloat(qtyInput.value);
+      if(!g||g<=0) return;
+      const food=pendingFood.rawFood,r=g/food.w;
+      if(cKcal) cKcal.value=Math.round(food.kcal*r);
+      if(cProt) cProt.value=Math.round(food.p*r*10)/10;
+      if(cCarbs) cCarbs.value=Math.round(food.c*r*10)/10;
+      if(cFat) cFat.value=Math.round(food.f*r*10)/10;
+    };
   } else {
     qtyRow.style.display='none';
     qtyInput.value='';
+    qtyInput.oninput=null;
   }
   showLogScreen('confirm');
   pauseAlwaysOn();
@@ -421,16 +461,32 @@ function doConfirm(){
   if(qtyRow.style.display!=='none'&&pendingFood.rawFood){
     const grams=parseFloat(qtyInput.value);
     if(grams&&grams>0){
-      const food=pendingFood.rawFood,r=grams/food.w;
       pendingFood.weight=Math.round(grams);
-      pendingFood.kcal=Math.round(food.kcal*r);
-      pendingFood.protein=Math.round(food.p*r*10)/10;
-      pendingFood.carbs=Math.round(food.c*r*10)/10;
-      pendingFood.fat=Math.round(food.f*r*10)/10;
-      pendingFood.fibre=Math.round((food.fi||0)*r*10)/10;
+      if(_confirmManualMacros){
+        pendingFood.kcal=parseFloat(document.getElementById('c-kcal')?.value)||0;
+        pendingFood.protein=parseFloat(document.getElementById('c-protein')?.value)||0;
+        pendingFood.carbs=parseFloat(document.getElementById('c-carbs')?.value)||0;
+        pendingFood.fat=parseFloat(document.getElementById('c-fat')?.value)||0;
+        // Override prompt when macros differ from DB food
+        const food=pendingFood.rawFood,r=grams/food.w;
+        const dbKcal=Math.round(food.kcal*r);
+        if(pendingFood.kcal!==dbKcal){
+          const r2=100/pendingFood.weight;
+          _pendingOverride={key:food.name,name:pendingFood.name,macros:{kcal:Math.round(pendingFood.kcal*r2),protein:Math.round(pendingFood.protein*r2*10)/10,carbs:Math.round(pendingFood.carbs*r2*10)/10,fat:Math.round(pendingFood.fat*r2*10)/10,fibre:Math.round((pendingFood.fibre||0)*r2*10)/10}};
+          setTimeout(()=>_showOverridePrompt(pendingFood.name||food.name),900);
+        }
+      } else {
+        const food=pendingFood.rawFood,r=grams/food.w;
+        pendingFood.kcal=Math.round(food.kcal*r);
+        pendingFood.protein=Math.round(food.p*r*10)/10;
+        pendingFood.carbs=Math.round(food.c*r*10)/10;
+        pendingFood.fat=Math.round(food.f*r*10)/10;
+        pendingFood.fibre=Math.round((food.fi||0)*r*10)/10;
+      }
     }
   }
   snapshotMeal(); meal.push(pendingFood); _persistDraft();
+  _confirmManualMacros=false;
   const name=pendingFood.name;
   speak(itemQueue.length ? 'Added. Next.' : 'Added.',()=>{
     pendingFood=null;
@@ -521,6 +577,26 @@ function resolveAmbig(food,amount){
 // MULTI-CONFIRM (batch ingredient review)
 // ═══════════════════════════════════════════
 let pendingBatch=[];
+function _updateEntryMacros(entry){
+  if(entry.manualMacros) return;
+  const food=entry.ambiguous?entry.options[entry.selectedIdx]:entry.food;
+  const w=Math.max(1,Math.round(entry.weight||1));
+  if(food){
+    const r=w/food.w;
+    entry.editKcal=Math.round(food.kcal*r);
+    entry.editProtein=Math.round(food.p*r*10)/10;
+    entry.editCarbs=Math.round(food.c*r*10)/10;
+    entry.editFat=Math.round(food.f*r*10)/10;
+  } else {
+    const ri=entry.rawItem||{};
+    const origW=ri.weight||w;
+    const r=origW>0?w/origW:1;
+    entry.editKcal=Math.round((ri.kcal||0)*r);
+    entry.editProtein=Math.round((ri.protein||0)*r*10)/10;
+    entry.editCarbs=Math.round((ri.carbs||0)*r*10)/10;
+    entry.editFat=Math.round((ri.fat||0)*r*10)/10;
+  }
+}
 function batchNeedsMultiConfirm(results){
   const food=results.filter(r=>!r.command);
   if(!food.length) return false;
@@ -530,8 +606,11 @@ function batchNeedsMultiConfirm(results){
 }
 function showMultiConfirm(results){
   pendingBatch=results.filter(r=>!r.command).map(r=>{
-    if(r.ambiguous) return{ambiguous:true,label:r.label,options:r.matches,selectedIdx:0,weight:r.amount||100};
-    return{ambiguous:false,label:r.name,options:null,food:r.rawFood||null,weight:r.weight||r.rawFood?.w||100,rawItem:r};
+    let entry;
+    if(r.ambiguous) entry={ambiguous:true,label:r.label,options:r.matches,selectedIdx:0,weight:r.amount||100,manualMacros:false};
+    else entry={ambiguous:false,label:r.name,options:null,food:r.rawFood||null,weight:r.weight||r.rawFood?.w||100,rawItem:r,manualMacros:false};
+    _updateEntryMacros(entry);
+    return entry;
   });
   renderMultiConfirm();
   showLogScreen('multi-confirm');
@@ -551,7 +630,7 @@ function renderMultiConfirm(){
         chip.type='button'; chip.textContent=food.name;
         const sel=fi===entry.selectedIdx;
         chip.style.cssText='font-size:12px;padding:5px 11px;border-radius:20px;cursor:pointer;font-family:inherit;border:.5px solid '+(sel?'var(--accent);background:var(--accent);color:#fff;':'var(--border);background:var(--card-2);color:var(--text);');
-        chip.addEventListener('click',()=>{entry.selectedIdx=fi;renderMultiConfirm();});
+        chip.addEventListener('click',()=>{entry.selectedIdx=fi;_updateEntryMacros(entry);renderMultiConfirm();});
         wrap.appendChild(chip);
       });
       card.appendChild(wrap);
@@ -565,14 +644,14 @@ function renderMultiConfirm(){
     const btnStyle='border:.5px solid var(--border);border-radius:6px;min-width:38px;height:34px;font-size:20px;line-height:1;cursor:pointer;color:var(--text);flex-shrink:0;padding:0;background:var(--card-2);';
     const minusBtn=document.createElement('button');
     minusBtn.textContent='−'; minusBtn.type='button'; minusBtn.style.cssText=btnStyle;
-    minusBtn.addEventListener('click',()=>{entry.weight=Math.max(1,(entry.weight||10)-10);renderMultiConfirm();});
+    minusBtn.addEventListener('click',()=>{entry.weight=Math.max(1,(entry.weight||10)-10);_updateEntryMacros(entry);renderMultiConfirm();});
     const wtIn=document.createElement('input');
     wtIn.type='number'; wtIn.value=Math.round(entry.weight); wtIn.min=1;
     wtIn.style.cssText='width:60px;text-align:center;font-size:14px;background:var(--card);border:.5px solid var(--border);border-radius:6px;padding:5px 6px;color:var(--text);font-family:inherit;outline:none;';
-    wtIn.addEventListener('change',()=>{entry.weight=Math.max(1,parseFloat(wtIn.value)||1);});
+    wtIn.addEventListener('change',()=>{entry.weight=Math.max(1,parseFloat(wtIn.value)||1);_updateEntryMacros(entry);renderMultiConfirm();});
     const plusBtn=document.createElement('button');
     plusBtn.textContent='+'; plusBtn.type='button'; plusBtn.style.cssText=btnStyle;
-    plusBtn.addEventListener('click',()=>{entry.weight=(entry.weight||0)+10;renderMultiConfirm();});
+    plusBtn.addEventListener('click',()=>{entry.weight=(entry.weight||0)+10;_updateEntryMacros(entry);renderMultiConfirm();});
     const gLbl=document.createElement('span');
     gLbl.textContent='g'; gLbl.style.cssText='font-size:13px;color:var(--text-muted);margin-right:auto;';
     const rmBtn=document.createElement('button');
@@ -581,6 +660,24 @@ function renderMultiConfirm(){
     rmBtn.addEventListener('click',()=>{pendingBatch.splice(idx,1);if(!pendingBatch.length){showLogScreen('listening');return;}renderMultiConfirm();});
     qRow.appendChild(minusBtn); qRow.appendChild(wtIn); qRow.appendChild(plusBtn); qRow.appendChild(gLbl); qRow.appendChild(rmBtn);
     card.appendChild(qRow);
+    // Macro inputs row
+    const macroRow=document.createElement('div');
+    macroRow.style.cssText='display:flex;gap:4px;margin-top:8px;';
+    const mcMacroDefs=[{key:'editKcal',label:'kcal',accent:true},{key:'editProtein',label:'P'},{key:'editCarbs',label:'C'},{key:'editFat',label:'F'}];
+    mcMacroDefs.forEach(({key,label,accent})=>{
+      const wrap=document.createElement('div');
+      wrap.style.cssText='flex:1;text-align:center;background:var(--bg-2);border:.5px solid var(--border);border-radius:8px;padding:5px 4px;';
+      const inp=document.createElement('input');
+      inp.type='number'; inp.value=entry[key]??0;
+      inp.style.cssText='width:100%;text-align:center;border:none;background:transparent;font-family:"Geist Mono",monospace;font-size:13px;font-weight:500;outline:none;padding:0;-moz-appearance:textfield;color:'+(accent?'var(--accent)':'var(--text)')+';';
+      inp.addEventListener('input',()=>{entry.manualMacros=true;entry[key]=parseFloat(inp.value)||0;});
+      const lbl=document.createElement('div');
+      lbl.textContent=label;
+      lbl.style.cssText='font-size:9px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.08em;font-weight:600;margin-top:2px;';
+      wrap.appendChild(inp); wrap.appendChild(lbl);
+      macroRow.appendChild(wrap);
+    });
+    card.appendChild(macroRow);
     list.appendChild(card);
   });
   const addBtn=document.getElementById('mc-add-btn');
@@ -589,11 +686,20 @@ function renderMultiConfirm(){
 function commitMultiConfirm(){
   if(!pendingBatch.length){showLogScreen('listening');return;}
   snapshotMeal();
+  let overrideCandidate=null;
   pendingBatch.forEach(entry=>{
     const food=entry.ambiguous?entry.options[entry.selectedIdx]:entry.food;
     const w=Math.max(1,Math.round(entry.weight));
     let item;
-    if(food){
+    if(entry.manualMacros){
+      const base=food?{name:food.name,icon:food.icon,rawFood:food}:{...(entry.rawItem||{})};
+      item={...base,weight:w,kcal:entry.editKcal||0,protein:entry.editProtein||0,carbs:entry.editCarbs||0,fat:entry.editFat||0,fibre:food?Math.round((food.fi||0)*w/food.w*10)/10:(entry.rawItem?.fibre||0)};
+      if(food&&w){
+        const r2=100/w;
+        const dbKcal=Math.round(food.kcal*w/food.w);
+        if((entry.editKcal||0)!==dbKcal) overrideCandidate={key:food.name,name:food.name,macros:{kcal:Math.round((entry.editKcal||0)*r2),protein:Math.round((entry.editProtein||0)*r2*10)/10,carbs:Math.round((entry.editCarbs||0)*r2*10)/10,fat:Math.round((entry.editFat||0)*r2*10)/10,fibre:0}};
+      }
+    } else if(food){
       const r=w/food.w;
       item={name:food.name,weight:w,kcal:Math.round(food.kcal*r),protein:Math.round(food.p*r*10)/10,carbs:Math.round(food.c*r*10)/10,fat:Math.round(food.f*r*10)/10,fibre:Math.round((food.fi||0)*r*10)/10,icon:food.icon,rawFood:food};
     } else {
@@ -605,6 +711,7 @@ function commitMultiConfirm(){
     item.id=nextIngId++; meal.push(item);
   });
   _persistDraft();
+  if(overrideCandidate){_pendingOverride=overrideCandidate;setTimeout(()=>_showOverridePrompt(overrideCandidate.name),600);}
   const count=pendingBatch.length; pendingBatch=[];
   renderCurrentMeal(); updateHome();
   showLogScreen('listening');
@@ -669,6 +776,15 @@ function openCustomEntry(){
   switchModalTab('custom');
   setTimeout(()=>document.getElementById('custom-name').focus(),150);
 }
+function openCreateCustomFood(query){
+  openAddModal();
+  switchModalTab('custom');
+  setTimeout(()=>{
+    const nameEl=document.getElementById('custom-name');
+    if(nameEl){nameEl.value=query||'';nameEl.focus();}
+    if(query) setTimeout(()=>document.getElementById('custom-kcal').focus(),80);
+  },150);
+}
 function closeAddModal(){
   const m=document.getElementById('add-modal');
   m.classList.remove('show');
@@ -685,18 +801,37 @@ function switchModalTab(tab){
 function renderFoodResults(query){
   const container=document.getElementById('food-results');
   const q=query.toLowerCase().trim();
-  const matches=q?FOODS.filter(f=>f.name.toLowerCase().includes(q)||(f.kw&&f.kw.some(k=>k.includes(q)))):FOODS.slice(0,20);
+  const customs=typeof getCustomFoods==='function'?getCustomFoods():[];
+  const customMatches=q?customs.filter(f=>f.name.toLowerCase().includes(q)):customs.slice(0,5);
+  const dbMatches=q?FOODS.filter(f=>f.name.toLowerCase().includes(q)||(f.kw&&f.kw.some(k=>k.includes(q)))):FOODS.slice(0,20);
   container.innerHTML='';
-  matches.forEach(food=>{
+  customMatches.forEach(food=>{
+    const div=document.createElement('div');
+    div.className='food-result-item'+(food===modalSelectedFood?' selected':'');
+    div.innerHTML=`<span class="fri-name">${food.name}</span><span class="fri-custom-badge">custom</span><span class="fri-kcal">${food.kcal} kcal/100g</span>`;
+    div.addEventListener('click',()=>selectFood(food));
+    container.appendChild(div);
+  });
+  dbMatches.forEach(food=>{
     const div=document.createElement('div');
     div.className='food-result-item'+(food===modalSelectedFood?' selected':'');
     div.innerHTML=`<span class="fri-name">${food.name}</span><span class="fri-kcal">${food.kcal} kcal/100g</span>`;
     div.addEventListener('click',()=>selectFood(food));
     container.appendChild(div);
   });
+  if(q&&customMatches.length===0&&dbMatches.length===0){
+    const btn=document.createElement('button');
+    btn.type='button';
+    btn.className='create-custom-food-btn';
+    btn.textContent='+ Create "'+query+'" as custom food';
+    btn.addEventListener('click',()=>openCreateCustomFood(query));
+    container.appendChild(btn);
+  }
 }
 function selectFood(food){
   modalSelectedFood=food;
+  const gramInput=document.getElementById('gram-input');
+  if(gramInput&&food.defaultServing) gramInput.value=food.defaultServing;
   document.querySelectorAll('.food-result-item').forEach(el=>el.classList.toggle('selected',el.querySelector('.fri-name').textContent===food.name));
   document.getElementById('spb-name').textContent=food.name;
   document.getElementById('spb-per100').textContent=`per 100g · ${food.kcal} kcal · ${food.p}g P · ${food.c}g C · ${food.f}g F`;
@@ -731,16 +866,22 @@ function addManualIngredient(){
   } else {
     const name=document.getElementById('custom-name').value.trim();
     if(!name){showToast('Enter a food name');return;}
-    const weightRaw=document.getElementById('custom-weight').value;
-    const weight=weightRaw!==''?parseFloat(weightRaw)||null:null;
-    const kcal=parseFloat(document.getElementById('custom-kcal').value)||0;
-    const protein=parseFloat(document.getElementById('custom-protein').value)||0;
-    const carbs=parseFloat(document.getElementById('custom-carbs').value)||0;
-    const fat=parseFloat(document.getElementById('custom-fat').value)||0;
-    const fibre=parseFloat(document.getElementById('custom-fibre').value)||0;
-    snapshotMeal(); meal.push({id:nextIngId++,name,weight,kcal,protein,carbs,fat,fibre,icon:'ti-clipboard'});
+    const servingRaw=document.getElementById('custom-weight').value;
+    const serving=servingRaw!==''?parseFloat(servingRaw)||100:100;
+    const kcalPer100=parseFloat(document.getElementById('custom-kcal').value)||0;
+    const proteinPer100=parseFloat(document.getElementById('custom-protein').value)||0;
+    const carbsPer100=parseFloat(document.getElementById('custom-carbs').value)||0;
+    const fatPer100=parseFloat(document.getElementById('custom-fat').value)||0;
+    const fibrePer100=parseFloat(document.getElementById('custom-fibre').value)||0;
+    const customFood=typeof addCustomFood==='function'?addCustomFood({
+      name,w:100,kcal:kcalPer100,p:proteinPer100,c:carbsPer100,f:fatPer100,fi:fibrePer100,
+      defaultServing:servingRaw!==''?serving:undefined,icon:'ti-clipboard'
+    }):null;
+    const r=serving/100;
+    snapshotMeal();
+    meal.push({id:nextIngId++,name,weight:serving,kcal:Math.round(kcalPer100*r),protein:Math.round(proteinPer100*r*10)/10,carbs:Math.round(carbsPer100*r*10)/10,fat:Math.round(fatPer100*r*10)/10,fibre:Math.round(fibrePer100*r*10)/10,icon:'ti-clipboard',rawFood:customFood||undefined});
     _persistDraft();
-    showToast('Added '+name+' ✓');
+    showToast('Saved & added '+name+' ✓');
   }
   closeAddModal();
   showLogScreen('listening');
@@ -851,7 +992,14 @@ function stepIngWeight(id,delta){
   const cur=item.weight||0;
   const next=Math.max(1,cur+delta);
   if(next===cur) return;
-  if(cur>0){
+  if(_inlineManualMacros){
+    // Persist whatever the user typed in macro inputs before re-render
+    const kEl=document.getElementById('ile-kcal'),pEl=document.getElementById('ile-protein'),cEl=document.getElementById('ile-carbs'),fEl=document.getElementById('ile-fat');
+    if(kEl) item.kcal=parseFloat(kEl.value)||0;
+    if(pEl) item.protein=parseFloat(pEl.value)||0;
+    if(cEl) item.carbs=parseFloat(cEl.value)||0;
+    if(fEl) item.fat=parseFloat(fEl.value)||0;
+  } else if(cur>0){
     const r=next/cur;
     item.kcal=Math.round(item.kcal*r*10)/10;
     item.protein=Math.round(item.protein*r*10)/10;
@@ -869,7 +1017,12 @@ function commitInlineEdit(id){
   if(!newName){showToast('Name required');return;}
   const wtVal=document.getElementById('ile-weight')?.value;
   const newWeight=wtVal!=null&&wtVal!==''?parseFloat(wtVal)||null:null;
-  if(newWeight!==null&&item.weight&&item.weight>0&&newWeight!==item.weight){
+  if(_inlineManualMacros){
+    item.kcal=parseFloat(document.getElementById('ile-kcal')?.value)||0;
+    item.protein=parseFloat(document.getElementById('ile-protein')?.value)||0;
+    item.carbs=parseFloat(document.getElementById('ile-carbs')?.value)||0;
+    item.fat=parseFloat(document.getElementById('ile-fat')?.value)||0;
+  } else if(newWeight!==null&&item.weight&&item.weight>0&&newWeight!==item.weight){
     const r=newWeight/item.weight;
     item.kcal=Math.round(item.kcal*r*10)/10;
     item.protein=Math.round(item.protein*r*10)/10;
@@ -879,6 +1032,7 @@ function commitInlineEdit(id){
   }
   item.name=newName; item.weight=newWeight;
   _persistDraft();
+  _inlineManualMacros=false;
   _inlineEditId=null; renderCurrentMeal(); showToast('Updated ✓');
   if(item.weight&&!item.customMacro){
     const food=item.rawFood||(typeof findFoodByText==='function'?findFoodByText(item.name):null);
