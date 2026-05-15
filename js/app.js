@@ -148,7 +148,7 @@ function startLogWithRecentIngredientByName(name,section){
   if(r) startLogWithRecentIngredient(r,section);
 }
 function logUsualMealByIndex(section,idx){
-  const usuals=(typeof getUsualMeals==='function'?getUsualMeals():{})[section]||[];
+  const usuals=typeof getUsualMealsForSection==='function'?getUsualMealsForSection(section):[];
   const u=usuals[idx];
   if(!u||!u.ingredients||!u.ingredients.length) return;
   meal.length=0;
@@ -172,8 +172,6 @@ function renderHomeMealSections(meals){
     (buckets[sk]||buckets.snacks).push(m);
   });
   Object.keys(buckets).forEach(k=>buckets[k].sort((a,b)=>new Date(a.time)-new Date(b.time)));
-  const usualsBySection=typeof getUsualMeals==='function'?getUsualMeals():{};
-
   return HOME_MEAL_SECTIONS.map(({key,label})=>{
     const arr=buckets[key];
     const inner=arr.length?arr.map(homeMealRowHtml).join(''):'<div class="home-meal-empty">Nothing logged yet</div>';
@@ -182,7 +180,7 @@ function renderHomeMealSections(meals){
     let quickBlocks='';
     if(!hasLogged){
       // 1. Usual meals grid (up to 3)
-      const usuals=(usualsBySection[key]||[]).slice(0,3);
+      const usuals=(typeof getUsualMealsForSection==='function'?getUsualMealsForSection(key):(usualsBySection[key]||[])).slice(0,3);
       if(usuals.length){
         const cards=usuals.map((u,i)=>{
           const span=usuals.length===3&&i===2?' style="grid-column:1/-1;min-height:auto;"':'';

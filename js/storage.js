@@ -60,5 +60,10 @@ function updateUsualMeals(mealObj,typedName=''){
   usual[section]=usual[section].slice(0,5);
   saveUsualMeals(usual);
 }
+function getUsualMealsForSection(section){
+  const usual=getUsualMeals();
+  return (usual[section]||[]).filter(u=>!u.section||u.section===section);
+}
 window.getUsualMeals=getUsualMeals;
+window.getUsualMealsForSection=getUsualMealsForSection;
 window.updateUsualMeals=updateUsualMeals;
