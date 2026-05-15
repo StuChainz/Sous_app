@@ -151,16 +151,25 @@ function logUsualMealByIndex(section,idx){
   const usuals=typeof getUsualMealsForSection==='function'?getUsualMealsForSection(section):[];
   const u=usuals[idx];
   if(!u||!u.ingredients||!u.ingredients.length) return;
-  meal.length=0;
-  itemQueue.length=0;
-  u.ingredients.forEach(i=>meal.push({...i,id:nextIngId++}));
-  currentMealSection=u.section||section;
-  currentEditMealId=null; currentEditMealDate=null; currentQuickMode=false;
-  // Clear name input so saveMealToLog doesn't pick up a stale typed name
-  const _ni=document.getElementById('sum-meal-name'); if(_ni) _ni.value='';
-  saveMealToLog();  // updates useCount+lastUsed via updateUsualMeals, then re-sorts in storage
-  meal.length=0;
-  const mt=sumMacros(u.ingredients);
+  const log=getLog();
+  const date=selectedLogDate||localDateStr();
+  const mealSection=section||u.section||getDefaultQuickAddSection(date);
+  const ingredients=u.ingredients.map((ing,i)=>({...ing,id:Date.now()+i}));
+  const mt=sumMacros(ingredients);
+  const mealObj={
+    id:Date.now(),
+    name:u.name,
+    time:new Date().toISOString(),
+    section:mealSection,
+    ingredients,
+    totals:{kcal:Math.round(mt.kcal),protein:Math.round(mt.protein*10)/10,carbs:Math.round(mt.carbs*10)/10,fat:Math.round(mt.fat*10)/10,fibre:Math.round(mt.fibre*10)/10}
+  };
+  if(!log[date]) log[date]={meals:[],totals:{kcal:0,protein:0,carbs:0,fat:0,fibre:0}};
+  log[date].meals.push(mealObj);
+  log[date].totals=sumMacros(log[date].meals.map(m=>m.totals));
+  saveLog(log);
+  if(typeof updateUsualMeals==='function') updateUsualMeals(mealObj,u.name);
+  if(typeof addToRecentIngredients==='function') ingredients.forEach(i=>addToRecentIngredients(i));
   showToast(`${u.name} · ${Math.round(mt.kcal)} kcal saved`,2500);
   renderHome();
 }

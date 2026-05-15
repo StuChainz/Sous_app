@@ -755,8 +755,8 @@ function commitMultiConfirm(){
   _persistDraft();
   if(overrideCandidate){_pendingOverride=overrideCandidate;setTimeout(()=>_showOverridePrompt(overrideCandidate.name),600);}
   const count=pendingBatch.length; pendingBatch=[];
-  renderCurrentMeal(); updateHome();
   showLogScreen('listening');
+  updateHome();
   showToast('Added '+count+' ingredient'+(count!==1?'s':'')+' ✓');
   setTimeout(restartAlwaysOn,400);
 }
@@ -777,6 +777,8 @@ function showSummary(announce=true){
   if(sel) sel.value=currentMealSection;
   const nameInput=document.getElementById('sum-meal-name');
   if(nameInput&&(announce||!nameInput.value.trim())) nameInput.value=generateMealNameFromIngredients(meal,currentMealSection);
+  const saveUsual=document.getElementById('sum-save-usual');
+  if(saveUsual&&announce) saveUsual.checked=false;
   const t=sumMacros(meal);
   document.getElementById('sum-kcal').textContent=Math.round(t.kcal);
   document.getElementById('sum-protein').textContent=Math.round(t.protein)+'g';
@@ -1115,7 +1117,7 @@ function generateMealNameFromIngredients(ingredients,fallbackSection){
   if(names.length===3) return names[0]+', '+names[1]+' + '+names[2];
   return names[0]+' + '+(names.length-1)+' items';
 }
-function saveMealToLog(){
+function saveMealToLog(saveAsUsual=false){
   const date=(typeof selectedLogDate!=='undefined'?selectedLogDate:todayStr()),log=getLog();
   if(!log[date]) log[date]={meals:[],totals:{kcal:0,protein:0,carbs:0,fat:0,fibre:0}};
   const mt=sumMacros(meal);
@@ -1140,7 +1142,7 @@ function saveMealToLog(){
   }
   saveLog(log);
   if(typeof clearDraft==='function') clearDraft();
-  window.updateUsualMeals(mealObj,typedName);
+  if(saveAsUsual&&window.updateUsualMeals) window.updateUsualMeals(mealObj,typedName);
   meal.forEach(i=>window.addToRecentIngredients(i));
 }
 
@@ -1305,7 +1307,13 @@ function wireLogButtons(){
   document.getElementById('add-custom-btn').addEventListener('click',()=>openCustomEntry());
   document.getElementById('add-more-btn').addEventListener('click',()=>openAddModal());
   document.getElementById('sum-section-select').addEventListener('change',e=>{currentMealSection=e.target.value;});
-  document.getElementById('save-meal-btn').addEventListener('click',()=>{saveMealToLog();showToast('Meal saved! 🎉',2500);currentQuickMode=false;setTimeout(()=>{meal=[];itemQueue=[];nextIngId=1;stopAllRec();switchTab('home');},1800);});
+  document.getElementById('save-meal-btn').addEventListener('click',()=>{
+    const saveAsUsual=!!document.getElementById('sum-save-usual')?.checked;
+    saveMealToLog(saveAsUsual);
+    showToast(saveAsUsual?'Meal logged and saved for quick add 🎉':'Meal logged 🎉',2500);
+    currentQuickMode=false;
+    setTimeout(()=>{meal=[];itemQueue=[];nextIngId=1;stopAllRec();switchTab('home');},1800);
+  });
   // Add modal
   document.getElementById('modal-close-btn').addEventListener('click',closeAddModal);
   document.getElementById('add-modal').addEventListener('click',e=>{if(e.target===document.getElementById('add-modal'))closeAddModal();});

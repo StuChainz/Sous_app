@@ -751,7 +751,11 @@ html,body{height:100%;font-family:'Geist',sans-serif;background:var(--bg);oversc
             <option value="supplements">Supplements</option>
           </select>
         </div>
-        <button class="btn-primary" id="save-meal-btn">Save meal</button>
+        <label style="display:flex;align-items:flex-start;gap:9px;margin:12px 0 10px;font-size:13px;color:var(--text-muted);line-height:1.35;">
+          <input id="sum-save-usual" type="checkbox" style="margin-top:2px;accent-color:var(--accent);">
+          <span>Save as custom meal for quick add</span>
+        </label>
+        <button class="btn-primary" id="save-meal-btn">Log meal</button>
       </div>
 
     </div>
@@ -1335,11 +1339,11 @@ html,body{height:100%;font-family:'Geist',sans-serif;background:var(--bg);oversc
 <script src="js/core/totals.js?v=8"></script>
 <script src="js/food-data.js?v=8"></script>
 <script src="js/parser.js?v=8"></script>
-<script src="js/speech.js?v=8"></script>
+<script src="js/speech.js?v=9"></script>
 <script src="js/history.js?v=8"></script>
 <script src="js/profile.js?v=8"></script>
 <script src="js/recipes.js?v=8"></script>
-<script src="js/app.js?v=8"></script>
+<script src="js/app.js?v=10"></script>
 
 </body>
 </html>
