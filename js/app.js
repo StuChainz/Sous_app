@@ -154,7 +154,11 @@ function logUsualMealByIndex(section,idx){
   const log=getLog();
   const date=selectedLogDate||localDateStr();
   const mealSection=section||u.section||getDefaultQuickAddSection(date);
-  const ingredients=u.ingredients.map((ing,i)=>({...ing,id:Date.now()+i}));
+  const ingredients=u.ingredients.map((ing,i)=>{
+    const item={...ing,serving:ing.serving?{...ing.serving}:undefined,id:Date.now()+i};
+    if(typeof syncServingFromWeight==='function') syncServingFromWeight(item);
+    return item;
+  });
   const mt=sumMacros(ingredients);
   const mealObj={
     id:Date.now(),
@@ -222,6 +226,7 @@ function editCopyUsualMeal(section,idx){
 function renderHomeMealSections(meals){
   const esc=s=>String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
   const jsEsc=s=>String(s).replace(/\\/g,'\\\\').replace(/'/g,"\\'");
+  const ingLabel=i=>`${i.name}${i.weight||i.serving?' '+(typeof itemWeightLabel==='function'?itemWeightLabel(i):(i.weight+'g')):''}`;
   const buckets={breakfast:[],lunch:[],dinner:[],snacks:[],supplements:[]};
   meals.forEach(m=>{
     const sk=homeMealSectionKey(m);
@@ -243,8 +248,11 @@ function renderHomeMealSections(meals){
           const cls=i===0?'usual-card most-used':'usual-card';
           const mt=sumMacros(u.ingredients||[]);
           const kcal=Math.round(mt.kcal||0);
-          const ingCount=(u.ingredients||[]).length;
-          return`<div role="button" tabindex="0" class="${cls}"${span} onclick="logUsualMealByIndex('${key}',${i})"><div class="usual-card-name">${esc(u.name)}</div><div class="usual-card-meta">${ingCount} ingredient${ingCount!==1?'s':''} · <span class="kcal">${kcal} kcal</span></div><button type="button" class="usual-card-menu-btn" onclick="event.stopPropagation();openUsualMealMenu('${jsEsc(key)}',${i})" aria-label="Manage usual meal">⋯</button></div>`;
+          const ingredients=u.ingredients||[];
+          const ingCount=ingredients.length;
+          const preview=ingredients.slice(0,2).map(ingLabel).join(', ')+(ingredients.length>2?' +' +(ingredients.length-2):'');
+          const meta=preview||`${ingCount} ingredient${ingCount!==1?'s':''}`;
+          return`<div role="button" tabindex="0" class="${cls}"${span} onclick="logUsualMealByIndex('${key}',${i})"><div class="usual-card-name">${esc(u.name)}</div><div class="usual-card-meta">${esc(meta)} · <span class="kcal">${kcal} kcal</span></div><button type="button" class="usual-card-menu-btn" onclick="event.stopPropagation();openUsualMealMenu('${jsEsc(key)}',${i})" aria-label="Manage usual meal">⋯</button></div>`;
         }).join('');
         quickBlocks+=`<div class="usuals-grid">${cards}</div>`;
       }
@@ -253,7 +261,8 @@ function renderHomeMealSections(meals){
       const last=getLastMealBySection(key);
       if(last){
         const nm=esc((last.name||'').trim()||'Unnamed meal');
-        quickBlocks+=`<div class="home-section-repeat-card" onclick="repeatLastMealForSection('${key}')"><div class="home-section-repeat-row"><div class="home-section-last-meal">↻ Yesterday: <strong>${nm}</strong></div><i class="ti ti-chevron-right repeat-chevron"></i></div></div>`;
+        const details=(last.ingredients||[]).slice(0,2).map(ingLabel).join(', ');
+        quickBlocks+=`<div class="home-section-repeat-card" onclick="repeatLastMealForSection('${key}')"><div class="home-section-repeat-row"><div class="home-section-last-meal">↻ Last: <strong>${nm}</strong>${details?' · '+esc(details):''}</div><i class="ti ti-chevron-right repeat-chevron"></i></div></div>`;
       }
 
       // 3. Per-section recent ingredient chips

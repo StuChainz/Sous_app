@@ -1,9 +1,18 @@
 // ═══════════════════════════════════════════
 // FOOD DATABASE
 // ═══════════════════════════════════════════
+// Canonical Sous food shape:
+// - nutritionPer100g is the canonical calculation base for expansion/imports.
+// - units are user-facing serving shortcuts; grams remain the internal scale.
+// - aliases help search/parser matching without changing the display name.
+// - countryCodes are reserved for future country-specific filtering.
+// - Imported foods should be normalised into this shape before use.
+//
+// Legacy fields (`kw`, `w`, `kcal`, `p`, `c`, `f`, `fi`, `type`) are retained
+// because the current app and parser still rely on them.
 const FOODS=[
   // Poultry
-  {name:'Chicken breast',  w:100,kcal:165,p:31,  c:0,   f:3.6, fi:0,   icon:'ti-meat',       kw:['chicken breast','chicken breasts','breast','chicken fillet','chicken fillets','grilled chicken breast','chicken breast fillet']},
+  {name:'Chicken breast',  w:100,kcal:165,p:31,  c:0,   f:3.6, fi:0,   icon:'ti-meat',       kw:['chicken breast','chicken breasts','breast','chicken fillet','chicken fillets','grilled chicken breast','chicken breast fillet'],defaultUnit:'breast',units:[{label:'breast',grams:170},{label:'g',grams:1}]},
   {name:'Chicken thigh',   w:100,kcal:209,p:26,  c:0,   f:11,  fi:0,   icon:'ti-meat',       kw:['chicken thigh','chicken thighs','thigh','thighs','boneless thigh','boneless thighs','chicken thigh fillet']},
   {name:'Chicken drumstick',w:100,kcal:185,p:27, c:0,   f:8,   fi:0,   icon:'ti-meat',       kw:['chicken drumstick','drumstick','drumsticks']},
   {name:'Chicken mince',   w:100,kcal:170,p:20,  c:0,   f:10,  fi:0,   icon:'ti-meat',       kw:['chicken mince','minced chicken']},
@@ -17,8 +26,8 @@ const FOODS=[
   {name:'Pork belly',      w:100,kcal:395,p:10,  c:0,   f:39,  fi:0,   icon:'ti-meat',       kw:['pork belly']},
   {name:'Pork mince',      w:100,kcal:243,p:25,  c:0,   f:16,  fi:0,   icon:'ti-meat',       kw:['pork mince','minced pork']},
   {name:'Ham',             w:100,kcal:107,p:17,  c:1.5, f:3.5, fi:0,   icon:'ti-meat',       kw:['ham','cooked ham']},
-  {name:'Bacon',           w:100,kcal:215,p:23,  c:0,   f:14,  fi:0,   icon:'ti-meat',       kw:['bacon','back bacon','streaky bacon']},
-  {name:'Sausages',        w:100,kcal:301,p:13,  c:8,   f:25,  fi:0,   icon:'ti-meat',       kw:['sausage','sausages','pork sausage']},
+  {name:'Bacon',           w:100,kcal:215,p:23,  c:0,   f:14,  fi:0,   icon:'ti-meat',       kw:['bacon','back bacon','streaky bacon'],defaultUnit:'rasher',units:[{label:'rasher',grams:25,defaultQty:2},{label:'g',grams:1}]},
+  {name:'Sausages',        w:100,kcal:301,p:13,  c:8,   f:25,  fi:0,   icon:'ti-meat',       kw:['sausage','sausages','pork sausage'],defaultUnit:'sausage',units:[{label:'sausage',grams:60},{label:'g',grams:1}]},
   {name:'Lamb chops',      w:100,kcal:294,p:25,  c:0,   f:21,  fi:0,   icon:'ti-meat',       kw:['lamb chops','lamb chop','lamb cutlet']},
   {name:'Lamb mince',      w:100,kcal:282,p:21,  c:0,   f:22,  fi:0,   icon:'ti-meat',       kw:['lamb mince','minced lamb']},
   // Fish & seafood
@@ -33,7 +42,7 @@ const FOODS=[
   {name:'Prawns',          w:100,kcal:99, p:21,  c:0,   f:1.1, fi:0,   icon:'ti-fish',       kw:['prawns','prawn','shrimp','shrimps']},
   {name:'Crab',            w:100,kcal:97, p:19,  c:0,   f:2,   fi:0,   icon:'ti-fish',       kw:['crab']},
   // Eggs
-  {name:'Egg',             w:50, kcal:78, p:6,   c:0.6, f:5,   fi:0,   icon:'ti-egg',        kw:['egg','eggs','whole egg','whole eggs','boiled egg','boiled eggs','scrambled egg','scrambled eggs','fried egg','fried eggs','poached egg','poached eggs']},
+  {name:'Egg',             w:50, kcal:78, p:6,   c:0.6, f:5,   fi:0,   icon:'ti-egg',        kw:['egg','eggs','whole egg','whole eggs','boiled egg','boiled eggs','scrambled egg','scrambled eggs','fried egg','fried eggs','poached egg','poached eggs'],defaultUnit:'egg',units:[{label:'egg',grams:50},{label:'g',grams:1}]},
   {name:'Egg white',       w:33, kcal:17, p:3.6, c:0.2, f:0,   fi:0,   icon:'ti-egg',        kw:['egg white','egg whites','whites']},
   // Dairy
   {name:'Greek yoghurt',       w:100,kcal:59, p:10,  c:3.6, f:0.4, fi:0,   icon:'ti-glass',      kw:['greek yoghurt','greek yogurt','yoghurt','yogurt']},
@@ -61,11 +70,12 @@ const FOODS=[
   {name:'Quinoa',          w:100,kcal:368,p:14,  c:64,  f:6,   fi:7,   icon:'ti-bowl-spoon', kw:['quinoa']},
   {name:'Couscous',        w:100,kcal:376,p:13,  c:73,  f:0.6, fi:5,   icon:'ti-bowl-spoon', kw:['couscous']},
   {name:'Barley',          w:100,kcal:354,p:10,  c:74,  f:2.3, fi:10,  icon:'ti-bowl-spoon', kw:['barley','pearl barley']},
-  {name:'Bread',           w:35, kcal:79, p:3.5, c:14,  f:1,   fi:2,   icon:'ti-bread',      kw:['wholemeal bread','wholegrain bread','brown bread']},
-  {name:'White bread',     w:30, kcal:75, p:2.7, c:14,  f:0.9, fi:0.7, icon:'ti-bread',      kw:['white bread']},
-  {name:'Rye bread',       w:30, kcal:66, p:2.3, c:12,  f:0.6, fi:1.7, icon:'ti-bread',      kw:['rye bread','rye']},
+  {name:'Bread',           w:35, kcal:79, p:3.5, c:14,  f:1,   fi:2,   icon:'ti-bread',      kw:['wholemeal bread','wholegrain bread','brown bread'],defaultUnit:'slice',units:[{label:'slice',grams:40,defaultQty:2},{label:'g',grams:1}]},
+  {name:'White bread',     w:30, kcal:75, p:2.7, c:14,  f:0.9, fi:0.7, icon:'ti-bread',      kw:['white bread'],defaultUnit:'slice',units:[{label:'slice',grams:40,defaultQty:2},{label:'g',grams:1}]},
+  {name:'Rye bread',       w:30, kcal:66, p:2.3, c:12,  f:0.6, fi:1.7, icon:'ti-bread',      kw:['rye bread','rye'],defaultUnit:'slice',units:[{label:'slice',grams:40,defaultQty:2},{label:'g',grams:1}]},
+  {name:'Bread roll',      w:70, kcal:190,p:7,   c:36,  f:2,   fi:2.5, icon:'ti-bread',      kw:['bread roll','roll','bread bun','bun','bap'],defaultUnit:'roll',units:[{label:'roll',grams:70},{label:'g',grams:1}]},
   {name:'Rice cake',       w:10, kcal:38, p:0.9, c:8,   f:0.3, fi:0.3, icon:'ti-bread',      kw:['rice cake','rice cakes']},
-  {name:'Tortilla wrap',   w:40, kcal:120,p:3.5, c:20,  f:3,   fi:1.2, icon:'ti-bread',      kw:['tortilla','wrap','tortilla wrap']},
+  {name:'Tortilla wrap',   w:40, kcal:120,p:3.5, c:20,  f:3,   fi:1.2, icon:'ti-bread',      kw:['tortilla','wrap','tortilla wrap'],defaultUnit:'wrap',units:[{label:'wrap',grams:60},{label:'g',grams:1}]},
   {name:'Bagel',           w:100,kcal:250,p:10,  c:50,  f:1.5, fi:2,   icon:'ti-bread',      kw:['bagel']},
   // Legumes
   {name:'Lentils',         w:100,kcal:116,p:9,   c:20,  f:0.4, fi:8,   icon:'ti-leaf',       kw:['lentils','lentil','red lentils']},
@@ -97,13 +107,13 @@ const FOODS=[
   {name:'Green beans',     w:100,kcal:31, p:1.8, c:7.1, f:0.1, fi:2.7, icon:'ti-plant-2',    kw:['green beans','french beans','runner beans']},
   {name:'Beetroot',        w:100,kcal:43, p:1.6, c:10,  f:0.1, fi:2.8, icon:'ti-plant-2',    kw:['beetroot','beet']},
   {name:'Leek',            w:100,kcal:31, p:1.5, c:7.4, f:0.3, fi:1.8, icon:'ti-plant-2',    kw:['leek','leeks']},
-  {name:'Avocado',         w:100,kcal:160,p:2,   c:9,   f:15,  fi:7,   icon:'ti-plant-2',    kw:['avocado']},
+  {name:'Avocado',         w:100,kcal:160,p:2,   c:9,   f:15,  fi:7,   icon:'ti-plant-2',    kw:['avocado'],defaultUnit:'avocado',units:[{label:'avocado',grams:150},{label:'g',grams:1}]},
   {name:'Lettuce',         w:100,kcal:15, p:1.4, c:2.9, f:0.2, fi:1.3, icon:'ti-leaf',       kw:['lettuce','salad leaves','mixed leaves','rocket']},
   {name:'Cabbage',         w:100,kcal:25, p:1.3, c:5.8, f:0.1, fi:2.5, icon:'ti-leaf',       kw:['cabbage','red cabbage','savoy']},
   // Fruits
-  {name:'Banana',          w:120,kcal:105,p:1.3, c:27,  f:0.4, fi:3.1, icon:'ti-apple',      kw:['banana']},
-  {name:'Apple',           w:150,kcal:78, p:0.4, c:21,  f:0.2, fi:3.6, icon:'ti-apple',      kw:['apple']},
-  {name:'Orange',          w:130,kcal:62, p:1.2, c:15,  f:0.2, fi:3.1, icon:'ti-apple',      kw:['orange']},
+  {name:'Banana',          w:120,kcal:105,p:1.3, c:27,  f:0.4, fi:3.1, icon:'ti-apple',      kw:['banana'],defaultUnit:'banana',units:[{label:'banana',grams:120},{label:'g',grams:1}]},
+  {name:'Apple',           w:150,kcal:78, p:0.4, c:21,  f:0.2, fi:3.6, icon:'ti-apple',      kw:['apple'],defaultUnit:'apple',units:[{label:'apple',grams:180},{label:'g',grams:1}]},
+  {name:'Orange',          w:130,kcal:62, p:1.2, c:15,  f:0.2, fi:3.1, icon:'ti-apple',      kw:['orange'],defaultUnit:'orange',units:[{label:'orange',grams:130},{label:'g',grams:1}]},
   {name:'Strawberries',    w:100,kcal:32, p:0.7, c:7.7, f:0.3, fi:2,   icon:'ti-apple',      kw:['strawberry','strawberries']},
   {name:'Blueberries',     w:100,kcal:57, p:0.7, c:14,  f:0.3, fi:2.4, icon:'ti-apple',      kw:['blueberry','blueberries']},
   {name:'Raspberries',     w:100,kcal:52, p:1.2, c:12,  f:0.7, fi:6.5, icon:'ti-apple',      kw:['raspberry','raspberries']},
@@ -137,10 +147,73 @@ const FOODS=[
   {name:'Hummus',          w:100,kcal:166,p:7.9, c:14,  f:9.6, fi:6,   icon:'ti-droplet',    kw:['hummus','houmous']},
   {name:'Pesto',           w:100,kcal:421,p:10,  c:4,   f:42,  fi:0,   icon:'ti-droplet',    kw:['pesto']},
   // Supplements
-  {name:'Protein powder',  w:30, kcal:120,p:24,  c:3,   f:1.5, fi:0,   icon:'ti-flask',      kw:['protein powder','whey','whey protein','protein shake']},
+  {name:'Protein powder',  w:30, kcal:120,p:24,  c:3,   f:1.5, fi:0,   icon:'ti-flask',      kw:['protein powder','whey','whey protein','protein shake'],defaultUnit:'scoop',units:[{label:'scoop',grams:30},{label:'g',grams:1}]},
   {name:'Casein protein',  w:30, kcal:114,p:24,  c:3.5, f:1,   fi:0,   icon:'ti-flask',      kw:['casein','casein protein']},
   {name:'Collagen powder', w:10, kcal:36, p:9,   c:0,   f:0,   fi:0,   icon:'ti-flask',      kw:['collagen','collagen powder']},
 ];
+
+const FOOD_SCHEMA_VERSION=1;
+const FOOD_SOURCE='sous_seed';
+const FOOD_COUNTRY_CODES=['GB','US'];
+const EXTRA_ALIASES={
+  'Egg':['eggs','whole egg'],
+  'Bacon':['rasher','rashers'],
+  'Sausages':['sausage','sausages'],
+  'Oats':['porridge oats'],
+  'Bread':['bread slice','slice','slices','toast'],
+  'White bread':['white toast','slice','slices','toast'],
+  'Rye bread':['rye toast','slice','slices','toast'],
+  'Bread roll':['roll','rolls','bun','buns','bap'],
+  'Protein powder':['whey','whey protein','scoop','scoops'],
+  'Olive oil':['oil'],
+  'Milk':['semi skimmed milk','semi-skimmed milk','skimmed milk'],
+  'Whole milk':['whole milk','full fat milk'],
+  'Oat milk':['oat drink'],
+  'Almond milk':['almond drink']
+};
+function foodIdFromName(name){
+  return 'food_'+String(name||'')
+    .toLowerCase()
+    .replace(/&/g,' and ')
+    .replace(/[^a-z0-9]+/g,'_')
+    .replace(/^_+|_+$/g,'');
+}
+function foodCategory(food){
+  const n=String(food.name||'').toLowerCase();
+  if(food.icon==='ti-egg') return 'eggs';
+  if(food.icon==='ti-fish') return 'fish_seafood';
+  if(food.icon==='ti-cheese'||['milk','yoghurt','yogurt','skyr','cream'].some(x=>n.includes(x))) return 'dairy';
+  if(food.icon==='ti-bowl-spoon'||['rice','pasta','oats','quinoa','couscous','barley','bread','bagel','wrap'].some(x=>n.includes(x))) return 'grains';
+  if(food.icon==='ti-meat') return 'meat';
+  if(food.icon==='ti-nut') return 'nuts_seeds';
+  if(food.icon==='ti-apple') return 'fruit';
+  if(food.icon==='ti-flask') return 'supplements';
+  if(['lentils','chickpeas','beans','edamame','tofu','tempeh','hummus'].some(x=>n.includes(x))) return 'legumes';
+  if(food.icon==='ti-droplet') return 'oils_condiments';
+  if(food.icon==='ti-leaf'||food.icon==='ti-plant-2') return 'vegetables';
+  return 'general';
+}
+function normaliseFood(food){
+  const aliases=[...(food.kw||[]),...(EXTRA_ALIASES[food.name]||[])];
+  const uniqueAliases=[...new Set(aliases.map(a=>String(a).toLowerCase().trim()).filter(Boolean))];
+  food.id=food.id||foodIdFromName(food.name);
+  food.aliases=food.aliases||uniqueAliases;
+  food.kw=food.kw||food.aliases;
+  food.category=food.category||foodCategory(food);
+  food.foodType=food.foodType||food.type||'solid';
+  food.source=food.source||FOOD_SOURCE;
+  food.countryCodes=food.countryCodes||FOOD_COUNTRY_CODES.slice();
+  food.nutritionPer100g=food.nutritionPer100g||{
+    calories:food.w?Math.round(food.kcal*100/food.w):food.kcal,
+    protein:food.w?Math.round(food.p*100/food.w*10)/10:food.p,
+    carbs:food.w?Math.round(food.c*100/food.w*10)/10:food.c,
+    fat:food.w?Math.round(food.f*100/food.w*10)/10:food.f,
+    fibre:food.w?Math.round((food.fi||0)*100/food.w*10)/10:(food.fi||0)
+  };
+  food.schemaVersion=food.schemaVersion||FOOD_SCHEMA_VERSION;
+  return food;
+}
+FOODS.forEach(normaliseFood);
 
 const AMBIG=[
   {trigger:['chicken'],  options:['Chicken breast','Chicken thigh'],      question:'Chicken breast or thigh?'},

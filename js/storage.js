@@ -1,7 +1,7 @@
 // ═══════════════════════════════════════════
 // STORAGE
 // ═══════════════════════════════════════════
-const KEYS={profile:'sous_profile',weights:'sous_weights',log:'sous_log',recipes:'sous_recipes',recalDismissed:'sous_recal_dismissed',recentIngredients:'sous_recent_ingredients',usualMeals:'sous_usual_meals',draft:'sous_draft'};
+const KEYS={profile:'sous_profile',weights:'sous_weights',log:'sous_log',recipes:'sous_recipes',recalDismissed:'sous_recal_dismissed',recentIngredients:'sous_recent_ingredients',usualMeals:'sous_usual_meals',draft:'sous_draft',customServingUnits:'sous_custom_serving_units'};
 const getProfile=()=>{try{return JSON.parse(localStorage.getItem(KEYS.profile)||'null')||{};}catch(e){return{};}};
 const getWeights=()=>{try{return JSON.parse(localStorage.getItem(KEYS.weights)||'[]');}catch(e){return[];}};
 const getLog=()=>{try{return JSON.parse(localStorage.getItem(KEYS.log)||'{}');}catch(e){return{};}};
@@ -15,7 +15,7 @@ function getRecentIngredients(){try{return JSON.parse(localStorage.getItem(KEYS.
 function saveRecentIngredients(r){localStorage.setItem(KEYS.recentIngredients,JSON.stringify(r));}
 function addToRecentIngredients(ingredient){
   const list=getRecentIngredients().filter(r=>r.name.toLowerCase()!==ingredient.name.toLowerCase());
-  list.unshift({name:ingredient.name,kcal:ingredient.kcal,protein:ingredient.protein,carbs:ingredient.carbs,fat:ingredient.fat,fibre:ingredient.fibre!=null?ingredient.fibre:0,lastUsed:Date.now()});
+  list.unshift({name:ingredient.name,weight:ingredient.weight,serving:ingredient.serving?{...ingredient.serving}:undefined,kcal:ingredient.kcal,protein:ingredient.protein,carbs:ingredient.carbs,fat:ingredient.fat,fibre:ingredient.fibre!=null?ingredient.fibre:0,icon:ingredient.icon,type:ingredient.type,lastUsed:Date.now()});
   saveRecentIngredients(list.slice(0,20));
 }
 window.getRecentIngredients=getRecentIngredients;
@@ -102,6 +102,44 @@ function getFoodOverride(key){if(!key) return null;const o=getUserFoodOverrides(
 window.getUserFoodOverrides=getUserFoodOverrides;
 window.setFoodOverride=setFoodOverride;
 window.getFoodOverride=getFoodOverride;
+
+// ═══════════════════════════════════════════
+// CUSTOM SERVING UNITS
+// ═══════════════════════════════════════════
+function getCustomServingUnits(){try{return JSON.parse(localStorage.getItem(KEYS.customServingUnits)||'{}');}catch(e){return{};}}
+function saveCustomServingUnits(units){localStorage.setItem(KEYS.customServingUnits,JSON.stringify(units));}
+function _servingUnitKey(foodName){return String(foodName||'').toLowerCase().trim();}
+function getCustomServingUnit(foodName){
+  const key=_servingUnitKey(foodName);
+  if(!key) return null;
+  return getCustomServingUnits()[key]||null;
+}
+function setCustomServingUnit(foodName,unit){
+  const key=_servingUnitKey(foodName);
+  const label=String(unit?.label||'').trim();
+  if(!key||!label) return null;
+  const grams=unit.grams!=null&&unit.grams!==''?Number(unit.grams):null;
+  const npu=unit.nutritionPerUnit||null;
+  const cleaned={label};
+  if(grams&&grams>0) cleaned.grams=grams;
+  if(npu){
+    cleaned.nutritionPerUnit={
+      calories:Number(npu.calories)||0,
+      protein:Number(npu.protein)||0,
+      carbs:Number(npu.carbs)||0,
+      fat:Number(npu.fat)||0
+    };
+    if(npu.fibre!=null) cleaned.nutritionPerUnit.fibre=Number(npu.fibre)||0;
+  }
+  if(!cleaned.grams&&!cleaned.nutritionPerUnit) return null;
+  const units=getCustomServingUnits();
+  units[key]=cleaned;
+  saveCustomServingUnits(units);
+  return cleaned;
+}
+window.getCustomServingUnits=getCustomServingUnits;
+window.getCustomServingUnit=getCustomServingUnit;
+window.setCustomServingUnit=setCustomServingUnit;
 
 // ═══════════════════════════════════════════
 // USER CUSTOM FOODS

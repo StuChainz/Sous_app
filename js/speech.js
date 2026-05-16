@@ -61,7 +61,7 @@ function showBatchHeard(results){
   }
 }
 function applyFoodOverride(item){
-  if(!item||item.customMacro||!item.weight) return item;
+  if(!item||item.customMacro||item.customUnitNutrition||!item.weight) return item;
   const key=(item.rawFood?item.rawFood.name:item.name);
   const override=typeof getFoodOverride==='function'?getFoodOverride(key):null;
   if(!override) return item;
@@ -73,7 +73,136 @@ function applyFoodOverride(item){
   item.fibre=Math.round((override.fibre||0)*r*10)/10;
   return item;
 }
+function _pluralUnit(label,qty){
+  const l=String(label||'unit');
+  if(Number(qty)===1) return l;
+  if(l.endsWith('y')) return l.slice(0,-1)+'ies';
+  if(/(?:s|x|ch|sh)$/i.test(l)) return l+'es';
+  return l.endsWith('s')?l:l+'s';
+}
+function _formatQty(qty){
+  const n=Number(qty)||0;
+  return String(Math.round(n*10)/10).replace(/\.0$/,'');
+}
+function itemWeightLabel(item){
+  if(!item) return '—';
+  if(item.customMacro) return 'manual macro entry';
+  if(item.serving&&item.serving.label&&item.serving.quantity){
+    const q=Math.round(Number(item.serving.quantity)*10)/10;
+    return _formatQty(q)+' '+_pluralUnit(item.serving.label,q);
+  }
+  const inferred=inferServingFromWeight(item);
+  if(inferred){
+    return _formatQty(inferred.quantity)+' '+_pluralUnit(inferred.label,inferred.quantity);
+  }
+  const unit=item.type==='liquid'?'ml':'g';
+  return (item.weight||0)+unit;
+}
+function getServingUnitForFood(foodOrName){
+  const name=typeof foodOrName==='string'?foodOrName:foodOrName?.name;
+  const custom=typeof getCustomServingUnit==='function'?getCustomServingUnit(name):null;
+  if(custom) return custom;
+  const food=typeof foodOrName==='object'?foodOrName:null;
+  if(food&&food.defaultUnit&&Array.isArray(food.units)){
+    return food.units.find(u=>u.label===food.defaultUnit)||food.units[0]||null;
+  }
+  return null;
+}
+function defaultServingQty(food,unit){
+  const explicit=unit?.defaultQty??food?.defaultQty;
+  if(explicit&&Number(explicit)>0) return Number(explicit);
+  return 1;
+}
+function inferServingFromWeight(item){
+  if(!item||!item.weight) return null;
+  const food=item.rawFood||(typeof findFoodByText==='function'?findFoodByText(item.name):null);
+  const unit=getServingUnitForFood(food||item.name);
+  if(!unit||!unit.label||!unit.grams) return null;
+  const qty=Number(item.weight)/Number(unit.grams);
+  if(!Number.isFinite(qty)||qty<=0) return null;
+  const rounded=Math.round(qty*10)/10;
+  if(Math.abs(qty-rounded)>0.01) return null;
+  return {label:unit.label,quantity:rounded,grams:unit.grams};
+}
+function syncServingFromWeight(item){
+  if(!item) return item;
+  const inferred=inferServingFromWeight(item);
+  if(inferred) item.serving=inferred;
+  else if(item.serving&&item.serving.grams) delete item.serving;
+  return item;
+}
+function buildItemFromFoodServing(food,qty,unit){
+  const q=Math.max(0,Number(qty)||0);
+  if(!food||!unit||q<=0) return null;
+  const npu=unit.nutritionPerUnit||null;
+  const grams=unit.grams?Math.round(unit.grams*q):null;
+  let item;
+  if(npu){
+    item={
+      name:food.name,
+      weight:grams,
+      kcal:Math.round((Number(npu.calories)||0)*q),
+      protein:Math.round((Number(npu.protein)||0)*q*10)/10,
+      carbs:Math.round((Number(npu.carbs)||0)*q*10)/10,
+      fat:Math.round((Number(npu.fat)||0)*q*10)/10,
+      fibre:Math.round((Number(npu.fibre)||0)*q*10)/10
+    };
+  } else if(grams){
+    const r=grams/(food.w||100);
+    item={name:food.name,weight:grams,kcal:Math.round(food.kcal*r),protein:Math.round(food.p*r*10)/10,carbs:Math.round(food.c*r*10)/10,fat:Math.round(food.f*r*10)/10,fibre:Math.round((food.fi||0)*r*10)/10};
+  } else return null;
+  item.icon=food.icon;
+  item.type=food.type||'solid';
+  item.rawFood=food;
+  item.serving={label:unit.label,quantity:q,grams:unit.grams||undefined};
+  if(npu) item.customUnitNutrition=true;
+  return item;
+}
+function _unitFields(prefix){
+  return {
+    label:document.getElementById(prefix+'-unit-label'),
+    grams:document.getElementById(prefix+'-unit-grams'),
+    kcal:document.getElementById(prefix+'-unit-kcal'),
+    protein:document.getElementById(prefix+'-unit-protein'),
+    carbs:document.getElementById(prefix+'-unit-carbs'),
+    fat:document.getElementById(prefix+'-unit-fat')
+  };
+}
+function readCustomUnitFromFields(prefix){
+  const f=_unitFields(prefix);
+  if(!f.label) return {unit:null,attempted:false};
+  const raw=[f.label,f.grams,f.kcal,f.protein,f.carbs,f.fat].map(el=>el?.value?.trim()||'');
+  const attempted=raw.some(Boolean);
+  if(!attempted) return {unit:null,attempted:false};
+  const label=raw[0];
+  if(!label) return {error:'Unit name required',attempted:true};
+  const grams=raw[1]?parseFloat(raw[1]):null;
+  if(raw[1]&&(!grams||grams<=0)) return {error:'Enter a valid unit weight',attempted:true};
+  const macroInputs=raw.slice(2);
+  const hasMacros=macroInputs.some(Boolean);
+  const unit={label};
+  if(grams) unit.grams=grams;
+  if(hasMacros){
+    if(macroInputs.some(v=>v==='')) return {error:'Enter all per-unit macro fields, or leave them all blank',attempted:true};
+    const vals=macroInputs.map(parseFloat);
+    if(vals.some(v=>Number.isNaN(v)||v<0)) return {error:'Enter valid per-unit macros',attempted:true};
+    unit.nutritionPerUnit={calories:vals[0],protein:vals[1],carbs:vals[2],fat:vals[3]};
+  }
+  if(!unit.grams&&!unit.nutritionPerUnit) return {error:'Add grams or per-unit nutrition',attempted:true};
+  return {unit,attempted:true};
+}
+function populateCustomUnitFields(prefix,unit){
+  const f=_unitFields(prefix);
+  if(!f.label) return;
+  f.label.value=unit?.label||'';
+  f.grams.value=unit?.grams||'';
+  f.kcal.value=unit?.nutritionPerUnit?.calories??'';
+  f.protein.value=unit?.nutritionPerUnit?.protein??'';
+  f.carbs.value=unit?.nutritionPerUnit?.carbs??'';
+  f.fat.value=unit?.nutritionPerUnit?.fat??'';
+}
 function autoAddItem(item){
+  syncServingFromWeight(item);
   applyFoodOverride(item);
   snapshotMeal(); meal.push(item); _persistDraft();
 }
@@ -81,6 +210,7 @@ function autoAddClearItems(items){
   if(!items.length) return;
   snapshotMeal();
   items.forEach(item=>{
+    syncServingFromWeight(item);
     applyFoodOverride(item);
     meal.push(item);
   });
@@ -304,7 +434,7 @@ function renderCurrentMeal(){
       row.style.cssText='display:flex;justify-content:space-between;align-items:center;padding:7px 12px;border-bottom:.5px solid var(--border);';
       const label=document.createElement('span');
       label.style.cssText='font-size:13px;color:var(--text);flex:1;min-width:0;';
-      label.textContent=i.name+(i.weight?' '+i.weight+'g':'');
+      label.textContent=i.name+(i.weight||i.serving?' '+itemWeightLabel(i):'');
       const macros=document.createElement('span');
       macros.style.cssText='font-size:12px;color:var(--text-muted);font-family:\'Geist Mono\',monospace;margin-right:6px;';
       macros.textContent=i.kcal+' kcal · '+i.protein+'g P';
@@ -350,6 +480,7 @@ function renderRecentIngredients(){
     const bits=[];
     if(r.kcal!=null&&r.kcal!=='') bits.push(Math.round(Number(r.kcal))+' kcal');
     if(r.protein!=null&&r.protein!=='') bits.push(Math.round(Number(r.protein)*10)/10+'g P');
+    if(r.weight||r.serving) bits.unshift(itemWeightLabel(r));
     meta.textContent=bits.join(' · ');
     row.appendChild(label);
     row.appendChild(meta);
@@ -362,12 +493,15 @@ function addIngredientFromRecent(r){
   meal.push({
     id:nextIngId++,
     name:r.name,
+    weight:r.weight,
+    serving:r.serving?{...r.serving}:undefined,
     kcal:Math.round(Number(r.kcal))||0,
     protein:Math.round(Number(r.protein||0)*10)/10,
     carbs:Math.round(Number(r.carbs||0)*10)/10,
     fat:Math.round(Number(r.fat||0)*10)/10,
     fibre:Math.round(Number(r.fibre||0)*10)/10,
     icon:r.icon||'ti-clipboard',
+    type:r.type||'solid',
   });
   _persistDraft();
   showToast('Added '+r.name+' ✓');
@@ -528,6 +662,7 @@ function doConfirm(){
       }
     }
   }
+  syncServingFromWeight(pendingFood);
   snapshotMeal(); meal.push(pendingFood); _persistDraft();
   _confirmManualMacros=false;
   const name=pendingFood.name;
@@ -553,7 +688,7 @@ function commitQuantity(grams){
   if(!pendingFood||!pendingFood.rawFood) return;
   const food=pendingFood.rawFood;
   const r=grams/food.w;
-  const item={id:nextIngId++,name:food.name,weight:Math.round(grams),kcal:Math.round(food.kcal*r),protein:Math.round(food.p*r*10)/10,carbs:Math.round(food.c*r*10)/10,fat:Math.round(food.f*r*10)/10,fibre:Math.round((food.fi||0)*r*10)/10,icon:food.icon};
+  const item=syncServingFromWeight({id:nextIngId++,name:food.name,weight:Math.round(grams),kcal:Math.round(food.kcal*r),protein:Math.round(food.p*r*10)/10,carbs:Math.round(food.c*r*10)/10,fat:Math.round(food.f*r*10)/10,fibre:Math.round((food.fi||0)*r*10)/10,icon:food.icon,type:food.type||'solid',rawFood:food});
   snapshotMeal(); meal.push(item); _persistDraft();
   showToast('Added '+item.name+' '+Math.round(grams)+'g ✓');
   pendingFood=null;
@@ -611,7 +746,7 @@ function showAmbiguous(matches,amount,label,question){
 }
 function resolveAmbig(food,amount){
   const r=amount?amount/food.w:1;
-  const resolved={name:food.name,weight:amount?Math.round(amount):food.w,kcal:Math.round(food.kcal*r),protein:Math.round(food.p*r*10)/10,carbs:Math.round(food.c*r*10)/10,fat:Math.round(food.f*r*10)/10,fibre:Math.round((food.fi||0)*r*10)/10,icon:food.icon,rawFood:food,weightSpecified:amount!=null};
+  const resolved=syncServingFromWeight({name:food.name,weight:amount?Math.round(amount):food.w,kcal:Math.round(food.kcal*r),protein:Math.round(food.p*r*10)/10,carbs:Math.round(food.c*r*10)/10,fat:Math.round(food.f*r*10)/10,fibre:Math.round((food.fi||0)*r*10)/10,icon:food.icon,type:food.type||'solid',rawFood:food,weightSpecified:amount!=null});
   currentAmbig=null;
   if(!amount){askQuantity(resolved);}else{showConfirm(resolved);}
 }
@@ -750,6 +885,7 @@ function commitMultiConfirm(){
       const r=origW>0?w/origW:1;
       item={...ri,weight:w,kcal:Math.round((ri.kcal||0)*r),protein:Math.round((ri.protein||0)*r*10)/10,carbs:Math.round((ri.carbs||0)*r*10)/10,fat:Math.round((ri.fat||0)*r*10)/10,fibre:Math.round((ri.fibre||0)*r*10)/10};
     }
+    syncServingFromWeight(item);
     item.id=nextIngId++; meal.push(item);
   });
   _persistDraft();
@@ -806,9 +942,11 @@ function openAddModal(){
   modalSelectedFood=null; modalActiveTab='search';
   document.getElementById('food-search').value='';
   document.getElementById('gram-input').value='100';
+  document.getElementById('serving-unit-qty').value='1';
+  document.getElementById('serving-unit-row').style.display='none';
   document.getElementById('selected-preview-box').style.display='none';
   renderFoodResults('');
-  ['custom-name','custom-weight','custom-kcal','custom-protein','custom-carbs','custom-fat','custom-fibre'].forEach(id=>{document.getElementById(id).value='';});
+  ['custom-name','custom-weight','custom-kcal','custom-protein','custom-carbs','custom-fat','custom-fibre','custom-unit-label','custom-unit-grams','custom-unit-kcal','custom-unit-protein','custom-unit-carbs','custom-unit-fat'].forEach(id=>{document.getElementById(id).value='';});
   switchModalTab('search');
   const m=document.getElementById('add-modal');
   m.style.display='flex';
@@ -885,6 +1023,18 @@ function selectFood(food){
   modalSelectedFood=food;
   const gramInput=document.getElementById('gram-input');
   if(gramInput&&food.defaultServing) gramInput.value=food.defaultServing;
+  const unit=getServingUnitForFood(food);
+  const unitRow=document.getElementById('serving-unit-row');
+  const unitQty=document.getElementById('serving-unit-qty');
+  const unitLabel=document.getElementById('serving-unit-label');
+  if(unitRow&&unitQty&&unitLabel&&unit){
+    unitRow.style.display='flex';
+    unitQty.value=defaultServingQty(food,unit);
+    unitLabel.textContent=_pluralUnit(unit.label,Number(unitQty.value)||1);
+    if(unit.grams&&gramInput) gramInput.value=Math.round(unit.grams*(Number(unitQty.value)||1));
+  } else if(unitRow){
+    unitRow.style.display='none';
+  }
   document.querySelectorAll('.food-result-item').forEach(el=>el.classList.toggle('selected',el.querySelector('.fri-name').textContent===food.name));
   document.getElementById('spb-name').textContent=food.name;
   document.getElementById('spb-per100').textContent=`per 100g · ${food.kcal} kcal · ${food.p}g P · ${food.c}g C · ${food.f}g F`;
@@ -894,6 +1044,20 @@ function selectFood(food){
 }
 function updatePreviewMacros(){
   if(!modalSelectedFood) return;
+  const unit=getServingUnitForFood(modalSelectedFood);
+  const unitRow=document.getElementById('serving-unit-row');
+  const qty=parseFloat(document.getElementById('serving-unit-qty')?.value)||0;
+  const byServing=unit&&unitRow&&unitRow.style.display!=='none'&&qty>0;
+  const item=byServing?buildItemFromFoodServing(modalSelectedFood,qty,unit):null;
+  if(item){
+    if(unit.grams) document.getElementById('gram-input').value=Math.round(unit.grams*qty);
+    document.getElementById('serving-unit-label').textContent=_pluralUnit(unit.label,qty);
+    document.getElementById('pmg-kcal').textContent=Math.round(item.kcal);
+    document.getElementById('pmg-p').textContent=Math.round(item.protein*10)/10+'g';
+    document.getElementById('pmg-c').textContent=Math.round(item.carbs*10)/10+'g';
+    document.getElementById('pmg-f').textContent=Math.round(item.fat*10)/10+'g';
+    return;
+  }
   const grams=parseFloat(document.getElementById('gram-input').value)||100;
   const r=grams/(modalSelectedFood.w||100);
   document.getElementById('pmg-kcal').textContent=Math.round(modalSelectedFood.kcal*r);
@@ -904,21 +1068,36 @@ function updatePreviewMacros(){
 function addManualIngredient(){
   if(modalActiveTab==='search'){
     if(!modalSelectedFood){showToast('Pick a food first');return;}
-    const grams=parseFloat(document.getElementById('gram-input').value)||100;
-    if(grams<=0){showToast('Enter a valid amount');return;}
-    const r=grams/(modalSelectedFood.w||100);
-    const newItem={id:nextIngId++,name:modalSelectedFood.name,weight:Math.round(grams),kcal:Math.round(modalSelectedFood.kcal*r),protein:Math.round(modalSelectedFood.p*r*10)/10,carbs:Math.round(modalSelectedFood.c*r*10)/10,fat:Math.round(modalSelectedFood.f*r*10)/10,fibre:Math.round((modalSelectedFood.fi||0)*r*10)/10,icon:modalSelectedFood.icon,type:modalSelectedFood.type||'solid',rawFood:modalSelectedFood};
+    const unit=getServingUnitForFood(modalSelectedFood);
+    const unitRow=document.getElementById('serving-unit-row');
+    const servingQty=parseFloat(document.getElementById('serving-unit-qty')?.value)||0;
+    let newItem=null;
+    if(unit&&unitRow&&unitRow.style.display!=='none'&&servingQty>0){
+      newItem=buildItemFromFoodServing(modalSelectedFood,servingQty,unit);
+      if(!newItem){showToast('Enter a valid serving amount');return;}
+      newItem.id=nextIngId++;
+    } else {
+      const grams=parseFloat(document.getElementById('gram-input').value)||100;
+      if(grams<=0){showToast('Enter a valid amount');return;}
+      const r=grams/(modalSelectedFood.w||100);
+      newItem={id:nextIngId++,name:modalSelectedFood.name,weight:Math.round(grams),kcal:Math.round(modalSelectedFood.kcal*r),protein:Math.round(modalSelectedFood.p*r*10)/10,carbs:Math.round(modalSelectedFood.c*r*10)/10,fat:Math.round(modalSelectedFood.f*r*10)/10,fibre:Math.round((modalSelectedFood.fi||0)*r*10)/10,icon:modalSelectedFood.icon,type:modalSelectedFood.type||'solid',rawFood:modalSelectedFood};
+    }
     applyFoodOverride(newItem);
+    syncServingFromWeight(newItem);
     snapshotMeal(); meal.push(newItem);
     _persistDraft();
     const foodName=modalSelectedFood.name;
     showToast('Added '+foodName+' ✓');
-    const r2=100/Math.round(grams);
-    _pendingOverride={key:foodName,name:foodName,macros:{kcal:Math.round(newItem.kcal*r2),protein:Math.round(newItem.protein*r2*10)/10,carbs:Math.round(newItem.carbs*r2*10)/10,fat:Math.round(newItem.fat*r2*10)/10,fibre:Math.round((newItem.fibre||0)*r2*10)/10}};
-    setTimeout(()=>_showOverridePrompt(foodName),350);
+    if(newItem.weight){
+      const r2=100/Math.round(newItem.weight);
+      _pendingOverride={key:foodName,name:foodName,macros:{kcal:Math.round(newItem.kcal*r2),protein:Math.round(newItem.protein*r2*10)/10,carbs:Math.round(newItem.carbs*r2*10)/10,fat:Math.round(newItem.fat*r2*10)/10,fibre:Math.round((newItem.fibre||0)*r2*10)/10}};
+      setTimeout(()=>_showOverridePrompt(foodName),350);
+    }
   } else {
     const name=document.getElementById('custom-name').value.trim();
     if(!name){showToast('Enter a food name');return;}
+    const unitResult=readCustomUnitFromFields('custom');
+    if(unitResult.error){showToast(unitResult.error);return;}
     const servingRaw=document.getElementById('custom-weight').value;
     const serving=servingRaw!==''?parseFloat(servingRaw)||100:100;
     const kcalPer100=parseFloat(document.getElementById('custom-kcal').value)||0;
@@ -931,9 +1110,12 @@ function addManualIngredient(){
       name,w:100,kcal:kcalPer100,p:proteinPer100,c:carbsPer100,f:fatPer100,fi:fibrePer100,
       defaultServing:servingRaw!==''?serving:undefined,icon:'ti-clipboard',type:foodType
     }):null;
+    if(unitResult.unit&&typeof setCustomServingUnit==='function') setCustomServingUnit(name,unitResult.unit);
+    const unit=unitResult.unit||getServingUnitForFood(name);
+    const unitItem=unit?buildItemFromFoodServing(customFood||{name,w:100,kcal:kcalPer100,p:proteinPer100,c:carbsPer100,f:fatPer100,fi:fibrePer100,icon:'ti-clipboard',type:foodType},1,unit):null;
     const r=serving/100;
     snapshotMeal();
-    meal.push({id:nextIngId++,name,weight:serving,kcal:Math.round(kcalPer100*r),protein:Math.round(proteinPer100*r*10)/10,carbs:Math.round(carbsPer100*r*10)/10,fat:Math.round(fatPer100*r*10)/10,fibre:Math.round(fibrePer100*r*10)/10,icon:'ti-clipboard',type:foodType,rawFood:customFood||undefined});
+    meal.push(unitItem?{...unitItem,id:nextIngId++}:{id:nextIngId++,name,weight:serving,kcal:Math.round(kcalPer100*r),protein:Math.round(proteinPer100*r*10)/10,carbs:Math.round(carbsPer100*r*10)/10,fat:Math.round(fatPer100*r*10)/10,fibre:Math.round(fibrePer100*r*10)/10,icon:'ti-clipboard',type:foodType,rawFood:customFood||undefined});
     _persistDraft();
     showToast('Saved & added '+name+' ✓');
   }
@@ -956,6 +1138,9 @@ function openEditModal(id){
   document.getElementById('edit-carbs').value=item.carbs;
   document.getElementById('edit-fat').value=item.fat;
   document.getElementById('edit-fibre').value=item.fibre??'';
+  const foodForUnit=item.rawFood||(typeof findFoodByText==='function'?findFoodByText(item.name):null);
+  const savedUnit=typeof getCustomServingUnit==='function'?getCustomServingUnit(foodForUnit?.name||item.name):null;
+  populateCustomUnitFields('edit',savedUnit||item.serving||getServingUnitForFood(foodForUnit||item.name));
   _editBaseValues=null; _editFoodKey=null;
   if(item.weight&&!item.customMacro){
     const food=item.rawFood||(typeof findFoodByText==='function'?findFoodByText(item.name):null);
@@ -989,10 +1174,21 @@ function saveEdit(){
   const fat=parseFloat(document.getElementById('edit-fat').value)||0;
   const fibre=parseFloat(document.getElementById('edit-fibre').value)||0;
   if(!name){showToast('Food name required');return;}
+  const unitResult=readCustomUnitFromFields('edit');
+  if(unitResult.error){showToast(unitResult.error);return;}
   const item=meal.find(i=>i.id===id);
   if(!item) return;
   snapshotMeal();
   item.name=name; item.weight=weight; item.kcal=kcal; item.protein=protein; item.carbs=carbs; item.fat=fat; item.fibre=fibre;
+  if(unitResult.unit&&typeof setCustomServingUnit==='function'){
+    const unitKey=item.rawFood?.name||_editFoodKey||name;
+    setCustomServingUnit(unitKey,unitResult.unit);
+    if(!item.serving&&weight&&unitResult.unit.grams&&Math.abs(weight/unitResult.unit.grams-Math.round(weight/unitResult.unit.grams))<0.001){
+      const qty=Math.round(weight/unitResult.unit.grams);
+      item.serving={label:unitResult.unit.label,quantity:qty,grams:unitResult.unit.grams};
+    }
+  }
+  syncServingFromWeight(item);
   _persistDraft();
   closeEditModal(); _refreshAfterEdit(); showToast('Updated ✓');
   if(_editBaseValues&&weight&&_editFoodKey){
@@ -1044,7 +1240,8 @@ function stepIngWeight(id,delta){
   const item=meal.find(i=>i.id===id);
   if(!item) return;
   const cur=item.weight||0;
-  const next=Math.max(1,cur+delta);
+  const unitStep=item.serving?.grams||inferServingFromWeight(item)?.grams||10;
+  const next=Math.max(1,cur+(delta<0?-unitStep:unitStep));
   if(next===cur) return;
   if(_inlineManualMacros){
     // Persist whatever the user typed in macro inputs before re-render
@@ -1062,6 +1259,7 @@ function stepIngWeight(id,delta){
     item.fibre=Math.round((item.fibre||0)*r*10)/10;
   }
   item.weight=next;
+  syncServingFromWeight(item);
   renderCurrentMeal();
 }
 function commitInlineEdit(id){
@@ -1085,6 +1283,7 @@ function commitInlineEdit(id){
     item.fibre=Math.round((item.fibre||0)*r*10)/10;
   }
   item.name=newName; item.weight=newWeight;
+  syncServingFromWeight(item);
   _persistDraft();
   _inlineManualMacros=false;
   _inlineEditId=null; renderCurrentMeal(); showToast('Updated ✓');
@@ -1321,6 +1520,7 @@ function wireLogButtons(){
   document.getElementById('tab-custom-btn').addEventListener('click',()=>switchModalTab('custom'));
   document.getElementById('food-search').addEventListener('input',e=>renderFoodResults(e.target.value));
   document.getElementById('gram-input').addEventListener('input',updatePreviewMacros);
+  document.getElementById('serving-unit-qty').addEventListener('input',updatePreviewMacros);
   document.getElementById('modal-add-btn').addEventListener('click',addManualIngredient);
   // Edit modal
   document.getElementById('undo-btn').addEventListener('click',undoLastAction);
@@ -1339,7 +1539,7 @@ function wireLogButtons(){
   document.getElementById('qty-input').addEventListener('keydown',e=>{if(e.key==='Enter'){const g=parseFloat(e.target.value);if(g&&g>0)commitQuantity(g);}});
   document.getElementById('qty-default-btn').addEventListener('click',()=>{
     if(!pendingFood) return;
-    snapshotMeal(); meal.push({...pendingFood,id:nextIngId++}); _persistDraft();
+    snapshotMeal(); meal.push(syncServingFromWeight({...pendingFood,id:nextIngId++})); _persistDraft();
     showToast('Added '+pendingFood.name+' ✓');
     pendingFood=null;
     showLogScreen('listening');

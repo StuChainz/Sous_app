@@ -44,7 +44,7 @@ function renderHistoryDay(){
       const sectionOpts=[['breakfast','Breakfast'],['lunch','Lunch'],['dinner','Dinner'],['snacks','Snacks'],['supplements','Supplements']].map(([v,l])=>`<option value="${v}"${curSection===v?' selected':''}>${l}</option>`).join('');
       const ingHtml=ings.map((ing,iIdx)=>`
         <div style="font-size:12px;color:var(--text-muted);padding:6px 14px;border-top:.5px solid var(--border);display:flex;justify-content:space-between;align-items:center;">
-          <span>${ing.name}${ing.weight?' · '+ing.weight+'g':''} · ${ing.kcal} kcal</span>
+          <span>${ing.name}${ing.weight||ing.serving?' · '+(typeof itemWeightLabel==='function'?itemWeightLabel(ing):(ing.weight+'g')):''} · ${ing.kcal} kcal</span>
           <div style="display:flex;gap:4px;">
             <button onclick="openHistoryIngredientEdit('${ds}',${mIdx},${iIdx})" style="background:none;border:none;cursor:pointer;color:var(--text-muted);font-size:14px;padding:2px 6px;opacity:.7;" title="Edit ingredient"><i class="ti ti-pencil"></i></button>
             <button onclick="deleteHistoryIngredient('${ds}',${mIdx},${iIdx})" style="background:none;border:none;cursor:pointer;color:var(--red);font-size:14px;padding:2px 6px;opacity:.7;" title="Remove ingredient"><i class="ti ti-trash"></i></button>
@@ -152,6 +152,7 @@ function saveHistoryIngredientEdit(){
   if(!log[dateStr]?.meals?.[mealIdx]?.ingredients?.[ingIdx]) return;
   const ing=log[dateStr].meals[mealIdx].ingredients[ingIdx];
   ing.name=name; ing.weight=weight; ing.kcal=kcal; ing.protein=protein; ing.carbs=carbs; ing.fat=fat; ing.fibre=fibre;
+  if(typeof syncServingFromWeight==='function') syncServingFromWeight(ing);
   const meal=log[dateStr].meals[mealIdx];
   meal.totals=sumMacros(meal.ingredients);
   log[dateStr].totals=sumMacros(log[dateStr].meals.map(m=>m.totals));
