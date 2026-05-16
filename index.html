@@ -85,8 +85,9 @@
 [data-palette="midnight"] .btn-primary,
 [data-palette="midnight"] .modal-btn.primary{ color:#14110D; }
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;}
-html,body{height:100%;font-family:'Geist',sans-serif;background:var(--bg);overscroll-behavior:none;}
-.app{max-width:430px;margin:0 auto;min-height:100dvh;display:flex;flex-direction:column;background:var(--bg);background-image:radial-gradient(ellipse 70% 30% at 50% 0%,var(--accent-pale),transparent);position:relative;}
+html{height:-webkit-fill-available;}
+html,body{height:100%;min-height:100dvh;font-family:'Geist',sans-serif;background:var(--bg);overscroll-behavior:none;}
+.app{max-width:430px;margin:0 auto;min-height:100vh;min-height:100dvh;display:flex;flex-direction:column;background:var(--bg);background-image:radial-gradient(ellipse 70% 30% at 50% 0%,var(--accent-pale),transparent);position:relative;}
 .status-bar{height:44px;display:flex;align-items:flex-end;justify-content:space-between;padding:0 24px 8px;font-size:12px;font-weight:500;color:var(--text);flex-shrink:0;background:var(--bg);}
 .status-time{font-family:'Geist Mono',monospace;font-size:14px;}
 .status-icons{display:flex;gap:6px;align-items:center;}
@@ -96,7 +97,7 @@ html,body{height:100%;font-family:'Geist',sans-serif;background:var(--bg);oversc
 .tab-pane.active{display:flex;}
 #pane-log{overflow:hidden;padding-bottom:0;}
 #pane-recipes{overflow:hidden;padding-bottom:0;}
-.bottom-tabs{position:fixed;bottom:0;left:50%;transform:translateX(-50%);width:100%;max-width:430px;height:var(--tab-h);background:var(--card);border-top:.5px solid var(--border);display:flex;z-index:50;}
+.bottom-tabs{position:fixed;bottom:0;left:50%;transform:translateX(-50%);width:100%;max-width:430px;height:calc(var(--tab-h) + env(safe-area-inset-bottom));padding-bottom:env(safe-area-inset-bottom);background:var(--card);border-top:.5px solid var(--border);display:flex;z-index:50;}
 .tab{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;cursor:pointer;color:var(--text-muted);font-size:10px;font-weight:500;transition:color .15s;padding-bottom:4px;user-select:none;}
 .tab i{font-size:22px;}
 .tab.active{color:var(--accent);}
@@ -211,12 +212,12 @@ html,body{height:100%;font-family:'Geist',sans-serif;background:var(--bg);oversc
 .meal-delete-btn:hover{opacity:1;color:var(--danger,#e53e3e);}
 .empty-state{text-align:center;padding:32px 16px;color:var(--text-muted);font-size:13px;}
 .empty-state i{font-size:36px;color:var(--border-strong);display:block;margin-bottom:8px;}
-.log-screen{position:absolute;inset:0;display:none;flex-direction:column;overflow-y:auto;-webkit-overflow-scrolling:touch;}
+.log-screen{position:absolute;inset:0;display:none;flex-direction:column;overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;min-height:0;padding-bottom:calc(var(--tab-h) + 32px + env(safe-area-inset-bottom));scroll-padding-bottom:calc(var(--tab-h) + 32px + env(safe-area-inset-bottom));}
 .log-screen.active{display:flex;}
-#ls-listening{background:var(--bg);position:relative;overflow-y:auto;-webkit-overflow-scrolling:touch;padding-bottom:calc(var(--tab-h) + 16px);}
+#ls-listening{background:var(--bg);position:absolute;overflow-y:auto;-webkit-overflow-scrolling:touch;padding-bottom:calc(var(--tab-h) + 32px + env(safe-area-inset-bottom));}
 #ls-listening::before{content:"";position:absolute;inset:0;pointer-events:none;background:radial-gradient(60% 40% at 50% 38%, var(--accent-soft), transparent 70%);z-index:0;transition:opacity 0.4s;}
 #ls-listening > *{position:relative;z-index:1;}
-#ls-confirm,#ls-ambiguous,#ls-summary,#ls-multi-confirm{background:var(--bg);padding:16px 20px calc(var(--tab-h) + 24px);}
+#ls-confirm,#ls-ambiguous,#ls-summary,#ls-multi-confirm{background:var(--bg);padding:16px 20px calc(var(--tab-h) + 40px + env(safe-area-inset-bottom));}
 .listen-topbar{display:flex;justify-content:space-between;align-items:center;padding:14px 22px;flex-shrink:0;}
 .listen-cancel{font-size:12px;color:var(--text-muted);cursor:pointer;display:flex;align-items:center;gap:4px;text-transform:uppercase;letter-spacing:0.1em;font-weight:500;}
 .listen-cancel:hover{color:var(--text);}
@@ -1393,6 +1394,7 @@ html,body{height:100%;font-family:'Geist',sans-serif;background:var(--bg);oversc
 <script src="js/recipes.js?v=8"></script>
 <script src="js/app.js?v=10"></script>
 <script src="js/ai-interpreter.js?v=1"></script>
+<script src="js/ai-response-cache.js?v=1"></script>
 
 </body>
 </html>
