@@ -48,7 +48,7 @@ function getLastMealBySection(section){
   for(const date of dates){
     const meals=(log[date].meals||[]).slice().reverse();
     for(const m of meals){
-      if((m.section||'').toLowerCase()===section.toLowerCase()) return m;
+      if((m.section||'').toLowerCase()===section.toLowerCase()) return {...m,_historyDate:date};
     }
   }
   return null;

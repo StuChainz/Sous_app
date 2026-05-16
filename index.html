@@ -213,7 +213,7 @@ html,body{height:100%;font-family:'Geist',sans-serif;background:var(--bg);oversc
 .empty-state i{font-size:36px;color:var(--border-strong);display:block;margin-bottom:8px;}
 .log-screen{position:absolute;inset:0;display:none;flex-direction:column;overflow-y:auto;-webkit-overflow-scrolling:touch;}
 .log-screen.active{display:flex;}
-#ls-listening{background:var(--bg);position:relative;overflow:hidden;}
+#ls-listening{background:var(--bg);position:relative;overflow-y:auto;-webkit-overflow-scrolling:touch;padding-bottom:calc(var(--tab-h) + 16px);}
 #ls-listening::before{content:"";position:absolute;inset:0;pointer-events:none;background:radial-gradient(60% 40% at 50% 38%, var(--accent-soft), transparent 70%);z-index:0;transition:opacity 0.4s;}
 #ls-listening > *{position:relative;z-index:1;}
 #ls-confirm,#ls-ambiguous,#ls-summary,#ls-multi-confirm{background:var(--bg);padding:16px 20px calc(var(--tab-h) + 24px);}

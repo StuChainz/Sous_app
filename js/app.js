@@ -58,6 +58,16 @@ function formatDisplayDate(dateStr){
   const [y,m,d]=dateStr.split('-');
   return d+'-'+months[parseInt(m,10)-1]+'-'+y.slice(2);
 }
+function formatQuickLogSourceDate(dateStr){
+  if(!dateStr) return '';
+  const d=new Date(dateStr+'T12:00:00');
+  if(Number.isNaN(d.getTime())) return '';
+  const today=new Date(localDateStr()+'T12:00:00');
+  const diffDays=Math.round((today-d)/86400000);
+  if(diffDays===1) return 'Yesterday';
+  if(diffDays>=2&&diffDays<=6) return d.toLocaleDateString('en-GB',{weekday:'long'});
+  return d.toLocaleDateString('en-GB',{day:'numeric',month:'short'});
+}
 let selectedLogDate=localDateStr();
 let currentEditMealId=null, currentEditMealDate=null;
 let currentQuickMode=false;
@@ -273,8 +283,9 @@ function renderHomeMealSections(meals){
       const last=getLastMealBySection(key);
       if(last){
         const nm=esc((last.name||'').trim()||'Unnamed meal');
+        const sourceDate=formatQuickLogSourceDate(last._historyDate);
         const details=(last.ingredients||[]).slice(0,2).map(ingLabel).join(', ');
-        quickBlocks+=`<div class="home-section-repeat-card" onclick="repeatLastMealForSection('${key}')"><div class="home-section-repeat-row"><div class="home-section-last-meal">↻ Last: <strong>${nm}</strong>${details?' · '+esc(details):''}</div><i class="ti ti-chevron-right repeat-chevron"></i></div></div>`;
+        quickBlocks+=`<div class="home-section-repeat-card" onclick="repeatLastMealForSection('${key}')"><div class="home-section-repeat-row"><div class="home-section-last-meal">↻ ${sourceDate?esc(sourceDate)+': ':'Last: '}<strong>${nm}</strong>${details?' · '+esc(details):''}</div><i class="ti ti-chevron-right repeat-chevron"></i></div></div>`;
       }
 
       // 3. Per-section recent ingredient chips
