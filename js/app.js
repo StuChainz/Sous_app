@@ -329,7 +329,10 @@ async function handleTranscript(transcript,rawText){
             const unknown=aiItems[firstUnknownIdx];
             const before=aiItems.slice(0,firstUnknownIdx);
             const after=aiItems.slice(firstUnknownIdx+1);
-            const heardName=(typeof _foodChoiceDisplayName==='function'?_foodChoiceDisplayName(rawText):null)||rawText||unknown.name;
+            // Use the AI's name for the unknown item, not the full rawText.
+            // rawText spans the whole transcript and would cause splitIngredients
+            // to produce segments that overlap with items already in `before`.
+            const heardName=(typeof _foodChoiceDisplayName==='function'&&unknown.name?_foodChoiceDisplayName(unknown.name):null)||unknown.name||rawText||transcript;
             showMultiFoodFallback(heardName,before,after);
             return;
           }
@@ -531,9 +534,23 @@ function mrfCommit(){
     }
   }
   _multiResolvePending=null;
+
+  if(!items.length&&!before.length&&!after.length){
+    showLogScreen('listening');
+    if(typeof restartAlwaysOn==='function') setTimeout(restartAlwaysOn,400);
+    return;
+  }
+
+  console.log('[Sous] resolved items added:',items);
+
+  // Multiple resolved items: skip per-item quantity confirmation and add with
+  // default weights so the user lands directly on the meal editor.
   const all=[...before,...items,...after];
-  if(all.length) handleParsed(all,'');
-  else{showLogScreen('listening');if(typeof restartAlwaysOn==='function') setTimeout(restartAlwaysOn,400);}
+  if(items.length>1){
+    handleParsed(all.map(i=>i.command?i:{...i,weightSpecified:true}),'');
+  } else {
+    handleParsed(all,'');
+  }
 }
 function mrfCancel(){
   _multiResolvePending=null;
