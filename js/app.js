@@ -152,7 +152,7 @@ window.draftToMeal=draftToMeal;
 let _lastAITranscript=null;
 
 function canUseAIInterpretation(){
-  const plan=(localStorage.getItem('userPlan')||'free').trim().toLowerCase();
+  const plan=(localStorage.getItem('userPlan')||'pro').trim().toLowerCase();
   return plan==='pro';
 }
 
