@@ -10,6 +10,7 @@ let undoSnapshot=null;
 let _editBaseValues=null,_editFoodKey=null,_pendingOverride=null;
 let currentMealSection=null;
 let _inlineEditId=null,_inlineManualMacros=false,_confirmManualMacros=false;
+let _pendingFoodChoice=null;
 
 function snapshotMeal(){undoSnapshot=meal.map(i=>({...i}));updateUndoBtn();}
 function updateUndoBtn(){const r=document.getElementById('undo-row');if(r)r.style.display=undoSnapshot?'flex':'none';}
@@ -244,6 +245,268 @@ function showNoMatchFallback(rawText){
   const bar=document.getElementById('voice-correct-bar');
   if(bar) bar.style.display='flex';
 }
+function _normaliseChoiceText(text){
+  let s=String(text||'').toLowerCase().trim();
+  if(typeof normaliseLogText==='function') s=normaliseLogText(s);
+  if(typeof stripSegmentPrefix==='function') s=stripSegmentPrefix(s);
+  if(typeof cleanSegment==='function') s=cleanSegment(s);
+  s=s
+    .replace(/\b\d+(?:\.\d+)?\s*(?:g|grams?|kg|ml|l|tbsp|tsp|oz|cups?|pieces?|slices?|servings?|portions?|cans?|tins?)\b/gi,' ')
+    .replace(/\b\d+(?:\.\d+)?\b/g,' ')
+    .replace(/\b(?:of|some|a|an|the)\b/g,' ')
+    .replace(/[^a-z0-9]+/g,' ')
+    .replace(/\s+/g,' ')
+    .trim();
+  return s;
+}
+function _foodChoiceKeys(food){
+  if(!food) return [];
+  const keys=[food.name,...(food.kw||[]),...(food.aliases||[])]
+    .map(_normaliseChoiceText)
+    .filter(k=>k.length>1);
+  return [...new Set(keys)];
+}
+const FOOD_CHOICE_FILLER_WORDS=new Set(['fresh','cooked','raw','large','small','medium','pink','red','white','black','green']);
+function _foodChoiceDisplayName(text){
+  let s=String(text||'').trim();
+  if(typeof stripSegmentPrefix==='function') s=stripSegmentPrefix(s);
+  s=s
+    .replace(/\b\d+(?:\.\d+)?\s*(?:g|grams?|kg|ml|l|tbsp|tsp|oz|cups?|pieces?|slices?|servings?|portions?|cans?|tins?)\b/gi,' ')
+    .replace(/\b\d+(?:\.\d+)?\b/g,' ')
+    .replace(/\b(?:of|some|a|an|the)\b/gi,' ')
+    .replace(/\s+/g,' ')
+    .trim();
+  return s;
+}
+function _singularChoiceToken(token){
+  const t=String(token||'').toLowerCase();
+  if(t.endsWith('ies')&&t.length>4) return t.slice(0,-3)+'y';
+  if(t.endsWith('es')&&t.length>4) return t.slice(0,-2);
+  if(t.endsWith('s')&&t.length>3) return t.slice(0,-1);
+  return t;
+}
+function _choiceTokens(text,{dropFillers=false}={}){
+  const tokens=_normaliseChoiceText(text).split(/\s+/).filter(t=>t.length>2);
+  const filtered=dropFillers?tokens.filter(t=>!FOOD_CHOICE_FILLER_WORDS.has(t)):tokens;
+  return filtered.map(_singularChoiceToken);
+}
+function _choiceTokenMatches(a,b){
+  return _singularChoiceToken(a)===_singularChoiceToken(b);
+}
+function _choiceEsc(text){
+  return String(text||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+function _relatedFoodMatches(rawName,preferredFood=null,limit=8){
+  const phrase=_normaliseChoiceText(rawName);
+  if(!phrase) return preferredFood?[preferredFood]:[];
+  const allFoods=[
+    ...(typeof getCustomFoods==='function'?getCustomFoods():[]),
+    ...(typeof getFoodDatabase==='function'?getFoodDatabase():(typeof FOODS!=='undefined'?FOODS:[]))
+  ];
+  const seen=new Set();
+  const foods=allFoods.filter(food=>{
+    const key=String(food?.id||food?.name||'').toLowerCase();
+    if(!food||!food.name||seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+  const phraseTokens=_choiceTokens(phrase);
+  const meaningTokens=_choiceTokens(phrase,{dropFillers:true});
+  const tokens=meaningTokens.length?meaningTokens:phraseTokens;
+  const scores=[];
+  foods.forEach(food=>{
+    const keys=_foodChoiceKeys(food);
+    const keyTokens=keys.flatMap(k=>_choiceTokens(k));
+    let score=preferredFood&&food.name===preferredFood.name?70:0;
+    keys.forEach(k=>{
+      if(k===phrase) score+=120;
+      else if(k.includes(phrase)||phrase.includes(k)) score+=80;
+    });
+    tokens.forEach(token=>{
+      if(keyTokens.some(kt=>_choiceTokenMatches(kt,token))) score+=28;
+      else if(keys.some(k=>k.includes(token))) score+=14;
+    });
+    if(score>0) scores.push({food,score});
+  });
+  return scores
+    .sort((a,b)=>b.score-a.score||String(a.food.name).localeCompare(String(b.food.name)))
+    .slice(0,limit)
+    .map(s=>s.food);
+}
+function _foodChoiceReviewFor(item,rawSegment){
+  if(!item||item.command||item.ambiguous||item.customMacro||item.foodChoiceConfirmed||!item.rawFood) return null;
+  const heard=_normaliseChoiceText(rawSegment||item.heardName||item.name);
+  if(!heard) return null;
+  const keys=_foodChoiceKeys(item.rawFood);
+  if(keys.includes(heard)) return null;
+  const useful=keys
+    .filter(k=>k.length>3)
+    .sort((a,b)=>b.length-a.length)
+    .find(k=>heard.includes(k)||k.includes(heard));
+  if(!useful) return null;
+  return {heard,matchedKey:useful,item};
+}
+function _extractHeardFoodSegments(rawText,count){
+  const raw=String(rawText||'').trim();
+  if(!raw) return [];
+  if(typeof splitIngredients==='function'){
+    const parts=splitIngredients(raw);
+    if(parts.length) return parts;
+  }
+  return count===1?[raw]:[];
+}
+function maybeShowFoodChoiceReview(results,rawText){
+  if(!rawText||!Array.isArray(results)||!results.length) return false;
+  const foodResults=results.filter(r=>!r.command);
+  if(!foodResults.length) return false;
+  const segments=_extractHeardFoodSegments(rawText,foodResults.length);
+  let foodIdx=0;
+  for(let i=0;i<results.length;i++){
+    const item=results[i];
+    if(item.command) continue;
+    const rawSegment=segments[foodIdx]||rawText;
+    foodIdx++;
+    const review=_foodChoiceReviewFor(item,rawSegment);
+    if(review){
+      const rawName=_foodChoiceDisplayName(rawSegment)||review.heard;
+      showFoodChoiceReview({
+        rawName,
+        originalText:rawSegment,
+        existingItem:item,
+        existingFood:item.rawFood,
+        relatedMatches:_relatedFoodMatches(rawName,item.rawFood),
+        before:results.slice(0,i),
+        after:results.slice(i+1)
+      });
+      return true;
+    }
+  }
+  return false;
+}
+function _ensureFoodChoiceScreen(){
+  let screen=document.getElementById('ls-food-choice');
+  if(screen) return screen;
+  screen=document.createElement('div');
+  screen.className='log-screen';
+  screen.id='ls-food-choice';
+  screen.style.cssText='background:var(--bg);padding:16px 20px calc(var(--tab-h) + 24px);';
+  screen.innerHTML=`
+    <div style="font-size:18px;font-weight:600;color:var(--text);margin-bottom:4px;">Check the food</div>
+    <div style="font-size:13px;color:var(--text-muted);margin-bottom:14px;" id="fc-sub"></div>
+    <div id="fc-existing-wrap" style="margin-bottom:12px;">
+      <div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:7px;">Existing matches</div>
+      <div id="fc-existing-list" style="display:flex;flex-direction:column;gap:6px;"></div>
+    </div>
+    <div style="background:var(--card);border:.5px solid var(--border);border-radius:10px;padding:12px;margin-bottom:14px;">
+      <div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px;">Create new food</div>
+      <div class="custom-field-group" style="margin-bottom:10px;">
+        <div class="custom-field-label">Food name</div>
+        <input type="text" class="custom-input" id="fc-name">
+      </div>
+      <div class="custom-label-row">
+        <div class="custom-field-group"><div class="custom-field-label">Calories per 100g</div><input type="number" class="custom-input" id="fc-kcal" min="0"></div>
+        <div class="custom-field-group"><div class="custom-field-label">Protein per 100g</div><input type="number" class="custom-input" id="fc-protein" min="0" step="0.1"></div>
+      </div>
+      <div class="custom-label-row">
+        <div class="custom-field-group"><div class="custom-field-label">Carbs per 100g</div><input type="number" class="custom-input" id="fc-carbs" min="0" step="0.1"></div>
+        <div class="custom-field-group"><div class="custom-field-label">Fat per 100g</div><input type="number" class="custom-input" id="fc-fat" min="0" step="0.1"></div>
+      </div>
+      <button type="button" class="btn-primary" id="fc-create" style="margin-top:12px;">Create new food</button>
+    </div>
+    <div style="display:flex;justify-content:center;padding:2px 0 8px;">
+      <button type="button" id="fc-cancel" style="background:none;border:none;color:var(--text-muted);font-size:13px;font-family:inherit;padding:8px 12px;cursor:pointer;">Cancel</button>
+    </div>`;
+  const confirm=document.getElementById('ls-confirm');
+  if(confirm&&confirm.parentNode) confirm.parentNode.insertBefore(screen,confirm.nextSibling);
+  return screen;
+}
+function _macroPer100FromItem(item,field,foodField){
+  if(!item) return 0;
+  if(item.weightSpecified&&item.weight){
+    return Math.round((Number(item[field])||0)*100/item.weight*10)/10;
+  }
+  const food=item.rawFood;
+  return food?Number(food[foodField])||0:Number(item[field])||0;
+}
+function showFoodChoiceReview(state){
+  _pendingFoodChoice=state;
+  _ensureFoodChoiceScreen();
+  const rawName=state.rawName||state.originalText||'this food';
+  const amount=state.existingItem?.weightSpecified?state.existingItem.weight:100;
+  document.getElementById('fc-sub').textContent='I heard "'+rawName+'". Choose an existing match or create it as a new food.';
+  const existingWrap=document.getElementById('fc-existing-wrap');
+  const existingList=document.getElementById('fc-existing-list');
+  const matches=state.relatedMatches||_relatedFoodMatches(rawName,state.existingFood);
+  existingList.innerHTML='';
+  if(matches.length){
+    existingWrap.style.display='block';
+    matches.forEach(food=>{
+      const btn=document.createElement('button');
+      btn.type='button';
+      btn.style.cssText='width:100%;display:flex;align-items:center;justify-content:space-between;gap:10px;text-align:left;background:var(--card);border:.5px solid var(--border);border-radius:10px;padding:9px 11px;font-family:inherit;cursor:pointer;color:var(--text);';
+      const kcal=Math.round(Number(food.kcal)||0);
+      const p=Math.round((Number(food.p)||0)*10)/10;
+      btn.innerHTML=`<span style="font-size:14px;font-weight:500;">${_choiceEsc(food.name)}</span><span style="font-size:12px;color:var(--text-muted);font-family:'Geist Mono',monospace;white-space:nowrap;">${kcal} kcal · ${p}g P</span>`;
+      btn.addEventListener('click',()=>resolveFoodChoiceFood(food));
+      existingList.appendChild(btn);
+    });
+  } else existingWrap.style.display='none';
+  document.getElementById('fc-name').value=rawName;
+  document.getElementById('fc-kcal').value=_macroPer100FromItem(state.existingItem,'kcal','kcal');
+  document.getElementById('fc-protein').value=_macroPer100FromItem(state.existingItem,'protein','p');
+  document.getElementById('fc-carbs').value=_macroPer100FromItem(state.existingItem,'carbs','c');
+  document.getElementById('fc-fat').value=_macroPer100FromItem(state.existingItem,'fat','f');
+  document.getElementById('fc-create').onclick=()=>resolveFoodChoiceCreate(amount);
+  document.getElementById('fc-cancel').onclick=()=>{_pendingFoodChoice=null;showLogScreen('listening');setTimeout(restartAlwaysOn,400);};
+  showLogScreen('food-choice');
+  pauseAlwaysOn();
+  requestAnimationFrame(()=>document.getElementById('fc-name')?.focus());
+}
+function _continueFoodChoiceWith(item){
+  const state=_pendingFoodChoice;
+  _pendingFoodChoice=null;
+  const next=[...(state?.before||[]),item,...(state?.after||[])];
+  handleParsed(next,'');
+}
+function resolveFoodChoiceExisting(){
+  if(!_pendingFoodChoice||!_pendingFoodChoice.existingItem) return;
+  const item={..._pendingFoodChoice.existingItem,heardName:_pendingFoodChoice.rawName,foodChoiceConfirmed:true};
+  _continueFoodChoiceWith(item);
+}
+function resolveFoodChoiceFood(food){
+  if(!_pendingFoodChoice||!food) return;
+  if(_pendingFoodChoice.existingFood&&food.name===_pendingFoodChoice.existingFood.name){
+    resolveFoodChoiceExisting();
+    return;
+  }
+  const base=_pendingFoodChoice.existingItem||{};
+  let grams=base.weightSpecified?Math.max(1,Math.round(base.weight||food.w||100)):null;
+  if(grams==null&&base.weight&&base.rawFood){
+    grams=Math.max(1,Math.round(base.weight));
+  }
+  const item={...base,name:food.name,rawFood:food,icon:food.icon,type:food.type||'solid',confidence:'high',needsConfirm:false,foodChoiceConfirmed:true,heardName:_pendingFoodChoice.rawName};
+  if(grams!=null){
+    const r=grams/(food.w||100);
+    Object.assign(item,{weight:grams,kcal:Math.round(food.kcal*r),protein:Math.round(food.p*r*10)/10,carbs:Math.round(food.c*r*10)/10,fat:Math.round(food.f*r*10)/10,fibre:Math.round((food.fi||0)*r*10)/10,weightSpecified:true});
+  } else {
+    Object.assign(item,{weight:food.w,kcal:food.kcal,protein:food.p,carbs:food.c,fat:food.f,fibre:food.fi||0,weightSpecified:false});
+  }
+  _continueFoodChoiceWith(item);
+}
+function resolveFoodChoiceCreate(amount){
+  if(!_pendingFoodChoice) return;
+  const name=(document.getElementById('fc-name')?.value||'').trim();
+  if(!name){showToast('Enter a food name');return;}
+  const kcal=parseFloat(document.getElementById('fc-kcal')?.value)||0;
+  const protein=parseFloat(document.getElementById('fc-protein')?.value)||0;
+  const carbs=parseFloat(document.getElementById('fc-carbs')?.value)||0;
+  const fat=parseFloat(document.getElementById('fc-fat')?.value)||0;
+  const customFood=typeof addCustomFood==='function'?addCustomFood({name,w:100,kcal,p:protein,c:carbs,f:fat,fi:0,icon:'ti-clipboard',type:'solid'}):{name,w:100,kcal,p:protein,c:carbs,f:fat,fi:0,icon:'ti-clipboard',type:'solid'};
+  const grams=_pendingFoodChoice.existingItem?.weightSpecified?Math.max(1,Math.round(amount||100)):100;
+  const r=grams/100;
+  const item={id:nextIngId++,name,weight:grams,kcal:Math.round(kcal*r),protein:Math.round(protein*r*10)/10,carbs:Math.round(carbs*r*10)/10,fat:Math.round(fat*r*10)/10,fibre:0,icon:'ti-clipboard',type:'solid',rawFood:customFood,weightSpecified:true,confidence:'high',needsConfirm:false,foodChoiceConfirmed:true,heardName:_pendingFoodChoice.rawName};
+  _continueFoodChoiceWith(item);
+}
 function showVoiceCorrectBar(msg){
   const b=document.getElementById('voice-correct-bar'),m=document.getElementById('voice-correct-msg');
   if(!b) return;
@@ -266,7 +529,17 @@ function handleParsed(results,rawText=''){
   if(!results||!results.length){
     const rt=(rawText||'').trim();
     if(rt.length>1){
-      showNoMatchFallback(rt);
+      const qty=typeof extractQuantity==='function'?extractQuantity(rt):null;
+      const rawName=_foodChoiceDisplayName(rt)||_normaliseChoiceText(rt)||rt;
+      showFoodChoiceReview({
+        rawName,
+        originalText:rt,
+        existingItem:{weightSpecified:qty&&qty.grams!=null,weight:qty&&qty.grams!=null?Math.round(qty.grams):100},
+        existingFood:null,
+        relatedMatches:_relatedFoodMatches(rawName),
+        before:[],
+        after:[]
+      });
     } else {
       if(_voiceMode) showVoiceRetry("Didn't catch that — try again");
       else showToast("Didn't catch that — try again!");
@@ -287,6 +560,7 @@ function handleParsed(results,rawText=''){
     if(!meal.length){showToast('Add some ingredients first!');return;}
     stopAllRec(); showSummary(); return;
   }
+  if(maybeShowFoodChoiceReview(results,rawText)) return;
   showBatchHeard(results);
   const foodResults=results.filter(r=>!r.command);
   const reviewItems=foodResults.filter(r=>!isClearIngredient(r));
