@@ -994,7 +994,8 @@ function renderFoodResults(query){
   const q=query.toLowerCase().trim();
   const customs=typeof getCustomFoods==='function'?getCustomFoods():[];
   const customMatches=q?customs.filter(f=>f.name.toLowerCase().includes(q)):customs.slice(0,5);
-  const dbMatches=q?FOODS.filter(f=>f.name.toLowerCase().includes(q)||(f.kw&&f.kw.some(k=>k.includes(q)))):FOODS.slice(0,20);
+  const dbFoods=typeof getFoodDatabase==='function'?getFoodDatabase():FOODS;
+  const dbMatches=q?dbFoods.filter(f=>f.name.toLowerCase().includes(q)||(f.kw&&f.kw.some(k=>k.includes(q)))):dbFoods.slice(0,20);
   container.innerHTML='';
   customMatches.forEach(food=>{
     const div=document.createElement('div');

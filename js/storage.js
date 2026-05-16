@@ -1,7 +1,7 @@
 // ═══════════════════════════════════════════
 // STORAGE
 // ═══════════════════════════════════════════
-const KEYS={profile:'sous_profile',weights:'sous_weights',log:'sous_log',recipes:'sous_recipes',recalDismissed:'sous_recal_dismissed',recentIngredients:'sous_recent_ingredients',usualMeals:'sous_usual_meals',draft:'sous_draft',customServingUnits:'sous_custom_serving_units'};
+const KEYS={profile:'sous_profile',weights:'sous_weights',log:'sous_log',recipes:'sous_recipes',recalDismissed:'sous_recal_dismissed',recentIngredients:'sous_recent_ingredients',usualMeals:'sous_usual_meals',draft:'sous_draft',customServingUnits:'sous_custom_serving_units',userCountry:'userCountry'};
 const getProfile=()=>{try{return JSON.parse(localStorage.getItem(KEYS.profile)||'null')||{};}catch(e){return{};}};
 const getWeights=()=>{try{return JSON.parse(localStorage.getItem(KEYS.weights)||'[]');}catch(e){return[];}};
 const getLog=()=>{try{return JSON.parse(localStorage.getItem(KEYS.log)||'{}');}catch(e){return{};}};
@@ -11,6 +11,11 @@ const saveWeights=w=>localStorage.setItem(KEYS.weights,JSON.stringify(w));
 const saveProfile=p=>localStorage.setItem(KEYS.profile,JSON.stringify(p));
 const saveRecipes=r=>localStorage.setItem(KEYS.recipes,JSON.stringify(r));
 const todayStr=()=>new Date().toISOString().slice(0,10);
+function normaliseUserCountry(countryCode){return String(countryCode||'GLOBAL').toUpperCase().trim()||'GLOBAL';}
+function getUserCountry(){try{return normaliseUserCountry(localStorage.getItem(KEYS.userCountry)||'GLOBAL');}catch(e){return'GLOBAL';}}
+function setUserCountry(countryCode){const code=normaliseUserCountry(countryCode);localStorage.setItem(KEYS.userCountry,code);return code;}
+window.getUserCountry=getUserCountry;
+window.setUserCountry=setUserCountry;
 function getRecentIngredients(){try{return JSON.parse(localStorage.getItem(KEYS.recentIngredients)||'[]');}catch(e){return[];}}
 function saveRecentIngredients(r){localStorage.setItem(KEYS.recentIngredients,JSON.stringify(r));}
 function addToRecentIngredients(ingredient){

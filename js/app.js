@@ -2,6 +2,11 @@
 // NAVIGATION
 // ═══════════════════════════════════════════
 let currentTab='home';
+let currentCountry='GLOBAL';
+function getFoodDatabase(){
+  const foods=typeof getPreferredFoods==='function'?getPreferredFoods(currentCountry):FOODS;
+  return foods&&foods.length?foods:FOODS;
+}
 function switchTab(tab,opts={}){
   document.querySelectorAll('.tab-pane').forEach(p=>p.classList.remove('active'));
   document.querySelectorAll('.bottom-tabs .tab').forEach(t=>t.classList.remove('active'));
@@ -482,6 +487,8 @@ function initDateNav(){
 }
 
 function init(){
+  currentCountry=typeof getUserCountry==='function'?getUserCountry():'GLOBAL';
+  window.currentCountry=currentCountry;
   updateClock(); setInterval(updateClock,10000);
   initDateNav();
   renderHome();
