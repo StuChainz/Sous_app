@@ -13,7 +13,13 @@ const saveRecipes=r=>localStorage.setItem(KEYS.recipes,JSON.stringify(r));
 const todayStr=()=>new Date().toISOString().slice(0,10);
 function normaliseUserCountry(countryCode){return String(countryCode||'GLOBAL').toUpperCase().trim()||'GLOBAL';}
 function getUserCountry(){try{return normaliseUserCountry(localStorage.getItem(KEYS.userCountry)||'GLOBAL');}catch(e){return'GLOBAL';}}
-function setUserCountry(countryCode){const code=normaliseUserCountry(countryCode);localStorage.setItem(KEYS.userCountry,code);return code;}
+function setUserCountry(countryCode){
+  const code=normaliseUserCountry(countryCode);
+  localStorage.setItem(KEYS.userCountry,code);
+  if(typeof window.setCurrentCountry==='function') window.setCurrentCountry(code);
+  else window.currentCountry=code;
+  return code;
+}
 window.getUserCountry=getUserCountry;
 window.setUserCountry=setUserCountry;
 function getRecentIngredients(){try{return JSON.parse(localStorage.getItem(KEYS.recentIngredients)||'[]');}catch(e){return[];}}

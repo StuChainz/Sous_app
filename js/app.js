@@ -7,6 +7,12 @@ function getFoodDatabase(){
   const foods=typeof getPreferredFoods==='function'?getPreferredFoods(currentCountry):FOODS;
   return foods&&foods.length?foods:FOODS;
 }
+function setCurrentCountry(countryCode){
+  currentCountry=typeof normaliseUserCountry==='function'?normaliseUserCountry(countryCode):String(countryCode||'GLOBAL').toUpperCase().trim()||'GLOBAL';
+  window.currentCountry=currentCountry;
+  return currentCountry;
+}
+window.setCurrentCountry=setCurrentCountry;
 function switchTab(tab,opts={}){
   document.querySelectorAll('.tab-pane').forEach(p=>p.classList.remove('active'));
   document.querySelectorAll('.bottom-tabs .tab').forEach(t=>t.classList.remove('active'));
