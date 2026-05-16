@@ -3,6 +3,19 @@
 // ═══════════════════════════════════════════
 let currentTab='home';
 let currentCountry='GLOBAL';
+function setAppViewportHeight(){
+  const h=window.visualViewport?.height||window.innerHeight;
+  if(h) document.documentElement.style.setProperty('--app-height',Math.round(h)+'px');
+}
+function updateStandaloneModeClass(){
+  const standalone=window.navigator.standalone===true||window.matchMedia?.('(display-mode: standalone)').matches;
+  document.documentElement.classList.toggle('standalone-ios',!!standalone);
+}
+setAppViewportHeight();
+updateStandaloneModeClass();
+window.addEventListener('resize',setAppViewportHeight,{passive:true});
+window.addEventListener('orientationchange',()=>setTimeout(setAppViewportHeight,250),{passive:true});
+window.visualViewport?.addEventListener('resize',setAppViewportHeight,{passive:true});
 function getFoodDatabase(){
   const foods=typeof getPreferredFoods==='function'?getPreferredFoods(currentCountry):FOODS;
   return foods&&foods.length?foods:FOODS;
