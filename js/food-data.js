@@ -227,33 +227,63 @@ function foodCountryCodes(food){
   return Array.isArray(food.countryCodes)&&food.countryCodes.length?food.countryCodes:FOOD_COUNTRY_CODES;
 }
 
-function foodSearchTerms(food){
-  return [food.name,...(food.aliases||[]),...(food.kw||[])]
-    .map(t=>String(t).toLowerCase().trim())
-    .filter(Boolean);
+function normaliseFoodSearchText(text){
+  return String(text||'')
+    .toLowerCase()
+    .replace(/&/g,' and ')
+    .replace(/[^a-z0-9]+/g,' ')
+    .trim()
+    .replace(/\s+/g,' ');
+}
+
+const UNSAFE_FOOD_MATCH_KEYS=new Set(['g','gram','grams','ml','slice','slices','scoop','scoops','serving','servings','piece','pieces']);
+
+function getFoodMatchKeys(food){
+  const nameKey=normaliseFoodSearchText(food.name);
+  const aliases=[...(food.aliases||[]),...(food.kw||[])]
+    .map(normaliseFoodSearchText)
+    .filter(term=>term&&term.length>=4&&!UNSAFE_FOOD_MATCH_KEYS.has(term));
+  return [...new Set([nameKey,...aliases].filter(Boolean))];
+}
+
+function foodMatchesCountry(food,countryCode){
+  const code=normaliseCountryCode(countryCode);
+  const codes=foodCountryCodes(food);
+  return codes.includes('GLOBAL')||(code&&codes.includes(code));
+}
+
+function isCountrySpecificFood(food,countryCode){
+  const code=normaliseCountryCode(countryCode);
+  const codes=foodCountryCodes(food);
+  return !!code&&code!=='GLOBAL'&&codes.includes(code)&&!codes.includes('GLOBAL');
+}
+
+function globalFoods(){
+  return FOODS.filter(food=>foodCountryCodes(food).includes('GLOBAL'));
 }
 
 function getFoodsForCountry(countryCode){
-  const code=normaliseCountryCode(countryCode);
-  return FOODS.filter(food=>{
-    const codes=foodCountryCodes(food);
-    return codes.includes('GLOBAL')||(code&&codes.includes(code));
-  });
+  const foods=FOODS.filter(food=>foodMatchesCountry(food,countryCode));
+  const globals=globalFoods();
+  return foods.length?foods:globals.length?globals:FOODS;
 }
 
 function getPreferredFoods(countryCode){
   const code=normaliseCountryCode(countryCode);
   const foods=getFoodsForCountry(code);
-  const countryFoods=foods.filter(food=>code&&foodCountryCodes(food).includes(code)&&!foodCountryCodes(food).includes('GLOBAL'));
-  const countryTerms=new Set(countryFoods.flatMap(foodSearchTerms));
-  return [
+  if(!code||code==='GLOBAL') return foods.length?foods:FOODS;
+  const countryFoods=foods.filter(food=>isCountrySpecificFood(food,code));
+  if(!countryFoods.length) return foods.length?foods:FOODS;
+  const countryKeys=new Set(countryFoods.flatMap(getFoodMatchKeys));
+  const preferred=[
     ...countryFoods,
     ...foods.filter(food=>{
       if(countryFoods.includes(food)) return false;
       if(!foodCountryCodes(food).includes('GLOBAL')) return true;
-      return !foodSearchTerms(food).some(term=>countryTerms.has(term));
+      return !getFoodMatchKeys(food).some(key=>countryKeys.has(key));
     })
   ];
+  return preferred.length?preferred:foods.length?foods:FOODS;
 }
 
 const AMBIG=[
