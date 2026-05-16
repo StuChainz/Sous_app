@@ -12,6 +12,7 @@
 //
 // Legacy fields (`kw`, `w`, `kcal`, `p`, `c`, `f`, `fi`, `type`) are retained
 // because the current app and parser still rely on them.
+// type:'liquid' means the UI should prefer ml; missing type defaults to solid/g.
 const FOODS=[
   // Poultry
   {name:'Chicken breast',  w:100,kcal:165,p:31,  c:0,   f:3.6, fi:0,   icon:'ti-meat',       kw:['chicken breast','chicken breasts','breast','chicken fillet','chicken fillets','grilled chicken breast','chicken breast fillet'],defaultUnit:'breast',units:[{label:'breast',grams:170},{label:'g',grams:1}]},
@@ -60,7 +61,7 @@ const FOODS=[
   {name:'Mozzarella',      w:100,kcal:280,p:28,  c:2.2, f:17,  fi:0,   icon:'ti-cheese',     kw:['mozzarella']},
   {name:'Parmesan',        w:100,kcal:431,p:38,  c:4,   f:29,  fi:0,   icon:'ti-cheese',     kw:['parmesan','parmigiano']},
   {name:'Cream cheese',    w:100,kcal:342,p:6,   c:4.4, f:34,  fi:0,   icon:'ti-cheese',     kw:['cream cheese','philadelphia']},
-  {name:'Sour cream',      w:100,kcal:198,p:3,   c:4.3, f:20,  fi:0,   icon:'ti-glass',      kw:['sour cream','creme fraiche']},
+  {name:'Sour cream',      w:100,kcal:198,p:3,   c:4.3, f:20,  fi:0,   icon:'ti-glass',      kw:['sour cream','creme fraiche'],type:'liquid'},
   {name:'Butter',          w:10, kcal:72, p:0.1, c:0,   f:8,   fi:0,   icon:'ti-droplet',    kw:['butter']},
   {name:'Ghee',            w:14, kcal:123,p:0,   c:0,   f:14,  fi:0,   icon:'ti-droplet',    kw:['ghee','clarified butter']},
   {name:'Whipping cream',  w:100,kcal:345,p:2,   c:3.5, f:36,  fi:0,   icon:'ti-glass',      kw:['whipping cream','double cream','heavy cream'],type:'liquid'},
@@ -141,13 +142,13 @@ const FOODS=[
   {name:'Coconut oil',     w:14, kcal:121,p:0,   c:0,   f:14,  fi:0,   icon:'ti-droplet',    kw:['coconut oil'],type:'liquid'},
   {name:'Vegetable oil',   w:14, kcal:124,p:0,   c:0,   f:14,  fi:0,   icon:'ti-droplet',    kw:['vegetable oil','sunflower oil','rapeseed oil'],type:'liquid'},
   // Condiments & sauces
-  {name:'Ketchup',         w:100,kcal:112,p:1.3, c:26,  f:0.1, fi:0.4, icon:'ti-droplet',    kw:['ketchup','tomato ketchup']},
-  {name:'Mayonnaise',      w:100,kcal:685,p:1,   c:3.4, f:75,  fi:0,   icon:'ti-droplet',    kw:['mayonnaise','mayo']},
+  {name:'Ketchup',         w:100,kcal:112,p:1.3, c:26,  f:0.1, fi:0.4, icon:'ti-droplet',    kw:['ketchup','tomato ketchup'],type:'liquid'},
+  {name:'Mayonnaise',      w:100,kcal:685,p:1,   c:3.4, f:75,  fi:0,   icon:'ti-droplet',    kw:['mayonnaise','mayo'],type:'liquid'},
   {name:'Soy sauce',       w:15, kcal:8,  p:1.3, c:0.8, f:0,   fi:0,   icon:'ti-droplet',    kw:['soy sauce','soya sauce','tamari'],type:'liquid'},
-  {name:'Honey',           w:100,kcal:304,p:0.3, c:82,  f:0,   fi:0.2, icon:'ti-droplet',    kw:['honey']},
-  {name:'Tahini',          w:100,kcal:595,p:17,  c:21,  f:54,  fi:9,   icon:'ti-droplet',    kw:['tahini']},
-  {name:'Hummus',          w:100,kcal:166,p:7.9, c:14,  f:9.6, fi:6,   icon:'ti-droplet',    kw:['hummus','houmous']},
-  {name:'Pesto',           w:100,kcal:421,p:10,  c:4,   f:42,  fi:0,   icon:'ti-droplet',    kw:['pesto']},
+  {name:'Honey',           w:100,kcal:304,p:0.3, c:82,  f:0,   fi:0.2, icon:'ti-droplet',    kw:['honey'],type:'liquid'},
+  {name:'Tahini',          w:100,kcal:595,p:17,  c:21,  f:54,  fi:9,   icon:'ti-droplet',    kw:['tahini'],type:'liquid'},
+  {name:'Hummus',          w:100,kcal:166,p:7.9, c:14,  f:9.6, fi:6,   icon:'ti-droplet',    kw:['hummus','houmous'],type:'liquid'},
+  {name:'Pesto',           w:100,kcal:421,p:10,  c:4,   f:42,  fi:0,   icon:'ti-droplet',    kw:['pesto'],type:'liquid'},
   // Supplements
   {name:'Protein powder',  w:30, kcal:120,p:24,  c:3,   f:1.5, fi:0,   icon:'ti-flask',      kw:['protein powder','whey','whey protein','protein shake'],defaultUnit:'scoop',units:[{label:'scoop',grams:30},{label:'g',grams:1}]},
   {name:'Casein protein',  w:30, kcal:114,p:24,  c:3.5, f:1,   fi:0,   icon:'ti-flask',      kw:['casein','casein protein']},
