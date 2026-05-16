@@ -153,7 +153,7 @@ const FOODS=[
   {name:'Casein protein',  w:30, kcal:114,p:24,  c:3.5, f:1,   fi:0,   icon:'ti-flask',      kw:['casein','casein protein']},
   {name:'Collagen powder', w:10, kcal:36, p:9,   c:0,   f:0,   fi:0,   icon:'ti-flask',      kw:['collagen','collagen powder']},
   // GB curated pack
-  {name:'Back bacon',      w:100,kcal:225,p:23,  c:0.5, f:15,  fi:0,   icon:'ti-meat',       kw:['back bacon','bacon rasher','bacon rashers','rasher','rashers'],countryCodes:['GB'],source:'curated',defaultUnit:'rasher',units:[{label:'rasher',grams:30,defaultQty:2},{label:'g',grams:1}],nutritionPer100g:{calories:225,protein:23,carbs:0.5,fat:15,fibre:0}},
+  {name:'Back bacon',      w:100,kcal:225,p:23,  c:0.5, f:15,  fi:0,   icon:'ti-meat',       kw:['back bacon','bacon','bacon rasher','bacon rashers','rasher','rashers'],countryCodes:['GB'],source:'curated',defaultUnit:'rasher',units:[{label:'rasher',grams:30,defaultQty:2},{label:'g',grams:1}],nutritionPer100g:{calories:225,protein:23,carbs:0.5,fat:15,fibre:0}},
   {name:'Pork sausage',    w:100,kcal:301,p:13,  c:8,   f:25,  fi:0,   icon:'ti-meat',       kw:['pork sausage','pork sausages','sausage','sausages','banger','bangers'],countryCodes:['GB'],source:'curated',defaultUnit:'sausage',units:[{label:'sausage',grams:57,defaultQty:2},{label:'g',grams:1}],nutritionPer100g:{calories:301,protein:13,carbs:8,fat:25,fibre:0}},
   {name:'Baked beans',     w:100,kcal:78, p:4.7, c:12.5,f:0.4, fi:3.7, icon:'ti-leaf',       kw:['baked beans','beans on toast','tinned baked beans'],countryCodes:['GB'],source:'curated',defaultUnit:'half tin',units:[{label:'half tin',grams:200},{label:'tin',grams:400},{label:'g',grams:1}],nutritionPer100g:{calories:78,protein:4.7,carbs:12.5,fat:0.4,fibre:3.7}},
   {name:'Crumpet',         w:55, kcal:97, p:3.6, c:19,  f:0.7, fi:1.3, icon:'ti-bread',      kw:['crumpet','crumpets'],countryCodes:['GB'],source:'curated',defaultUnit:'crumpet',units:[{label:'crumpet',grams:55,defaultQty:2},{label:'g',grams:1}],nutritionPer100g:{calories:176,protein:6.5,carbs:34.5,fat:1.3,fibre:2.4}},
@@ -253,6 +253,7 @@ function normaliseFoodSearchText(text){
 }
 
 const UNSAFE_FOOD_MATCH_KEYS=new Set(['g','gram','grams','ml','slice','slices','scoop','scoops','serving','servings','piece','pieces']);
+const FOOD_MATCH_IGNORED_WORDS=new Set(['of','some','a','an','the']);
 
 function getFoodMatchKeys(food){
   const nameKey=normaliseFoodSearchText(food.name);
@@ -260,6 +261,110 @@ function getFoodMatchKeys(food){
     .map(normaliseFoodSearchText)
     .filter(term=>term&&term.length>=4&&!UNSAFE_FOOD_MATCH_KEYS.has(term));
   return [...new Set([nameKey,...aliases].filter(Boolean))];
+}
+
+function foodMatchCountryScore(food,countryCode){
+  const code=normaliseCountryCode(countryCode);
+  const codes=foodCountryCodes(food);
+  if(code&&code!=='GLOBAL'&&codes.includes(code)) return codes.includes('GLOBAL')?35:45;
+  if(codes.includes('GLOBAL')) return 20;
+  return 0;
+}
+
+function foodMatchTermScore(searchText,key){
+  if(!searchText||!key) return 0;
+  if(searchText===key) return 4000+key.length;
+  return (` ${searchText} `).includes(` ${key} `)?2000+key.length:0;
+}
+
+function foodMatchTokens(text){
+  return normaliseFoodSearchText(text).split(/\s+/).filter(Boolean);
+}
+
+function foodMatchCoverageScore(searchText,keys){
+  const searchTokens=foodMatchTokens(searchText);
+  if(searchTokens.length<2) return 0;
+  const keyTokens=new Set(keys.flatMap(foodMatchTokens));
+  return searchTokens.every(token=>keyTokens.has(token))?3000+searchText.length:0;
+}
+
+function foodMatchType(food,key,searchText){
+  if(!food||!key||!searchText) return 'none';
+  if(key==='__covered__') return 'covered-alias';
+  if(searchText!==key) return 'partial';
+  const nameKey=normaliseFoodSearchText(food.name);
+  return key===nameKey?'exact-name':'exact-alias';
+}
+
+function foodMatchConfidence(match,competitors){
+  if(!match) return 'none';
+  if(['exact-name','exact-alias','covered-alias'].includes(match.matchType)) return 'high';
+  const next=competitors.find(candidate=>candidate.food!==match.food);
+  if(next&&next.score>=match.score-25) return 'low';
+  return match.countryScore>=35?'medium':'low';
+}
+
+function foodMatchShouldConfirm(match,competitors){
+  if(!match) return true;
+  if(['exact-name','exact-alias','covered-alias'].includes(match.matchType)) return false;
+  if(match.confidence!=='high') return true;
+  const next=competitors.find(candidate=>candidate.food!==match.food);
+  return !!(next&&next.score>=match.score-25);
+}
+
+function meaningfulFoodMatchText(text){
+  return normaliseFoodSearchText(text)
+    .split(/\s+/)
+    .filter(token=>token&&!FOOD_MATCH_IGNORED_WORDS.has(token)&&!/^\d/.test(token))
+    .join(' ');
+}
+
+function foodMatchCountryCode(countryCode){
+  if(countryCode) return normaliseCountryCode(countryCode);
+  if(typeof window!=='undefined'&&window.currentCountry) return normaliseCountryCode(window.currentCountry);
+  if(typeof getUserCountry==='function') return normaliseCountryCode(getUserCountry());
+  return 'GLOBAL';
+}
+
+function getFoodMatchFoods(countryCode,includeCustom=true){
+  const code=foodMatchCountryCode(countryCode);
+  const customFoods=includeCustom&&typeof getCustomFoods==='function'?getCustomFoods():[];
+  const baseFoods=getPreferredFoods(code);
+  return customFoods.length?[...customFoods,...baseFoods]:baseFoods;
+}
+
+function getFoodTextMatch(text,opts={}){
+  const searchText=meaningfulFoodMatchText(text);
+  if(!searchText) return null;
+  const code=foodMatchCountryCode(opts.countryCode);
+  const foods=Array.isArray(opts.foods)?opts.foods:getFoodMatchFoods(code,opts.includeCustom!==false);
+  const candidates=[];
+  foods.forEach((food,index)=>{
+    const keys=getFoodMatchKeys(food);
+    let bestKey='',bestTermScore=0;
+    for(const key of keys){
+      const termScore=foodMatchTermScore(searchText,key);
+      if(termScore>bestTermScore){bestTermScore=termScore;bestKey=key;}
+    }
+    const coverageScore=foodMatchCoverageScore(searchText,keys);
+    if(coverageScore>bestTermScore){bestTermScore=coverageScore;bestKey='__covered__';}
+    if(!bestTermScore) return;
+    const countryScore=foodMatchCountryScore(food,code);
+    const score=bestTermScore+countryScore;
+    candidates.push({food,key:bestKey,score,countryScore,index,matchType:foodMatchType(food,bestKey,searchText)});
+  });
+  candidates.sort((a,b)=>b.score-a.score||a.index-b.index);
+  const best=candidates[0]||null;
+  if(!best) return null;
+  best.competitors=candidates.slice(1,5);
+  best.confidence=foodMatchConfidence(best,candidates);
+  best.shouldConfirm=foodMatchShouldConfirm(best,candidates);
+  return best;
+}
+
+function matchFoodByText(text,opts={}){
+  const match=getFoodTextMatch(text,opts);
+  return match?match.food:null;
 }
 
 function foodMatchesCountry(food,countryCode){

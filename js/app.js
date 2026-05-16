@@ -40,6 +40,16 @@ function showToast(msg,d=2200){
   t.textContent=msg; t.classList.add('show');
   clearTimeout(t._tid); t._tid=setTimeout(()=>t.classList.remove('show'),d);
 }
+function shouldConfirmFoodMatch(rawText,item){
+  if(!item||!item.rawFood||typeof getFoodTextMatch!=='function') return true;
+  const text=typeof _normaliseChoiceText==='function'?_normaliseChoiceText(rawText):String(rawText||'');
+  const match=getFoodTextMatch(text,{includeCustom:true});
+  if(!match||!match.food) return true;
+  const matchedKey=String(match.food.id||match.food.name);
+  const itemKey=String(item.rawFood.id||item.rawFood.name);
+  return matchedKey!==itemKey||match.shouldConfirm;
+}
+window.shouldConfirmFoodMatch=shouldConfirmFoodMatch;
 function updateClock(){
   const n=new Date(),h=n.getHours();
   document.getElementById('clock').textContent=String(h).padStart(2,'0')+':'+String(n.getMinutes()).padStart(2,'0');

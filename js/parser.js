@@ -124,19 +124,17 @@ function parseCustomMacroEntry(seg){
 
 function getAllFoods(){
   const customs=typeof getCustomFoods==='function'?getCustomFoods():[];
+  if(typeof getFoodMatchFoods==='function') return getFoodMatchFoods(null,true);
   return customs.length?[...customs,...FOODS]:FOODS;
 }
 function findFoodByText(text){
+  if(typeof matchFoodByText==='function') return matchFoodByText(text);
   const s=normaliseLogText(text||'');
   let bestFood=null,bestLen=0;
   for(const food of getAllFoods()){
-    if(food.kw){
-      for(const kw of food.kw){
-        if(s.includes(kw)&&kw.length>bestLen){bestFood=food;bestLen=kw.length;}
-      }
+    for(const kw of [...(food.kw||[]),food.name.toLowerCase()]){
+      if(s.includes(kw)&&kw.length>bestLen){bestFood=food;bestLen=kw.length;}
     }
-    const name=food.name.toLowerCase();
-    if(s.includes(name)&&name.length>bestLen){bestFood=food;bestLen=name.length;}
   }
   return bestFood;
 }
@@ -275,27 +273,18 @@ function parseSingleSegment(seg){
   for(const ag of [...PARSER_AMBIG,...AMBIG]){
     for(const trig of ag.trigger){
       if(new RegExp('\\b'+trig+'\\b','i').test(seg)){
-        const specificMatch=FOODS.find(f=>f.kw.some(kw=>kw!==trig&&kw.length>trig.length&&seg.includes(kw)));
+        const textMatch=typeof getFoodTextMatch==='function'?getFoodTextMatch(seg,{includeCustom:false}):null;
+        const specificMatch=textMatch&&textMatch.key!==trig&&textMatch.key.length>trig.length;
         if(!specificMatch){
-          const options=FOODS.filter(f=>ag.options.includes(f.name));
+          const baseFoods=typeof getFoodMatchFoods==='function'?getFoodMatchFoods(null,false):FOODS;
+          const options=baseFoods.filter(f=>ag.options.includes(f.name));
           const countAmount=qty&&qty.count!=null&&options[0]?Math.round(options[0].w*qty.count):null;
           return{ambiguous:true,matches:options,amount:explicitGrams!=null?explicitGrams:(countAmount||100),label:trig,question:ag.question};
         }
       }
     }
   }
-  // Longest keyword match — custom foods first (no kw, matched by name), then base foods
-  let bestFood=null,bestLen=0;
-  for(const food of getAllFoods()){
-    if(food.kw){
-      for(const kw of food.kw){
-        if(seg.includes(kw)&&kw.length>bestLen){bestFood=food;bestLen=kw.length;}
-      }
-    } else {
-      const name=food.name.toLowerCase();
-      if(seg.includes(name)&&name.length>bestLen){bestFood=food;bestLen=name.length;}
-    }
-  }
+  const bestFood=findFoodByText(seg);
   if(!bestFood) return null;
   // Resolve grams: explicit weight → multiplier×food.w → count×food.w → food default
   let grams=explicitGrams;

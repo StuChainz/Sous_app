@@ -337,6 +337,16 @@ function _foodChoiceReviewFor(item,rawSegment){
   if(!item||item.command||item.ambiguous||item.customMacro||item.foodChoiceConfirmed||!item.rawFood) return null;
   const heard=_normaliseChoiceText(rawSegment||item.heardName||item.name);
   if(!heard) return null;
+  if(typeof shouldConfirmFoodMatch==='function'){
+    if(!shouldConfirmFoodMatch(heard,item)) return null;
+  } else if(typeof getFoodTextMatch==='function'){
+    const match=getFoodTextMatch(heard,{includeCustom:true});
+    if(match&&match.food){
+      const sameFood=match.food===item.rawFood||String(match.food.id||match.food.name)===String(item.rawFood.id||item.rawFood.name);
+      if(sameFood&&!match.shouldConfirm) return null;
+      if(sameFood&&match.shouldConfirm) return {heard,matchedKey:match.key,item,match};
+    }
+  }
   const keys=_foodChoiceKeys(item.rawFood);
   if(keys.includes(heard)) return null;
   const useful=keys
