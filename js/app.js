@@ -145,10 +145,79 @@ window.draftToMeal=draftToMeal;
 // AI FALLBACK — PARSER → AI INTERPRETATION
 // ═══════════════════════════════════════════
 // Experimental. Parser is always tried first.
-// AI is only called when the parser finds zero food items.
+// AI is only called when the parser finds zero food items, OR when the parser
+// found some food(s) but meaningful unresolved words remain in the transcript.
 // All AI results require user confirmation — nothing is auto-saved.
 
 let _lastAITranscript=null;
+
+function canUseAIInterpretation(){
+  const plan=(localStorage.getItem('userPlan')||'free').trim().toLowerCase();
+  return plan==='pro';
+}
+
+// Words that carry no food meaning and are safe to ignore when scanning
+// for unresolved terms after parser matches.
+const _PARTIAL_FILLER=new Set([
+  'a','an','the','of','in','on','for','with','and','plus','or','but',
+  'some','any','i','had','ate','have','add','log','track','hey','sous','sue',
+  'please','about','approx','approximately','also','not','no','bit','little',
+  'very','really','quite','just','extra','more','then','too','so',
+  'cooked','raw','fresh','large','small','medium','big','whole','full',
+  'thing','something','unknown','other','another','stuff',
+  'half','piece','pieces','slice','slices','serving','servings',
+  'portion','portions','can','cans','tin','tins'
+]);
+
+// Words that look like food ingredients.  If any of these remain in the
+// transcript after stripping matched foods and fillers, the parse is partial.
+const _PARTIAL_MEANINGFUL=new Set([
+  'sauce','dressing','beans','bean','cheese','curry','yoghurt','yogurt',
+  'bread','rice','pasta','noodles','noodle','soup','gravy','cream',
+  'butter','oil','milk','egg','eggs','meat','fish','chicken','beef',
+  'pork','lamb','turkey','duck','tofu','nuts','nut','seeds','seed',
+  'flour','sugar','honey','jam','ketchup','mayo','mustard','vinegar',
+  'salsa','hummus','pesto','tahini','salad','wrap','burger','sandwich',
+  'bagel','cereal','oats','granola','fruit','veg','vegetable','vegetables',
+  'chocolate','cake','cookie','biscuit','muffin','brownie','chips','crisps',
+  'cracker','crackers','popcorn','avocado','spinach','broccoli','tomato',
+  'potato','potatoes','carrot','onion','garlic','ginger','lemon','lime',
+  'apple','banana','orange','strawberry','mango','mushroom','mushrooms',
+  'pepper','peppers','lettuce','cucumber','corn','peas','lentils','lentil',
+  'chickpeas','chickpea','tempeh','sausage','bacon','ham','steak','mince',
+  'fillet','quark','cottage','feta','cheddar','mozzarella','parmesan'
+]);
+
+// Returns true when the parser matched food(s) but the original transcript
+// still contains unresolved meaningful food-like words — indicating a partial
+// interpretation that should not be silently accepted.
+function detectMixedPartial(transcript,results){
+  const foodResults=results.filter(r=>!r.command&&!r.ambiguous&&r.rawFood);
+  if(!foodResults.length) return false;
+
+  let text=typeof normaliseLogText==='function'?normaliseLogText(transcript):transcript.toLowerCase();
+
+  // Strip quantity patterns
+  text=text.replace(/\b\d+(?:\.\d+)?\s*(?:g|kg|ml|l|oz|tbsp|tsp|cups?)\b/gi,' ');
+  text=text.replace(/\b\d+\b/g,' ');
+
+  // Strip each matched food's name and keyword aliases
+  for(const result of foodResults){
+    const food=result.rawFood;
+    const terms=[food.name.toLowerCase(),...(food.kw||[])];
+    for(const kw of terms){
+      const esc=kw.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
+      text=text.replace(new RegExp('\\b'+esc+'\\b','gi'),' ');
+    }
+  }
+
+  // Check remaining tokens for meaningful food words
+  const tokens=text.split(/\s+/).map(t=>t.trim().toLowerCase()).filter(t=>t.length>1);
+  for(const token of tokens){
+    if(!_PARTIAL_FILLER.has(token)&&_PARTIAL_MEANINGFUL.has(token)) return true;
+  }
+  return false;
+}
 
 // Convert an AI draft's ingredients back into parser-shaped items so
 // handleParsed can process them through the existing confirmation flow.
@@ -189,40 +258,70 @@ function aiDraftToParserResults(draft){
 }
 
 // Async entry point used by speech.js instead of the raw parseText→handleParsed pair.
-// Tries the parser; falls back to AI only when the parser finds no food.
+// Tries the parser; falls back to AI when the parser finds no food OR when the
+// parser found food(s) but meaningful unresolved words remain in the transcript.
 async function handleTranscript(transcript,rawText){
   const results=parseText(transcript);
-  if(!parserIsUncertain(results)){
+  const uncertain=parserIsUncertain(results);
+  const mixedPartial=!uncertain&&detectMixedPartial(transcript,results);
+
+  if(!uncertain&&!mixedPartial){
     console.log('[Sous] parser →',results.filter(r=>!r.command).length,'food item(s)');
     handleParsed(results,rawText);
     return;
   }
+
   const key=transcript.trim().toLowerCase();
   if(key===_lastAITranscript){
-    // Same input already sent to AI — don't call again
-    handleParsed(results,rawText);
+    // Same input already sent to AI — don't duplicate the call
+    if(mixedPartial){
+      // Partial match: force confirmation so nothing is auto-saved
+      const flagged=results.map(r=>r.command?r:{...r,needsConfirm:true,weightSpecified:false});
+      handleParsed(flagged,rawText);
+    } else {
+      handleParsed(results,rawText);
+    }
     return;
   }
   _lastAITranscript=key;
-  console.log('[Sous] parser uncertain — trying AI for:',transcript.trim());
-  try{
-    if(typeof interpretMealWithAI==='function'){
-      const draft=await interpretMealWithAI({
-        transcript:transcript.trim(),
-        section:typeof currentMealSection!=='undefined'?currentMealSection:null,
-        countryCode:typeof currentCountry!=='undefined'?currentCountry:null
-      });
-      const aiItems=aiDraftToParserResults(draft);
-      if(aiItems&&aiItems.length){
-        console.log('[Sous] AI →',aiItems.length,'ingredient(s) (needs confirmation)');
-        handleParsed(aiItems,rawText);
-        return;
-      }
-    }
-  }catch(e){
-    console.warn('[Sous] AI fallback error:',e);
+
+  if(mixedPartial){
+    console.log('[Sous] parser partial match — unresolved meaningful words, trying AI for:',transcript.trim());
+  } else {
+    console.log('[Sous] parser uncertain — trying AI for:',transcript.trim());
   }
-  handleParsed(results,rawText);
+
+  if(canUseAIInterpretation()){
+    console.log('[Sous] AI allowed');
+    try{
+      if(typeof interpretMealWithAI==='function'){
+        const draft=await interpretMealWithAI({
+          transcript:transcript.trim(),
+          section:typeof currentMealSection!=='undefined'?currentMealSection:null,
+          countryCode:typeof currentCountry!=='undefined'?currentCountry:null
+        });
+        const aiItems=aiDraftToParserResults(draft);
+        if(aiItems&&aiItems.length){
+          console.log('[Sous] AI →',aiItems.length,'ingredient(s) (needs confirmation)');
+          handleParsed(aiItems,rawText);
+          return;
+        }
+      }
+    }catch(e){
+      console.warn('[Sous] AI fallback error:',e);
+    }
+  } else {
+    console.log('[Sous] AI blocked: free plan');
+  }
+
+  // AI unavailable or returned nothing — use parser results
+  if(mixedPartial){
+    // Partial: force confirmation, don't auto-save incomplete interpretation
+    const flagged=results.map(r=>r.command?r:{...r,needsConfirm:true,weightSpecified:false});
+    handleParsed(flagged,rawText);
+  } else {
+    handleParsed(results,rawText);
+  }
 }
 function updateClock(){
   const n=new Date(),h=n.getHours();
