@@ -7,6 +7,7 @@ function getFoodDatabase(){
   const foods=typeof getPreferredFoods==='function'?getPreferredFoods(currentCountry):FOODS;
   return foods&&foods.length?foods:FOODS;
 }
+window.getFoodDatabase=getFoodDatabase;
 function setCurrentCountry(countryCode){
   currentCountry=typeof normaliseUserCountry==='function'?normaliseUserCountry(countryCode):String(countryCode||'GLOBAL').toUpperCase().trim()||'GLOBAL';
   window.currentCountry=currentCountry;
@@ -493,8 +494,7 @@ function initDateNav(){
 }
 
 function init(){
-  currentCountry=typeof getUserCountry==='function'?getUserCountry():'GLOBAL';
-  window.currentCountry=currentCountry;
+  setCurrentCountry(typeof getUserCountry==='function'?getUserCountry():'GLOBAL');
   updateClock(); setInterval(updateClock,10000);
   initDateNav();
   renderHome();
