@@ -113,52 +113,60 @@ async function interpretMealWithAI({transcript='',section=null,countryCode=null,
   ].filter(Boolean).join('\n');
 
   try{
-    const res=await fetch(config.endpoint,{
-      method:'POST',
-      headers:{
-        'Content-Type':'application/json',
-        'Authorization':`Bearer ${config.apiKey}`
-      },
-      body:JSON.stringify({
-        model:config.model,
-        input:prompt,
-        text:{
-          format:{
-            type:'json_schema',
-            name:'meal_draft',
-            strict:true,
-            schema:{
-              type:'object',
-              additionalProperties:false,
-              properties:{
-                section:{type:['string','null']},
-                ingredients:{
-                  type:'array',
-                  items:{
-                    type:'object',
-                    additionalProperties:false,
-                    properties:{
-                      name:{type:'string'},
-                      quantity:{type:'number'},
-                      unit:{type:'string'}
-                    },
-                    required:['name','quantity','unit']
+    // Request body follows the OpenAI Responses API shape (/v1/responses).
+    // If switching to Chat Completions (/v1/chat/completions), body must use `messages` + `response_format` instead.
+    const controller=new AbortController();
+    const timeout=setTimeout(()=>controller.abort(),10000);
+    let res;
+    try{
+      res=await fetch(config.endpoint,{
+        method:'POST',
+        signal:controller.signal,
+        headers:{
+          'Content-Type':'application/json',
+          'Authorization':`Bearer ${config.apiKey}`
+        },
+        body:JSON.stringify({
+          model:config.model,
+          input:prompt,
+          text:{
+            format:{
+              type:'json_schema',
+              name:'meal_draft',
+              strict:true,
+              schema:{
+                type:'object',
+                additionalProperties:false,
+                properties:{
+                  section:{type:['string','null']},
+                  ingredients:{
+                    type:'array',
+                    items:{
+                      type:'object',
+                      additionalProperties:false,
+                      properties:{
+                        name:{type:'string'},
+                        quantity:{type:'number'},
+                        unit:{type:'string'}
+                      },
+                      required:['name','quantity','unit']
+                    }
                   }
-                }
-              },
-              required:['section','ingredients']
+                },
+                required:['section','ingredients']
+              }
             }
           }
-        }
-      })
-    });
+        })
+      });
+    }finally{
+      clearTimeout(timeout);
+    }
     if(!res.ok) return emptyAIDraft(section,makeMealDraft);
 
-const data=await res.json();
-const rawText=extractAIResponseText(data);
-console.log('AI RAW RESPONSE:', rawText);
-
-const parsed=safeParseAIJSON(rawText);   
+    const data=await res.json();
+    const rawText=extractAIResponseText(data);
+    const parsed=safeParseAIJSON(rawText);
     if(!parsed||!Array.isArray(parsed.ingredients)) return emptyAIDraft(section,makeMealDraft);
 
     return makeMealDraft({
