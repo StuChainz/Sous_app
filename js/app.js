@@ -140,6 +140,90 @@ function draftToMeal(draft){
 window.createMealDraft=createMealDraft;
 window.createIngredientDraft=createIngredientDraft;
 window.draftToMeal=draftToMeal;
+
+// ═══════════════════════════════════════════
+// AI FALLBACK — PARSER → AI INTERPRETATION
+// ═══════════════════════════════════════════
+// Experimental. Parser is always tried first.
+// AI is only called when the parser finds zero food items.
+// All AI results require user confirmation — nothing is auto-saved.
+
+let _lastAITranscript=null;
+
+// Convert an AI draft's ingredients back into parser-shaped items so
+// handleParsed can process them through the existing confirmation flow.
+function aiDraftToParserResults(draft){
+  if(!draft||!Array.isArray(draft.ingredients)||!draft.ingredients.length) return null;
+  const WEIGHT_UNITS={g:1,kg:1000,ml:1,l:1000,oz:28.35,tbsp:15,tsp:5};
+  return draft.ingredients.map(ing=>{
+    const name=String(ing.displayName||ing.inputName||'').trim();
+    if(!name) return null;
+    const qty=typeof ing.quantity==='number'?ing.quantity:1;
+    const unit=String(ing.unit||'').toLowerCase().trim();
+    const isWeightUnit=Object.prototype.hasOwnProperty.call(WEIGHT_UNITS,unit);
+    const food=typeof findFoodByText==='function'?findFoodByText(name):null;
+    const grams=isWeightUnit
+      ?Math.round(qty*(WEIGHT_UNITS[unit]||1))
+      :food?Math.round(food.w*qty):Math.round(qty*100);
+    if(food){
+      return{
+        ...foodScale(food,grams),
+        rawFood:food,
+        confidence:'ai',
+        needsConfirm:true,
+        // weightSpecified false so isClearIngredient never auto-adds AI items
+        weightSpecified:false
+      };
+    }
+    // Food not in local database — surface name for manual review
+    return{
+      name,
+      weight:grams,
+      kcal:0,protein:0,carbs:0,fat:0,fibre:0,
+      icon:'ti-clipboard',
+      confidence:'ai',
+      needsConfirm:true,
+      weightSpecified:false
+    };
+  }).filter(Boolean);
+}
+
+// Async entry point used by speech.js instead of the raw parseText→handleParsed pair.
+// Tries the parser; falls back to AI only when the parser finds no food.
+async function handleTranscript(transcript,rawText){
+  const results=parseText(transcript);
+  if(!parserIsUncertain(results)){
+    console.log('[Sous] parser →',results.filter(r=>!r.command).length,'food item(s)');
+    handleParsed(results,rawText);
+    return;
+  }
+  const key=transcript.trim().toLowerCase();
+  if(key===_lastAITranscript){
+    // Same input already sent to AI — don't call again
+    handleParsed(results,rawText);
+    return;
+  }
+  _lastAITranscript=key;
+  console.log('[Sous] parser uncertain — trying AI for:',transcript.trim());
+  try{
+    if(typeof interpretMealWithAI==='function'){
+      const draft=await interpretMealWithAI({
+        transcript:transcript.trim(),
+        section:typeof currentMealSection!=='undefined'?currentMealSection:null,
+        countryCode:typeof currentCountry!=='undefined'?currentCountry:null
+      });
+      const aiItems=aiDraftToParserResults(draft);
+      if(aiItems&&aiItems.length){
+        console.log('[Sous] AI →',aiItems.length,'ingredient(s) (needs confirmation)');
+        handleParsed(aiItems,rawText);
+        return;
+      }
+    }
+  }catch(e){
+    console.warn('[Sous] AI fallback error:',e);
+  }
+  handleParsed(results,rawText);
+}
 function updateClock(){
   const n=new Date(),h=n.getHours();
   document.getElementById('clock').textContent=String(h).padStart(2,'0')+':'+String(n.getMinutes()).padStart(2,'0');

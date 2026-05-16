@@ -6,7 +6,8 @@
 // is secondary and must never save meals, mutate the active meal, or bypass review.
 // app.js remains responsible for confirmation, conversion, and saving.
 
-const DEFAULT_AI_ENDPOINT='https://api.openai.com/v1/responses';
+// Default to the local proxy. Set window.SOUS_AI_CONFIG.endpoint to call OpenAI directly (requires CORS support).
+const DEFAULT_AI_ENDPOINT='/api/interpret';
 const DEFAULT_AI_MODEL='gpt-4.1-mini';
 
 function fallbackCreateIngredientDraft(input={}){
@@ -101,72 +102,31 @@ async function interpretMealWithAI({transcript='',section=null,countryCode=null,
   if(!cleanTranscript) return emptyAIDraft(section,makeMealDraft);
 
   const config=getAIInterpreterConfig();
-  if(!config.apiKey) return emptyAIDraft(section,makeMealDraft);
 
-  const prompt=[
-    'Return JSON only. No explanations. No text outside JSON.',
-    'Shape: {"section":string|null,"ingredients":[{"name":string,"quantity":number,"unit":string}]}',
-    'Interpret the cooking transcript into ingredient entries.',
-    countryCode?`Country code: ${countryCode}`:null,
-    `Section: ${section||''}`,
-    `Transcript: ${cleanTranscript}`
-  ].filter(Boolean).join('\n');
+  // Only require an API key when calling OpenAI directly (absolute URL).
+  // The local proxy (/api/interpret) holds the key server-side.
+  const isProxy=config.endpoint.startsWith('/');
+  if(!isProxy&&!config.apiKey) return emptyAIDraft(section,makeMealDraft);
 
   try{
-    // Request body follows the OpenAI Responses API shape (/v1/responses).
-    // If switching to Chat Completions (/v1/chat/completions), body must use `messages` + `response_format` instead.
     const controller=new AbortController();
     const timeout=setTimeout(()=>controller.abort(),10000);
     let res;
     try{
+      const headers={'Content-Type':'application/json'};
+      if(!isProxy&&config.apiKey) headers['Authorization']=`Bearer ${config.apiKey}`;
       res=await fetch(config.endpoint,{
         method:'POST',
         signal:controller.signal,
-        headers:{
-          'Content-Type':'application/json',
-          'Authorization':`Bearer ${config.apiKey}`
-        },
-        body:JSON.stringify({
-          model:config.model,
-          input:prompt,
-          text:{
-            format:{
-              type:'json_schema',
-              name:'meal_draft',
-              strict:true,
-              schema:{
-                type:'object',
-                additionalProperties:false,
-                properties:{
-                  section:{type:['string','null']},
-                  ingredients:{
-                    type:'array',
-                    items:{
-                      type:'object',
-                      additionalProperties:false,
-                      properties:{
-                        name:{type:'string'},
-                        quantity:{type:'number'},
-                        unit:{type:'string'}
-                      },
-                      required:['name','quantity','unit']
-                    }
-                  }
-                },
-                required:['section','ingredients']
-              }
-            }
-          }
-        })
+        headers,
+        body:JSON.stringify({transcript:cleanTranscript,section,countryCode})
       });
     }finally{
       clearTimeout(timeout);
     }
     if(!res.ok) return emptyAIDraft(section,makeMealDraft);
 
-    const data=await res.json();
-    const rawText=extractAIResponseText(data);
-    const parsed=safeParseAIJSON(rawText);
+    const parsed=await res.json();
     if(!parsed||!Array.isArray(parsed.ingredients)) return emptyAIDraft(section,makeMealDraft);
 
     return makeMealDraft({

@@ -352,6 +352,13 @@ function parseRecipeText(text){
   return{ingredients,steps,totals};
 }
 
+// Returns true when the parser found no food items and AI should be tried.
+// Commands (undo, summary, etc.) are not food items — they are never uncertain.
+function parserIsUncertain(results){
+  if(!results||!results.length) return true;
+  return results.filter(r=>!r.command).length===0;
+}
+
 // ═══════════════════════════════════════════
 // PARSER TEST HARNESS
 // ═══════════════════════════════════════════

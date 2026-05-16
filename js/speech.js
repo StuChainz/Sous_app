@@ -1656,7 +1656,7 @@ function buildTapRec(){
       const isLow=typeof finalConf==='number'&&finalConf>0&&finalConf<0.75;
       _voiceMode=true;
       if(isLow) showVoiceCorrection(final.trim());
-      else handleParsed(parseText(final.trim()),final.trim());
+      else handleTranscript(final.trim(),final.trim());
     }
   };
   r.onerror=e=>{
@@ -1859,5 +1859,5 @@ function submitText(){
   hideVoiceCorrectBar();
   _voiceMode=false;
   const el=document.getElementById('transcript-text'); if(el) el.textContent='"'+val+'"';
-  inp.value=''; handleParsed(parseText(val),val);
+  inp.value=''; handleTranscript(val,val);
 }
