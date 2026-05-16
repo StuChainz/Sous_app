@@ -1,10 +1,10 @@
 <!DOCTYPE html>
-<html lang="en" data-palette="ember">
+<html lang="en" data-palette="ceramic" class="theme-light">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-<meta name="theme-color" content="#14110D">
-<meta name="color-scheme" content="dark light">
+<meta name="theme-color" content="#F4EFE6">
+<meta name="color-scheme" content="light dark">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Sous">
@@ -13,6 +13,23 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600&family=Geist+Mono:wght@400;500;600&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3/dist/tabler-icons.min.css">
+<script>
+(function(){
+  const fromPalette=p=>{
+    if(p==='ember'||p==='phosphor'||p==='midnight')return{mode:'dark',palette:p};
+    if(p==='ceramic'||p==='ceramic-phosphor'||p==='ceramic-midnight')return{mode:'light',palette:p};
+    return{mode:'light',palette:'ceramic'};
+  };
+  let theme=fromPalette();
+  try{
+    theme=fromPalette((JSON.parse(localStorage.getItem('sous_theme')||'{}')||{}).palette);
+  }catch(e){}
+  document.documentElement.setAttribute('data-palette',theme.palette);
+  document.documentElement.classList.toggle('theme-light',theme.mode==='light');
+  document.documentElement.classList.toggle('theme-dark',theme.mode==='dark');
+  document.querySelector('meta[name="theme-color"]')?.setAttribute('content',theme.mode==='light'?'#F4EFE6':'#14110D');
+})();
+</script>
 <style>
 /* ── TOKENS ─────────────────────────────────────────────── */
 :root {

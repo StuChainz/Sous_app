@@ -5,8 +5,10 @@
 // - nutritionPer100g is the canonical calculation base for expansion/imports.
 // - units are user-facing serving shortcuts; grams remain the internal scale.
 // - aliases help search/parser matching without changing the display name.
-// - countryCodes are reserved for future country-specific filtering.
+// - countryCodes allow global defaults plus country-specific foods.
 // - Imported foods should be normalised into this shape before use.
+// Country-specific foods are for local names, supermarket-style defaults,
+// serving sizes, and branded/imported foods later.
 //
 // Legacy fields (`kw`, `w`, `kcal`, `p`, `c`, `f`, `fi`, `type`) are retained
 // because the current app and parser still rely on them.
@@ -154,7 +156,7 @@ const FOODS=[
 
 const FOOD_SCHEMA_VERSION=1;
 const FOOD_SOURCE='sous_seed';
-const FOOD_COUNTRY_CODES=['GB','US'];
+const FOOD_COUNTRY_CODES=['GLOBAL'];
 const EXTRA_ALIASES={
   'Egg':['eggs','whole egg'],
   'Bacon':['rasher','rashers'],
@@ -202,7 +204,9 @@ function normaliseFood(food){
   food.category=food.category||foodCategory(food);
   food.foodType=food.foodType||food.type||'solid';
   food.source=food.source||FOOD_SOURCE;
-  food.countryCodes=food.countryCodes||FOOD_COUNTRY_CODES.slice();
+  food.countryCodes=(Array.isArray(food.countryCodes)&&food.countryCodes.length?food.countryCodes:FOOD_COUNTRY_CODES)
+    .map(c=>String(c).toUpperCase().trim())
+    .filter(Boolean);
   food.nutritionPer100g=food.nutritionPer100g||{
     calories:food.w?Math.round(food.kcal*100/food.w):food.kcal,
     protein:food.w?Math.round(food.p*100/food.w*10)/10:food.p,
@@ -214,6 +218,43 @@ function normaliseFood(food){
   return food;
 }
 FOODS.forEach(normaliseFood);
+
+function normaliseCountryCode(countryCode){
+  return String(countryCode||'').toUpperCase().trim();
+}
+
+function foodCountryCodes(food){
+  return Array.isArray(food.countryCodes)&&food.countryCodes.length?food.countryCodes:FOOD_COUNTRY_CODES;
+}
+
+function foodSearchTerms(food){
+  return [food.name,...(food.aliases||[]),...(food.kw||[])]
+    .map(t=>String(t).toLowerCase().trim())
+    .filter(Boolean);
+}
+
+function getFoodsForCountry(countryCode){
+  const code=normaliseCountryCode(countryCode);
+  return FOODS.filter(food=>{
+    const codes=foodCountryCodes(food);
+    return codes.includes('GLOBAL')||(code&&codes.includes(code));
+  });
+}
+
+function getPreferredFoods(countryCode){
+  const code=normaliseCountryCode(countryCode);
+  const foods=getFoodsForCountry(code);
+  const countryFoods=foods.filter(food=>code&&foodCountryCodes(food).includes(code)&&!foodCountryCodes(food).includes('GLOBAL'));
+  const countryTerms=new Set(countryFoods.flatMap(foodSearchTerms));
+  return [
+    ...countryFoods,
+    ...foods.filter(food=>{
+      if(countryFoods.includes(food)) return false;
+      if(!foodCountryCodes(food).includes('GLOBAL')) return true;
+      return !foodSearchTerms(food).some(term=>countryTerms.has(term));
+    })
+  ];
+}
 
 const AMBIG=[
   {trigger:['chicken'],  options:['Chicken breast','Chicken thigh'],      question:'Chicken breast or thigh?'},
