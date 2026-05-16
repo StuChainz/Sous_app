@@ -322,24 +322,15 @@ async function handleTranscript(transcript,rawText){
         const aiItems=aiDraftToParserResults(draft);
         if(aiItems&&aiItems.length){
           console.log('[Sous] AI →',aiItems.length,'ingredient(s) (needs confirmation)');
-          // Unknown items (not in food database) need an editable name before
-          // saving — route the first one through the food-choice review screen
-          // which has an editable name field and "Create new food" flow.
+          // Route unknown items (not in local database) through the multi-food
+          // fallback screen so the user can name/create them before saving.
           const firstUnknownIdx=aiItems.findIndex(i=>!i.rawFood);
-          if(firstUnknownIdx>=0&&typeof showFoodChoiceReview==='function'){
+          if(firstUnknownIdx>=0){
             const unknown=aiItems[firstUnknownIdx];
             const before=aiItems.slice(0,firstUnknownIdx);
             const after=aiItems.slice(firstUnknownIdx+1);
             const heardName=(typeof _foodChoiceDisplayName==='function'?_foodChoiceDisplayName(rawText):null)||rawText||unknown.name;
-            showFoodChoiceReview({
-              rawName:heardName,
-              originalText:rawText||transcript,
-              existingItem:{...unknown,weightSpecified:false},
-              existingFood:null,
-              relatedMatches:typeof _relatedFoodMatches==='function'?_relatedFoodMatches(heardName):[],
-              before,
-              after
-            });
+            showMultiFoodFallback(heardName,before,after);
             return;
           }
           handleParsed(aiItems,rawText);
@@ -362,6 +353,194 @@ async function handleTranscript(transcript,rawText){
     handleParsed(results,rawText);
   }
 }
+// ═══════════════════════════════════════════
+// MULTI-FOOD FALLBACK — resolve screen
+// ═══════════════════════════════════════════
+// Shown when parser/AI can't fully resolve the input phrase. Splits the phrase
+// on "and", "with", "plus", and comma, then lets the user pick an existing
+// food or create a new one for each part individually.
+
+let _multiResolvePending=null;
+
+function showMultiFoodFallback(rawPhrase,beforeItems,afterItems){
+  // Split into segments using the parser's splitIngredients when available,
+  // falling back to a simple separator split.
+  let terms=[];
+  if(typeof splitIngredients==='function') terms=splitIngredients(rawPhrase||'');
+  if(!terms.length){
+    terms=(rawPhrase||'').split(/\b(?:and|with|plus)\b|,/i)
+      .map(s=>s.trim()).filter(s=>s.length>1);
+  }
+  if(!terms.length) terms=[rawPhrase||'ingredient'];
+
+  _multiResolvePending={
+    segments:terms.map(term=>{
+      const displayName=(typeof _foodChoiceDisplayName==='function'
+        ?_foodChoiceDisplayName(term):null)||term;
+      return{
+        term,displayName,
+        selectedFood:null,
+        customName:'',customKcal:'',customProtein:'',customCarbs:'',customFat:'',
+        skipped:false,showCreate:false,
+        matches:typeof _relatedFoodMatches==='function'?_relatedFoodMatches(term,null,4):[]
+      };
+    }),
+    before:beforeItems||[],
+    after:afterItems||[]
+  };
+  _renderMultiResolve();
+  showLogScreen('multi-resolve');
+}
+window.showMultiFoodFallback=showMultiFoodFallback;
+
+function _ensureMultiResolveScreen(){
+  let s=document.getElementById('ls-multi-resolve');
+  if(s) return s;
+  s=document.createElement('div');
+  s.className='log-screen';
+  s.id='ls-multi-resolve';
+  s.style.cssText='background:var(--bg);overflow-y:auto;';
+  const anchor=document.getElementById('ls-food-choice')||document.getElementById('ls-multi-confirm');
+  if(anchor&&anchor.parentNode) anchor.parentNode.insertBefore(s,anchor.nextSibling);
+  else document.getElementById('pane-log')?.appendChild(s);
+  return s;
+}
+
+function mrfSyncInputs(){
+  if(!_multiResolvePending) return;
+  _multiResolvePending.segments.forEach((seg,idx)=>{
+    if(!seg.showCreate) return;
+    const n=document.getElementById('mrf-name-'+idx);if(n) seg.customName=n.value;
+    const k=document.getElementById('mrf-kcal-'+idx);if(k) seg.customKcal=k.value;
+    const p=document.getElementById('mrf-p-'+idx);if(p) seg.customProtein=p.value;
+    const c=document.getElementById('mrf-c-'+idx);if(c) seg.customCarbs=c.value;
+    const f=document.getElementById('mrf-f-'+idx);if(f) seg.customFat=f.value;
+  });
+}
+
+function _renderMultiResolve(){
+  const screen=_ensureMultiResolveScreen();
+  if(!screen||!_multiResolvePending) return;
+  const{segments}=_multiResolvePending;
+  const addable=segments.filter(s=>s.selectedFood||(s.showCreate&&s.customName.trim())).length;
+  const esc=s=>String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+
+  let html=`<div style="padding:16px 20px calc(var(--tab-h,80px) + 24px);">`;
+  html+=`<div style="font-size:18px;font-weight:600;color:var(--text);margin-bottom:4px;">Identify ingredients</div>`;
+  html+=`<div style="font-size:13px;color:var(--text-muted);margin-bottom:14px;">Couldn't fully match your input. Resolve each item below.</div>`;
+
+  segments.forEach((seg,idx)=>{
+    const border=seg.selectedFood?'var(--accent)':'var(--border)';
+    html+=`<div style="background:var(--card);border:.5px solid ${border};border-radius:10px;padding:10px 12px;margin-bottom:10px;">`;
+    html+=`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:${seg.skipped?'0':'8'}px;">`;
+    html+=`<div style="font-size:14px;font-weight:600;color:${seg.skipped?'var(--text-muted)':'var(--text)'};${seg.skipped?'text-decoration:line-through;':''}">`;
+    html+=esc(seg.displayName||seg.term);
+    html+=`</div>`;
+    html+=seg.skipped
+      ?`<button type="button" onclick="mrfUnskip(${idx})" style="background:none;border:none;font-size:12px;color:var(--accent);cursor:pointer;padding:2px 6px;">Undo</button>`
+      :`<button type="button" onclick="mrfSkip(${idx})" style="background:none;border:none;font-size:12px;color:var(--text-muted);cursor:pointer;padding:2px 6px;">Skip</button>`;
+    html+=`</div>`;
+
+    if(!seg.skipped){
+      if(seg.matches.length){
+        html+=`<div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:5px;">Existing matches</div>`;
+        html+=`<div style="display:flex;flex-wrap:wrap;gap:5px;margin-bottom:8px;">`;
+        seg.matches.forEach((food,fi)=>{
+          const sel=seg.selectedFood&&seg.selectedFood.name===food.name;
+          html+=`<button type="button" onclick="mrfSelect(${idx},${fi})" style="font-size:12px;padding:5px 10px;border-radius:20px;cursor:pointer;font-family:inherit;border:.5px solid ${sel?'var(--accent)':'var(--border)'};background:${sel?'var(--accent)':'var(--card-2)'};color:${sel?'#fff':'var(--text)'};">${esc(food.name)}</button>`;
+        });
+        html+=`</div>`;
+      }
+      html+=`<div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px;">Create new</div>`;
+      html+=`<button type="button" onclick="mrfToggleCreate(${idx})" style="font-size:12px;color:var(--accent);background:none;border:none;cursor:pointer;font-family:inherit;padding:2px 0;">${seg.showCreate?'Hide ▲':'+ Add custom'}</button>`;
+      if(seg.showCreate){
+        html+=`<div style="margin-top:8px;border-top:.5px solid var(--border);padding-top:8px;">`;
+        html+=`<input type="text" id="mrf-name-${idx}" value="${esc(seg.customName||(seg.displayName||seg.term))}" placeholder="Food name" style="width:100%;box-sizing:border-box;font-size:13px;background:var(--card);border:.5px solid var(--border);border-radius:6px;padding:6px 8px;color:var(--text);font-family:inherit;outline:none;margin-bottom:6px;">`;
+        html+=`<div style="display:grid;grid-template-columns:1fr 1fr;gap:5px;">`;
+        [{id:'mrf-kcal-'+idx,val:seg.customKcal,ph:'kcal / 100g'},{id:'mrf-p-'+idx,val:seg.customProtein,ph:'protein g'},{id:'mrf-c-'+idx,val:seg.customCarbs,ph:'carbs g'},{id:'mrf-f-'+idx,val:seg.customFat,ph:'fat g'}].forEach(({id,val,ph})=>{
+          html+=`<input type="number" id="${id}" value="${esc(String(val||''))}" placeholder="${ph}" min="0" step="0.1" style="font-size:12px;background:var(--card);border:.5px solid var(--border);border-radius:6px;padding:5px 6px;color:var(--text);font-family:inherit;outline:none;">`;
+        });
+        html+=`</div></div>`;
+      }
+    }
+    html+=`</div>`;
+  });
+
+  const btnOk=addable>0;
+  html+=`<button type="button" onclick="mrfCommit()" ${btnOk?'':'disabled'} style="width:100%;padding:13px;font-size:15px;font-weight:600;border-radius:10px;border:none;cursor:${btnOk?'pointer':'default'};background:${btnOk?'var(--accent)':'var(--card-2)'};color:${btnOk?'#fff':'var(--text-muted)'};font-family:inherit;margin-bottom:8px;">${btnOk?`Add ${addable} ingredient${addable!==1?'s':''} to meal`:'Select or create items above'}</button>`;
+  html+=`<div style="display:flex;justify-content:center;"><button type="button" onclick="mrfCancel()" style="background:none;border:none;color:var(--text-muted);font-size:13px;font-family:inherit;padding:8px 12px;cursor:pointer;">Cancel</button></div>`;
+  html+=`</div>`;
+  screen.innerHTML=html;
+}
+
+function mrfSelect(idx,foodIdx){
+  mrfSyncInputs();
+  if(!_multiResolvePending) return;
+  const seg=_multiResolvePending.segments[idx];
+  if(!seg) return;
+  const food=seg.matches[foodIdx];
+  if(!food) return;
+  // Second tap deselects
+  seg.selectedFood=(seg.selectedFood&&seg.selectedFood.name===food.name)?null:food;
+  if(seg.selectedFood) seg.showCreate=false;
+  _renderMultiResolve();
+}
+function mrfSkip(idx){
+  mrfSyncInputs();
+  if(!_multiResolvePending) return;
+  _multiResolvePending.segments[idx].skipped=true;
+  _renderMultiResolve();
+}
+function mrfUnskip(idx){
+  mrfSyncInputs();
+  if(!_multiResolvePending) return;
+  _multiResolvePending.segments[idx].skipped=false;
+  _renderMultiResolve();
+}
+function mrfToggleCreate(idx){
+  mrfSyncInputs();
+  if(!_multiResolvePending) return;
+  const seg=_multiResolvePending.segments[idx];
+  seg.showCreate=!seg.showCreate;
+  if(seg.showCreate){
+    seg.selectedFood=null;
+    if(!seg.customName) seg.customName=seg.displayName||seg.term;
+  }
+  _renderMultiResolve();
+}
+function mrfCommit(){
+  mrfSyncInputs();
+  if(!_multiResolvePending) return;
+  const{segments,before,after}=_multiResolvePending;
+  const items=[];
+  for(const seg of segments){
+    if(seg.skipped) continue;
+    if(seg.selectedFood){
+      const food=seg.selectedFood;
+      items.push({...foodScale(food,food.w),rawFood:food,confidence:'manual',needsConfirm:false,weightSpecified:false});
+    } else if(seg.showCreate&&seg.customName.trim()){
+      const name=seg.customName.trim();
+      const kcal=parseFloat(seg.customKcal)||0;
+      const protein=parseFloat(seg.customProtein)||0;
+      const carbs=parseFloat(seg.customCarbs)||0;
+      const fat=parseFloat(seg.customFat)||0;
+      const cf=typeof addCustomFood==='function'
+        ?addCustomFood({name,w:100,kcal,p:protein,c:carbs,f:fat,fi:0,icon:'ti-clipboard',type:'solid'})
+        :{name,w:100,kcal,p:protein,c:carbs,f:fat,fi:0,icon:'ti-clipboard',type:'solid'};
+      items.push({...foodScale(cf,100),rawFood:cf,confidence:'manual',needsConfirm:false,weightSpecified:false});
+    }
+  }
+  _multiResolvePending=null;
+  const all=[...before,...items,...after];
+  if(all.length) handleParsed(all,'');
+  else{showLogScreen('listening');if(typeof restartAlwaysOn==='function') setTimeout(restartAlwaysOn,400);}
+}
+function mrfCancel(){
+  _multiResolvePending=null;
+  showLogScreen('listening');
+  if(typeof restartAlwaysOn==='function') setTimeout(restartAlwaysOn,400);
+}
+
 function updateClock(){
   const n=new Date(),h=n.getHours();
   document.getElementById('clock').textContent=String(h).padStart(2,'0')+':'+String(n.getMinutes()).padStart(2,'0');

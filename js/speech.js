@@ -547,15 +547,19 @@ function handleParsed(results,rawText=''){
     if(rt.length>1){
       const qty=typeof extractQuantity==='function'?extractQuantity(rt):null;
       const rawName=_foodChoiceDisplayName(rt)||_normaliseChoiceText(rt)||rt;
-      showFoodChoiceReview({
-        rawName,
-        originalText:rt,
-        existingItem:{weightSpecified:qty&&qty.grams!=null,weight:qty&&qty.grams!=null?Math.round(qty.grams):100},
-        existingFood:null,
-        relatedMatches:_relatedFoodMatches(rawName),
-        before:[],
-        after:[]
-      });
+      if(typeof showMultiFoodFallback==='function'){
+        showMultiFoodFallback(rawName,[],[]);
+      } else {
+        showFoodChoiceReview({
+          rawName,
+          originalText:rt,
+          existingItem:{weightSpecified:qty&&qty.grams!=null,weight:qty&&qty.grams!=null?Math.round(qty.grams):100},
+          existingFood:null,
+          relatedMatches:_relatedFoodMatches(rawName),
+          before:[],
+          after:[]
+        });
+      }
     } else {
       if(_voiceMode) showVoiceRetry("Didn't catch that — try again");
       else showToast("Didn't catch that — try again!");
