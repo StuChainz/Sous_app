@@ -212,9 +212,9 @@ html,body{height:100%;min-height:100dvh;font-family:'Geist',sans-serif;backgroun
 .meal-delete-btn:hover{opacity:1;color:var(--danger,#e53e3e);}
 .empty-state{text-align:center;padding:32px 16px;color:var(--text-muted);font-size:13px;}
 .empty-state i{font-size:36px;color:var(--border-strong);display:block;margin-bottom:8px;}
-.log-screen{position:absolute;inset:0;display:none;flex-direction:column;overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;min-height:0;padding-bottom:calc(var(--tab-h) + 32px + env(safe-area-inset-bottom));scroll-padding-bottom:calc(var(--tab-h) + 32px + env(safe-area-inset-bottom));}
+.log-screen{position:absolute;inset:0;display:none;flex-direction:column;overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;min-height:0;padding-bottom:calc(var(--tab-h) + 48px + env(safe-area-inset-bottom));scroll-padding-bottom:calc(var(--tab-h) + 48px + env(safe-area-inset-bottom));}
 .log-screen.active{display:flex;}
-#ls-listening{background:var(--bg);position:absolute;overflow-y:auto;-webkit-overflow-scrolling:touch;padding-bottom:calc(var(--tab-h) + 32px + env(safe-area-inset-bottom));}
+#ls-listening{background:var(--bg);position:absolute;overflow-y:auto;-webkit-overflow-scrolling:touch;padding-bottom:calc(var(--tab-h) + 64px + env(safe-area-inset-bottom));}
 #ls-listening::before{content:"";position:absolute;inset:0;pointer-events:none;background:radial-gradient(60% 40% at 50% 38%, var(--accent-soft), transparent 70%);z-index:0;transition:opacity 0.4s;}
 #ls-listening > *{position:relative;z-index:1;}
 #ls-confirm,#ls-ambiguous,#ls-summary,#ls-multi-confirm{background:var(--bg);padding:16px 20px calc(var(--tab-h) + 40px + env(safe-area-inset-bottom));}
@@ -640,7 +640,7 @@ html,body{height:100%;min-height:100dvh;font-family:'Geist',sans-serif;backgroun
           <input class="voice-text-input" id="text-input" type="text" placeholder='e.g. "150g chicken and 80g rice" or "casserole 600 cal 45g protein"'>
           <button class="send-btn" id="send-btn"><i class="ti ti-send"></i></button>
         </div>
-        <div id="current-meal-list" style="display:none;margin:12px 20px 0;background:var(--card);border:.5px solid var(--border);border-radius:var(--radius-sm);overflow:hidden;"></div>
+        <div id="current-meal-list" style="display:none;margin:12px 20px 0;background:var(--card);border:.5px solid var(--border);border-radius:var(--radius-sm);overflow:visible;"></div>
         <div style="display:none;justify-content:flex-end;margin:6px 20px 0;" id="undo-row">
           <button id="undo-btn" style="background:none;border:none;padding:4px 8px;cursor:pointer;color:var(--text-muted);font-size:12px;display:inline-flex;align-items:center;gap:4px;"><i class="ti ti-arrow-back-up" style="font-size:14px;"></i> Undo</button>
         </div>
