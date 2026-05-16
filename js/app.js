@@ -193,7 +193,9 @@ const _PARTIAL_MEANINGFUL=new Set([
 // interpretation that should not be silently accepted.
 function detectMixedPartial(transcript,results){
   const foodResults=results.filter(r=>!r.command&&!r.ambiguous&&r.rawFood);
-  if(!foodResults.length) return false;
+  const ambigResults=results.filter(r=>!r.command&&r.ambiguous);
+  // Only relevant when something was matched (exact food or ambig trigger)
+  if(!foodResults.length&&!ambigResults.length) return false;
 
   let text=typeof normaliseLogText==='function'?normaliseLogText(transcript):transcript.toLowerCase();
 
@@ -208,6 +210,23 @@ function detectMixedPartial(transcript,results){
     for(const kw of terms){
       const esc=kw.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
       text=text.replace(new RegExp('\\b'+esc+'\\b','gi'),' ');
+    }
+  }
+
+  // Strip ambiguous trigger labels and their option names so they don't
+  // count as unresolved — e.g. "chicken" from the chicken ambig trigger.
+  for(const result of ambigResults){
+    const label=String(result.label||'').toLowerCase().trim();
+    if(label){
+      const esc=label.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
+      text=text.replace(new RegExp('\\b'+esc+'\\b','gi'),' ');
+    }
+    for(const opt of(result.matches||[])){
+      const optName=String(opt.name||'').toLowerCase();
+      if(optName){
+        const esc=optName.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
+        text=text.replace(new RegExp('\\b'+esc+'\\b','gi'),' ');
+      }
     }
   }
 
@@ -303,6 +322,26 @@ async function handleTranscript(transcript,rawText){
         const aiItems=aiDraftToParserResults(draft);
         if(aiItems&&aiItems.length){
           console.log('[Sous] AI →',aiItems.length,'ingredient(s) (needs confirmation)');
+          // Unknown items (not in food database) need an editable name before
+          // saving — route the first one through the food-choice review screen
+          // which has an editable name field and "Create new food" flow.
+          const firstUnknownIdx=aiItems.findIndex(i=>!i.rawFood);
+          if(firstUnknownIdx>=0&&typeof showFoodChoiceReview==='function'){
+            const unknown=aiItems[firstUnknownIdx];
+            const before=aiItems.slice(0,firstUnknownIdx);
+            const after=aiItems.slice(firstUnknownIdx+1);
+            const heardName=(typeof _foodChoiceDisplayName==='function'?_foodChoiceDisplayName(rawText):null)||rawText||unknown.name;
+            showFoodChoiceReview({
+              rawName:heardName,
+              originalText:rawText||transcript,
+              existingItem:{...unknown,weightSpecified:false},
+              existingFood:null,
+              relatedMatches:typeof _relatedFoodMatches==='function'?_relatedFoodMatches(heardName):[],
+              before,
+              after
+            });
+            return;
+          }
           handleParsed(aiItems,rawText);
           return;
         }
