@@ -50,6 +50,83 @@ function shouldConfirmFoodMatch(rawText,item){
   return matchedKey!==itemKey||match.shouldConfirm;
 }
 window.shouldConfirmFoodMatch=shouldConfirmFoodMatch;
+
+function nutritionPer100gFromFood(food){
+  if(!food) return null;
+  if(food.nutritionPer100g) return {...food.nutritionPer100g};
+  const w=Number(food.w)||100;
+  return {
+    calories:Math.round((Number(food.kcal)||0)*100/w),
+    protein:Math.round((Number(food.p)||0)*100/w*10)/10,
+    carbs:Math.round((Number(food.c)||0)*100/w*10)/10,
+    fat:Math.round((Number(food.f)||0)*100/w*10)/10,
+    fibre:Math.round((Number(food.fi)||0)*100/w*10)/10
+  };
+}
+function createMealDraft({section=null,source='manual',ingredients=[],needsConfirmation,questions}={}){
+  const draft={section,source,createdAt:Date.now(),ingredients:ingredients.map(createIngredientDraft)};
+  if(needsConfirmation!=null) draft.needsConfirmation=!!needsConfirmation;
+  if(questions!=null) draft.questions=questions;
+  return draft;
+}
+function createIngredientDraft(input={}){
+  const food=input.rawFood||input.food||null;
+  const serving=input.serving||null;
+  const unit=serving?.label||input.unit||(input.type==='liquid'?'ml':'g');
+  const quantity=serving?.quantity!=null?serving.quantity:(input.quantity!=null?input.quantity:(input.weight!=null?input.weight:1));
+  const draft={
+    inputName:input.inputName||input.heardName||input.name||input.displayName||'',
+    displayName:input.displayName||input.name||input.inputName||'',
+    quantity,
+    unit
+  };
+  if(food?.id) draft.matchedFoodId=food.id;
+  if(input.weight!=null) draft.grams=Math.round(Number(input.weight)||0);
+  const per100=nutritionPer100gFromFood(food);
+  if(per100) draft.nutritionPer100g=per100;
+  if(serving?.nutritionPerUnit) draft.nutritionPerUnit={...serving.nutritionPerUnit};
+  if(input.confidence) draft.confidence=input.confidence;
+  return draft;
+}
+function draftIngredientToMealItem(ingredient){
+  const grams=ingredient.grams!=null?Math.round(Number(ingredient.grams)||0):null;
+  const per100=ingredient.nutritionPer100g||null;
+  const r=grams&&per100?grams/100:0;
+  return {
+    name:ingredient.displayName||ingredient.inputName,
+    weight:grams,
+    kcal:Math.round((Number(per100?.calories)||0)*r),
+    protein:Math.round((Number(per100?.protein)||0)*r*10)/10,
+    carbs:Math.round((Number(per100?.carbs)||0)*r*10)/10,
+    fat:Math.round((Number(per100?.fat)||0)*r*10)/10,
+    fibre:Math.round((Number(per100?.fibre)||0)*r*10)/10,
+    icon:'ti-clipboard',
+    type:ingredient.unit==='ml'?'liquid':'solid'
+  };
+}
+function draftToMeal(draft){
+  const ingredients=(draft.meal||draft.savedIngredients||draft.ingredients||[]).map(i=>{
+    if(i.displayName||i.inputName) return draftIngredientToMealItem(i);
+    return {...i};
+  });
+  const mt=typeof sumMacros==='function'?sumMacros(ingredients):{kcal:0,protein:0,carbs:0,fat:0,fibre:0};
+  return {
+    name:draft.name||'Meal',
+    time:draft.time||new Date(draft.createdAt||Date.now()).toISOString(),
+    section:draft.section,
+    ingredients,
+    totals:{
+      kcal:Math.round(mt.kcal),
+      protein:Math.round(mt.protein*10)/10,
+      carbs:Math.round(mt.carbs*10)/10,
+      fat:Math.round(mt.fat*10)/10,
+      fibre:Math.round(mt.fibre*10)/10
+    }
+  };
+}
+window.createMealDraft=createMealDraft;
+window.createIngredientDraft=createIngredientDraft;
+window.draftToMeal=draftToMeal;
 function updateClock(){
   const n=new Date(),h=n.getHours();
   document.getElementById('clock').textContent=String(h).padStart(2,'0')+':'+String(n.getMinutes()).padStart(2,'0');
@@ -191,15 +268,12 @@ function logUsualMealByIndex(section,idx){
     if(typeof syncServingFromWeight==='function') syncServingFromWeight(item);
     return item;
   });
-  const mt=sumMacros(ingredients);
-  const mealObj={
-    id:Date.now(),
-    name:u.name,
-    time:new Date().toISOString(),
-    section:mealSection,
-    ingredients,
-    totals:{kcal:Math.round(mt.kcal),protein:Math.round(mt.protein*10)/10,carbs:Math.round(mt.carbs*10)/10,fat:Math.round(mt.fat*10)/10,fibre:Math.round(mt.fibre*10)/10}
-  };
+  const draft=createMealDraft({section:mealSection,source:'usual-meal',ingredients});
+  draft.name=u.name;
+  draft.savedIngredients=ingredients;
+  const mealObj=draftToMeal(draft);
+  mealObj.id=Date.now();
+  const mt=mealObj.totals;
   if(!log[date]) log[date]={meals:[],totals:{kcal:0,protein:0,carbs:0,fat:0,fibre:0}};
   log[date].meals.push(mealObj);
   log[date].totals=sumMacros(log[date].meals.map(m=>m.totals));

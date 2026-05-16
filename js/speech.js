@@ -19,7 +19,13 @@ function _persistDraft(){
   const quick=typeof currentQuickMode!=='undefined'&&currentQuickMode;
   const editing=typeof currentEditMealId!=='undefined'&&currentEditMealId;
   if(quick||editing) return;
-  saveDraft({meal:meal.map(i=>({...i})),section:currentMealSection||null,savedAt:Date.now()});
+  const ingredients=meal.map(i=>({...i}));
+  const draft=typeof createMealDraft==='function'
+    ? createMealDraft({section:currentMealSection||null,source:'cooking-session',ingredients})
+    : {section:currentMealSection||null,ingredients:[]};
+  draft.meal=ingredients;
+  draft.savedAt=Date.now();
+  saveDraft(draft);
 }
 function undoLastAction(){
   if(!undoSnapshot) return;
@@ -1604,12 +1610,15 @@ function generateMealNameFromIngredients(ingredients,fallbackSection){
 function saveMealToLog(saveAsUsual=false){
   const date=(typeof selectedLogDate!=='undefined'?selectedLogDate:todayStr()),log=getLog();
   if(!log[date]) log[date]={meals:[],totals:{kcal:0,protein:0,carbs:0,fat:0,fibre:0}};
-  const mt=sumMacros(meal);
   const section=currentMealSection||defaultSectionFromTime();
   const nameInput=document.getElementById('sum-meal-name');
   const typedName=nameInput?(nameInput.value.trim()||''):'';
   const name=typedName||generateMealNameFromIngredients(meal,section);
-  const mealObj={name,time:new Date().toISOString(),section,ingredients:meal.slice(),totals:{kcal:Math.round(mt.kcal),protein:Math.round(mt.protein*10)/10,carbs:Math.round(mt.carbs*10)/10,fat:Math.round(mt.fat*10)/10,fibre:Math.round(mt.fibre*10)/10}};
+  const ingredients=meal.slice();
+  const draft=typeof createMealDraft==='function'?createMealDraft({section,source:'cooking-session',ingredients}):{section,source:'cooking-session',ingredients};
+  draft.name=name;
+  draft.savedIngredients=ingredients;
+  const mealObj=typeof draftToMeal==='function'?draftToMeal(draft):{name,time:new Date().toISOString(),section,ingredients,totals:sumMacros(ingredients)};
   if(typeof currentEditMealId!=='undefined'&&currentEditMealId&&typeof currentEditMealDate!=='undefined'&&currentEditMealDate){
     const editDate=currentEditMealDate;
     if(!log[editDate]) log[editDate]={meals:[],totals:{kcal:0,protein:0,carbs:0,fat:0,fibre:0}};
@@ -1724,12 +1733,13 @@ function stopAllRec(){
 // ═══════════════════════════════════════════
 function startFreshLog(presetSection=null){
   const draft=typeof getDraft==='function'?getDraft():null;
-  const hasDraft=draft&&Array.isArray(draft.meal)&&draft.meal.length>0;
+  const draftItems=draft&&(Array.isArray(draft.meal)?draft.meal:(Array.isArray(draft.savedIngredients)?draft.savedIngredients:null));
+  const hasDraft=Array.isArray(draftItems)&&draftItems.length>0;
   meal=[]; itemQueue=[]; pendingFood=null; currentAmbig=null; undoSnapshot=null; updateUndoBtn();
   currentMealSection=hasDraft?(draft.section||presetSection):presetSection;
   currentQuickMode=false; currentEditMealId=null; currentEditMealDate=null;
   if(hasDraft){
-    draft.meal.forEach(i=>meal.push({...i,id:i.id||nextIngId++}));
+    draftItems.forEach(i=>meal.push({...i,id:i.id||nextIngId++}));
     if(meal.length) nextIngId=Math.max(...meal.map(i=>i.id||0))+1;
   }
   stopAllRec();
