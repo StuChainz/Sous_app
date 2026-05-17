@@ -11,6 +11,7 @@ let _editBaseValues=null,_editFoodKey=null,_pendingOverride=null;
 let currentMealSection=null;
 let _inlineEditId=null,_inlineManualMacros=false,_confirmManualMacros=false;
 let _pendingFoodChoice=null;
+let sousRealtime=null;
 
 function snapshotMeal(){undoSnapshot=meal.map(i=>({...i}));updateUndoBtn();}
 function updateUndoBtn(){const r=document.getElementById('undo-row');if(r)r.style.display=undoSnapshot?'flex':'none';}
@@ -807,6 +808,7 @@ function showLogScreen(id){
   document.querySelectorAll('.log-screen').forEach(s=>s.classList.remove('active'));
   document.getElementById('ls-'+id).classList.add('active');
   if(id==='listening'){renderCurrentMeal();renderRecentIngredients();}
+  else stopSousRealtimeVoice(false);
 }
 
 // ═══════════════════════════════════════════
@@ -840,6 +842,13 @@ function speak(text,onEnd){
 function speakThenListen(text,onResult){
   pauseAlwaysOn();
   speak(text,()=>setTimeout(()=>startClarificationListen(onResult),200));
+}
+
+function speakCachedResponse(key,data={},onEnd){
+  const fallback=()=>speak(typeof getCachedResponse==='function'?getCachedResponse(key,data):'Okay.',onEnd);
+  if(typeof getCachedResponseAsync==='function'){
+    getCachedResponseAsync(key,data).then(text=>speak(text,onEnd)).catch(fallback);
+  } else fallback();
 }
 
 // ═══════════════════════════════════════════
@@ -1714,6 +1723,209 @@ function buildTapRec(){
   return r;
 }
 function stopTapRec(){isRecording=false;if(!isSpeaking)setMicState(alwaysOnActive?'listening':'idle');}
+function realtimeVoiceEnabled(){
+  try{
+    return localStorage.getItem('sous_realtime_voice')==='1' || new URLSearchParams(location.search).get('realtime')==='1';
+  }catch(e){return false;}
+}
+function realtimeClientSecret(data){
+  return data && (data.client_secret?.value || data.client_secret || data.value);
+}
+function realtimeFoodContext(){
+  const foods=typeof getFoodDatabase==='function'?getFoodDatabase():(typeof FOODS!=='undefined'?FOODS:[]);
+  return (foods||[]).map(food=>({
+    name:food.name,
+    aliases:[...(food.kw||[]),...(food.aliases||[])]
+  }));
+}
+function sendRealtimeEvent(event){
+  if(!sousRealtime||!sousRealtime.dc||sousRealtime.dc.readyState!=='open') return false;
+  sousRealtime.dc.send(JSON.stringify(event));
+  return true;
+}
+function extractRealtimeActionText(event){
+  if(!event) return '';
+  if(typeof event.response?.output_text==='string') return event.response.output_text;
+  const output=event.response?.output||event.output||[];
+  if(!Array.isArray(output)) return '';
+  return output.flatMap(item=>Array.isArray(item.content)?item.content:[])
+    .map(part=>part.text||part.transcript||part.output_text||'')
+    .filter(Boolean)
+    .join('\n');
+}
+function normalizeRealtimeSection(section){
+  return ['breakfast','lunch','dinner','snacks','supplements'].includes(section)?section:null;
+}
+function transcriptFromRealtimeAction(action){
+  const cleaned=String(action.transcript||'').trim();
+  if(cleaned) return cleaned;
+  if(!Array.isArray(action.ingredients)) return '';
+  return action.ingredients.map(ing=>{
+    const name=String(ing.name||'').trim();
+    if(!name) return '';
+    const qty=ing.quantity==null?'':String(ing.quantity).trim();
+    const unit=String(ing.unit||'').trim();
+    return [qty,unit,name].filter(Boolean).join(' ');
+  }).filter(Boolean).join(' and ');
+}
+function handleRealtimeActionText(text){
+  const raw=String(text||'').trim();
+  if(!raw) return;
+  let action=null;
+  try{
+    const json=raw.match(/\{[\s\S]*\}/)?.[0]||raw;
+    action=JSON.parse(json);
+  }catch(e){
+    console.log('[Sous Realtime] error', 'Invalid action JSON');
+    showVoiceCorrection(raw);
+    return;
+  }
+  if(!action||!action.type) return;
+  console.log('[Sous Realtime] action received');
+  if(action.type==='cancel'){
+    stopSousRealtimeVoice(true);
+    return;
+  }
+  if(action.type==='clarify'){
+    const msg=String(action.message||'').trim()||(typeof getCachedResponse==='function'?getCachedResponse('clarification_needed'):'I need one more detail.');
+    showToast(msg,2600);
+    speak(msg);
+    return;
+  }
+  if(action.type==='log_ingredients'){
+    const section=normalizeRealtimeSection(action.section);
+    if(section) currentMealSection=section;
+    const transcript=transcriptFromRealtimeAction(action);
+    if(!transcript){
+      speakCachedResponse('clarification_needed');
+      return;
+    }
+    const el=document.getElementById('transcript-text');
+    if(el) el.textContent='"'+transcript+'"';
+    handleTranscript(transcript,transcript);
+  }
+}
+function handleRealtimeServerEvent(event){
+  if(!event||!event.type) return;
+  if(event.type.endsWith('.delta')){
+    const delta=event.delta||event.text||event.transcript||'';
+    if(delta&&sousRealtime) sousRealtime.textBuffer=(sousRealtime.textBuffer||'')+delta;
+    return;
+  }
+  if(event.type==='response.done'||event.type==='response.completed'){
+    const text=extractRealtimeActionText(event)||(sousRealtime&&sousRealtime.textBuffer)||'';
+    if(sousRealtime) sousRealtime.textBuffer='';
+    handleRealtimeActionText(text);
+  }
+  if(event.type==='error'){
+    console.log('[Sous Realtime] error', event.error?.message||event.error||'Realtime error');
+    stopSousRealtimeVoice(false);
+    speakCachedResponse('realtime_error');
+    setTimeout(restartAlwaysOn,300);
+  }
+}
+function finishSousRealtimeVoice(){
+  if(!sousRealtime||!sousRealtime.active) return;
+  if(sousRealtime.finishing) return;
+  sousRealtime.finishing=true;
+  try{sousRealtime.stream&&sousRealtime.stream.getAudioTracks().forEach(track=>track.stop());}catch(e){}
+  isRecording=false;
+  setMicState('speaking');
+  if(!sendRealtimeEvent({
+    type:'response.create',
+    response:{
+      output_modalities:['text'],
+      instructions:'Return one compact JSON action for the spoken request. If there was no clear request, return {"type":"clarify","message":"What would you like to log?"}.'
+    }
+  })) stopSousRealtimeVoice(true);
+  else {
+    clearTimeout(sousRealtime.idleTimer);
+    sousRealtime.idleTimer=setTimeout(()=>stopSousRealtimeVoice(true),12000);
+  }
+}
+async function startSousRealtimeVoice(){
+  if(sousRealtime&&sousRealtime.active){
+    stopSousRealtimeVoice(true);
+    return;
+  }
+  if(!navigator.mediaDevices?.getUserMedia||!window.RTCPeerConnection){
+    startTapRec();
+    return;
+  }
+  hideVoiceCorrectBar();
+  pauseAlwaysOn();
+  const el=document.getElementById('transcript-text'); if(el) el.textContent='—';
+  const inp=document.getElementById('text-input'); if(inp) inp.value='';
+  setMicState('recording');
+  try{
+    const tokenRes=await fetch('/api/realtime/session',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({
+        section:currentMealSection||null,
+        foods:realtimeFoodContext()
+      })
+    });
+    const tokenData=await tokenRes.json().catch(()=>({}));
+    if(!tokenRes.ok) throw new Error(tokenData.error||'Realtime session failed');
+    const secret=realtimeClientSecret(tokenData);
+    if(!secret) throw new Error('Realtime client secret missing');
+
+    const pc=new RTCPeerConnection();
+    const dc=pc.createDataChannel('oai-events');
+    const stream=await navigator.mediaDevices.getUserMedia({audio:true});
+    stream.getAudioTracks().forEach(track=>pc.addTrack(track,stream));
+    const audio=document.createElement('audio');
+    audio.autoplay=true;
+    pc.ontrack=e=>{audio.srcObject=e.streams[0];};
+    sousRealtime={active:true,pc,dc,stream,audio,textBuffer:'',idleTimer:null};
+    dc.addEventListener('open',()=>{
+      console.log('[Sous Realtime] connected');
+      isRecording=true;
+      setMicState('recording');
+      speakCachedResponse('realtime_ready');
+      clearTimeout(sousRealtime.idleTimer);
+      sousRealtime.idleTimer=setTimeout(()=>stopSousRealtimeVoice(true),60000);
+    });
+    dc.addEventListener('message',e=>{
+      try{handleRealtimeServerEvent(JSON.parse(e.data));}
+      catch(err){console.log('[Sous Realtime] error', err.message);}
+    });
+    pc.addEventListener('connectionstatechange',()=>{
+      if(['failed','disconnected','closed'].includes(pc.connectionState)) stopSousRealtimeVoice(false);
+    });
+
+    const offer=await pc.createOffer();
+    await pc.setLocalDescription(offer);
+    const sdpRes=await fetch('https://api.openai.com/v1/realtime/calls',{
+      method:'POST',
+      headers:{
+        'Authorization':'Bearer '+secret,
+        'Content-Type':'application/sdp'
+      },
+      body:offer.sdp
+    });
+    if(!sdpRes.ok) throw new Error('Realtime connection failed');
+    await pc.setRemoteDescription({type:'answer',sdp:await sdpRes.text()});
+  }catch(e){
+    console.log('[Sous Realtime] error', e.message);
+    stopSousRealtimeVoice(false);
+    speakCachedResponse('realtime_error',{},()=>setTimeout(startTapRec,200));
+  }
+}
+function stopSousRealtimeVoice(announce=false){
+  if(!sousRealtime) return;
+  const rt=sousRealtime;
+  sousRealtime=null;
+  clearTimeout(rt.idleTimer);
+  try{rt.dc&&rt.dc.close();}catch(e){}
+  try{rt.pc&&rt.pc.close();}catch(e){}
+  try{rt.stream&&rt.stream.getTracks().forEach(track=>track.stop());}catch(e){}
+  if(rt.audio) rt.audio.srcObject=null;
+  isRecording=false;
+  if(!isSpeaking) setMicState(alwaysOnActive?'listening':'idle');
+  if(announce) speakCachedResponse('realtime_stopped');
+}
 function startTapRec(){
   if(!SR){showToast('Speech not supported — use text input');return;}
   if(!tapRec) tapRec=buildTapRec();
@@ -1766,6 +1978,7 @@ function startAlwaysOn(){
   try{alwaysOnRec.start();}catch(e){document.getElementById('perm-warn').style.display='block';}
 }
 function stopAllRec(){
+  stopSousRealtimeVoice(false);
   try{if(tapRec)tapRec.stop();}catch(e){}
   try{if(alwaysOnRec)alwaysOnRec.stop();}catch(e){}
   isRecording=false;alwaysOnActive=false;
@@ -1831,7 +2044,13 @@ function resumeLog(){
 function wireLogButtons(){
   document.getElementById('log-cancel-btn').addEventListener('click',()=>{currentEditMealId=null;currentEditMealDate=null;currentQuickMode=false;if(typeof clearDraft==='function')clearDraft();stopAllRec();setMicState('idle');switchTab('home');});
   document.getElementById('finished-meal-btn').addEventListener('click',()=>{if(!meal.length){showToast('Add some ingredients first!');return;}stopAllRec();showSummary();});
-  document.getElementById('mic-btn').addEventListener('click',()=>{if(isSpeaking){window.speechSynthesis&&window.speechSynthesis.cancel();isSpeaking=false;}if(isRecording){try{tapRec&&tapRec.stop();}catch(e){}}else startTapRec();});
+  document.getElementById('mic-btn').addEventListener('click',()=>{
+    if(isSpeaking){window.speechSynthesis&&window.speechSynthesis.cancel();isSpeaking=false;}
+    if(sousRealtime&&sousRealtime.active){finishSousRealtimeVoice();return;}
+    if(isRecording){try{tapRec&&tapRec.stop();}catch(e){}}
+    else if(realtimeVoiceEnabled()) startSousRealtimeVoice();
+    else startTapRec();
+  });
   document.getElementById('send-btn').addEventListener('click',submitText);
   document.getElementById('voice-retry-btn').addEventListener('click',()=>{hideVoiceCorrectBar();startTapRec();});
   // voice-create-food-btn onclick is set dynamically in showNoMatchFallback with the raw text closure

@@ -33,6 +33,7 @@ function switchTab(tab,opts={}){
   document.getElementById('pane-'+tab).classList.add('active');
   document.querySelector(`.tab[data-tab="${tab}"]`).classList.add('active');
   const prev=currentTab; currentTab=tab;
+  if(prev==='log'&&tab!=='log'&&typeof stopAllRec==='function') stopAllRec();
   if(tab==='home') renderHome();
   if(tab==='history') { if(typeof renderHistoryDay==='function') renderHistoryDay(); }
   if(tab==='recipes') { if(typeof renderRecipeList==='function') renderRecipeList(); }

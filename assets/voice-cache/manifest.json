@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "type": "text-response-cache",
+  "responses": {
+    "logged": "text/logged.json",
+    "added": "text/added.json",
+    "saved_to_breakfast": "text/saved_to_breakfast.json",
+    "saved_to_lunch": "text/saved_to_lunch.json",
+    "saved_to_dinner": "text/saved_to_dinner.json",
+    "saved_to_snacks": "text/saved_to_snacks.json",
+    "saved_to_supplements": "text/saved_to_supplements.json",
+    "deleted": "text/deleted.json",
+    "undone": "text/undone.json",
+    "done": "text/done.json",
+    "got_it": "text/got_it.json",
+    "realtime_ready": "text/realtime_ready.json",
+    "realtime_stopped": "text/realtime_stopped.json",
+    "realtime_error": "text/realtime_error.json",
+    "clarification_needed": "text/clarification_needed.json"
+  }
+}
