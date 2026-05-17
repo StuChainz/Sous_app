@@ -8,7 +8,7 @@ const cors = require('cors');
 const app = express();
 const PORT = process.env.PORT || 3001;
 
-app.use(express.json());
+app.use(express.json({ limit: '6mb' }));
 app.use(cors({ origin: /^http:\/\/localhost(:\d+)?$/ }));
 
 // Serve the frontend from the project root.
@@ -110,6 +110,114 @@ app.post('/api/realtime/session', async (req, res) => {
   } catch (err) {
     console.error('[Sous Realtime] error', err.message);
     res.status(500).json({ error: 'Realtime session request failed.', detail: err.message });
+  }
+});
+
+app.post('/api/photo-estimate', async (req, res) => {
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) {
+    return res.status(500).json({ error: 'OPENAI_API_KEY is not set on the server.' });
+  }
+
+  const { image } = req.body || {};
+  if (!image || typeof image !== 'string' || !image.startsWith('data:image/')) {
+    return res.status(400).json({ error: 'A compressed image data URL is required.' });
+  }
+
+  const prompt = [
+    'Estimate restaurant meal nutrition from the photo.',
+    'Return JSON only. Be conservative. If unsure, use low confidence.',
+    'Calories and macros are estimates for the visible edible meal only.'
+  ].join('\n');
+
+  try {
+    const upstream = await fetch('https://api.openai.com/v1/responses', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`
+      },
+      body: JSON.stringify({
+        model: 'gpt-4.1-mini',
+        input: [{
+          role: 'user',
+          content: [
+            { type: 'input_text', text: prompt },
+            { type: 'input_image', image_url: image }
+          ]
+        }],
+        text: {
+          format: {
+            type: 'json_schema',
+            name: 'photo_meal_estimate',
+            strict: true,
+            schema: {
+              type: 'object',
+              additionalProperties: false,
+              properties: {
+                mealName: { type: 'string' },
+                confidence: { type: 'string', enum: ['low', 'medium', 'high'] },
+                estimatedCalories: { type: 'number' },
+                protein: { type: 'number' },
+                carbs: { type: 'number' },
+                fat: { type: 'number' },
+                items: {
+                  type: 'array',
+                  items: {
+                    type: 'object',
+                    additionalProperties: false,
+                    properties: {
+                      name: { type: 'string' },
+                      estimatedGrams: { type: ['number', 'null'] },
+                      calories: { type: ['number', 'null'] },
+                      protein: { type: ['number', 'null'] },
+                      carbs: { type: ['number', 'null'] },
+                      fat: { type: ['number', 'null'] }
+                    },
+                    required: ['name', 'estimatedGrams', 'calories', 'protein', 'carbs', 'fat']
+                  }
+                },
+                notes: { type: 'string' }
+              },
+              required: ['mealName', 'confidence', 'estimatedCalories', 'protein', 'carbs', 'fat', 'items', 'notes']
+            }
+          }
+        }
+      })
+    });
+
+    const text = await upstream.text();
+    let data = null;
+    try { data = text ? JSON.parse(text) : null; } catch {}
+
+    if (!upstream.ok) {
+      return res.status(upstream.status).json({
+        error: `OpenAI error: ${upstream.status}`,
+        detail: data && data.error ? data.error.message || data.error : text
+      });
+    }
+
+    let rawText = '';
+    if (typeof data.output_text === 'string') {
+      rawText = data.output_text;
+    } else if (Array.isArray(data.output)) {
+      rawText = data.output
+        .flatMap(item => Array.isArray(item.content) ? item.content : [])
+        .map(part => part.text || part.output_text || '')
+        .filter(Boolean)
+        .join('\n');
+    }
+
+    let parsed;
+    try {
+      parsed = JSON.parse(rawText);
+    } catch {
+      return res.status(502).json({ error: 'Invalid JSON returned by OpenAI.', raw: rawText });
+    }
+
+    res.json(parsed);
+  } catch (err) {
+    res.status(500).json({ error: 'Photo estimate request failed.', detail: err.message });
   }
 });
 

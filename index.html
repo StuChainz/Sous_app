@@ -574,6 +574,8 @@ html,body{height:100%;height:var(--app-height);min-height:-webkit-fill-available
           <div class="cta-label">Start cooking log</div>
           <div class="cta-sub">Tap or say "Hey Sous"</div>
         </div>
+        <button class="btn-secondary" type="button" onclick="openPhotoEstimatePicker()" style="margin-top:10px;width:100%;"><i class="ti ti-camera" style="margin-right:6px;"></i>Estimate from photo</button>
+        <input id="photo-estimate-input" type="file" accept="image/*" capture="environment" style="position:absolute;width:1px;height:1px;opacity:0;pointer-events:none;overflow:hidden;">
       </div>
 
       <div class="section">
@@ -1154,6 +1156,61 @@ html,body{height:100%;height:var(--app-height);min-height:-webkit-fill-available
       <button class="modal-btn secondary" onclick="doRenameUsualMeal()">Rename</button>
       <button class="modal-btn secondary usual-meal-remove-btn" onclick="doRemoveUsualMeal()">Remove from usuals</button>
       <button class="modal-btn secondary" onclick="closeUsualMealMenu()">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<!-- PHOTO ESTIMATE REVIEW MODAL -->
+<div id="photo-estimate-modal" class="modal-overlay" style="display:none">
+  <div class="modal-sheet">
+    <div class="modal-header">
+      <span class="modal-title">Review photo estimate</span>
+      <button class="modal-close" id="photo-estimate-close-btn">✕</button>
+    </div>
+    <div class="modal-panel">
+      <div id="photo-estimate-status" class="modal-body" style="display:none;margin-bottom:12px;"></div>
+      <div id="photo-estimate-form" style="display:none;">
+        <div class="custom-field-group" style="margin-bottom:10px;">
+          <div class="custom-field-label">Meal name</div>
+          <input type="text" class="custom-input" id="photo-meal-name">
+        </div>
+        <div class="custom-field-group" style="margin-bottom:10px;">
+          <div class="custom-field-label">Section</div>
+          <select class="custom-input" id="photo-meal-section">
+            <option value="breakfast">Breakfast</option>
+            <option value="lunch">Lunch</option>
+            <option value="dinner">Dinner</option>
+            <option value="snacks">Snacks</option>
+            <option value="supplements">Supplements</option>
+          </select>
+        </div>
+        <div class="custom-label-row" style="margin-bottom:10px;">
+          <div class="custom-field-group">
+            <div class="custom-field-label">Calories</div>
+            <input type="number" class="custom-input" id="photo-kcal" min="0">
+          </div>
+          <div class="custom-field-group">
+            <div class="custom-field-label">Protein (g)</div>
+            <input type="number" class="custom-input" id="photo-protein" min="0" step="0.1">
+          </div>
+        </div>
+        <div class="custom-label-row" style="margin-bottom:10px;">
+          <div class="custom-field-group">
+            <div class="custom-field-label">Carbs (g)</div>
+            <input type="number" class="custom-input" id="photo-carbs" min="0" step="0.1">
+          </div>
+          <div class="custom-field-group">
+            <div class="custom-field-label">Fat (g)</div>
+            <input type="number" class="custom-input" id="photo-fat" min="0" step="0.1">
+          </div>
+        </div>
+        <div id="photo-items-list" style="font-size:12px;color:var(--text-muted);line-height:1.5;margin:8px 0 10px;"></div>
+        <div style="font-size:12px;color:var(--text-muted);line-height:1.45;">Photo estimates are approximate. Portion size and hidden oils/sauces may be wrong.</div>
+      </div>
+    </div>
+    <div class="btn-row" style="margin-top:14px;">
+      <button class="btn-secondary" id="photo-estimate-cancel-btn">Cancel</button>
+      <button class="btn-primary" id="photo-estimate-save-btn" style="flex:2;display:none;">Save estimate</button>
     </div>
   </div>
 </div>

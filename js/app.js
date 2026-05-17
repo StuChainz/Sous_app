@@ -679,7 +679,8 @@ function homeMealRowHtml(m){
   const time=new Date(m.time).toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'});
   const n=m.ingredients?m.ingredients.length:0;
   const id=m.id;
-  return`<div class="meal-item" style="cursor:pointer;" onclick="startEditMeal(${id})"><div class="meal-item-left"><div class="meal-item-name">${m.name}</div><div class="meal-item-detail">${time} · ${n} ingredient${n!==1?'s':''}</div></div><div class="meal-item-kcal">${Math.round(m.totals.kcal)} kcal</div><button class="meal-delete-btn" onclick="event.stopPropagation();deleteMealFromHome(${id})" aria-label="Delete meal" title="Delete">×</button></div>`;
+  const source=m.source==='photo_estimate'?' · photo estimate':'';
+  return`<div class="meal-item" style="cursor:pointer;" onclick="startEditMeal(${id})"><div class="meal-item-left"><div class="meal-item-name">${m.name}</div><div class="meal-item-detail">${time} · ${n} ingredient${n!==1?'s':''}${source}</div></div><div class="meal-item-kcal">${Math.round(m.totals.kcal)} kcal</div><button class="meal-delete-btn" onclick="event.stopPropagation();deleteMealFromHome(${id})" aria-label="Delete meal" title="Delete">×</button></div>`;
 }
 function getRecentIngredientsForSection(section){
   const log=getLog();
@@ -724,6 +725,152 @@ function logUsualMealByIndex(section,idx){
   if(typeof updateUsualMeals==='function') updateUsualMeals(mealObj,u.name);
   if(typeof addToRecentIngredients==='function') ingredients.forEach(i=>addToRecentIngredients(i));
   showToast(`${u.name} · ${Math.round(mt.kcal)} kcal saved`,2500);
+  renderHome();
+}
+
+let _photoEstimateDraft=null;
+
+function photoEstimateSectionDefault(){
+  return typeof getDefaultQuickAddSection==='function'
+    ? getDefaultQuickAddSection(selectedLogDate||localDateStr())
+    : 'snacks';
+}
+function showPhotoEstimateModal({status='',showForm=false}={}){
+  const modal=document.getElementById('photo-estimate-modal');
+  if(!modal) return;
+  modal.style.display='flex';
+  requestAnimationFrame(()=>modal.classList.add('show'));
+  const statusEl=document.getElementById('photo-estimate-status');
+  const formEl=document.getElementById('photo-estimate-form');
+  const saveBtn=document.getElementById('photo-estimate-save-btn');
+  if(statusEl){
+    statusEl.style.display=status?'block':'none';
+    statusEl.textContent=status;
+  }
+  if(formEl) formEl.style.display=showForm?'block':'none';
+  if(saveBtn) saveBtn.style.display=showForm?'block':'none';
+}
+function closePhotoEstimateModal(){
+  const modal=document.getElementById('photo-estimate-modal');
+  if(!modal) return;
+  modal.classList.remove('show');
+  setTimeout(()=>{modal.style.display='none';},200);
+  const input=document.getElementById('photo-estimate-input');
+  if(input) input.value='';
+}
+function openPhotoEstimatePicker(){
+  document.getElementById('photo-estimate-input')?.click();
+}
+function resizePhotoForEstimate(file){
+  return new Promise((resolve,reject)=>{
+    const reader=new FileReader();
+    reader.onerror=()=>reject(new Error('Could not read photo.'));
+    reader.onload=()=>{
+      const img=new Image();
+      img.onerror=()=>reject(new Error('Could not load photo.'));
+      img.onload=()=>{
+        const maxW=1024;
+        const scale=Math.min(1,maxW/img.width);
+        const canvas=document.createElement('canvas');
+        canvas.width=Math.max(1,Math.round(img.width*scale));
+        canvas.height=Math.max(1,Math.round(img.height*scale));
+        const ctx=canvas.getContext('2d');
+        ctx.drawImage(img,0,0,canvas.width,canvas.height);
+        resolve(canvas.toDataURL('image/jpeg',0.7));
+      };
+      img.src=reader.result;
+    };
+    reader.readAsDataURL(file);
+  });
+}
+function roundMacro(n){
+  const val=Number(n);
+  if(!Number.isFinite(val)||val<0) return 0;
+  return Math.round(val*10)/10;
+}
+function renderPhotoEstimateReview(estimate){
+  _photoEstimateDraft=estimate;
+  document.getElementById('photo-meal-name').value=estimate.mealName||'Restaurant meal';
+  document.getElementById('photo-meal-section').value=photoEstimateSectionDefault();
+  document.getElementById('photo-kcal').value=Math.round(Number(estimate.estimatedCalories)||0);
+  document.getElementById('photo-protein').value=roundMacro(estimate.protein);
+  document.getElementById('photo-carbs').value=roundMacro(estimate.carbs);
+  document.getElementById('photo-fat').value=roundMacro(estimate.fat);
+  const items=document.getElementById('photo-items-list');
+  if(items){
+    const list=Array.isArray(estimate.items)?estimate.items:[];
+    const bits=list.slice(0,6).map(item=>{
+      const grams=item.estimatedGrams!=null?` · ${Math.round(Number(item.estimatedGrams)||0)}g`:'';
+      const kcal=item.calories!=null?` · ${Math.round(Number(item.calories)||0)} kcal`:'';
+      return `${item.name||'Item'}${grams}${kcal}`;
+    });
+    const confidence=estimate.confidence?`Confidence: ${estimate.confidence}`:'';
+    const notes=estimate.notes?estimate.notes:'';
+    items.textContent=[confidence,...bits,notes].filter(Boolean).join('\n');
+  }
+  showPhotoEstimateModal({showForm:true});
+}
+async function handlePhotoEstimateFile(file){
+  if(!file) return;
+  showPhotoEstimateModal({status:'Estimating from photo...',showForm:false});
+  try{
+    const image=await resizePhotoForEstimate(file);
+    const res=await fetch('/api/photo-estimate',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({image})
+    });
+    const data=await res.json().catch(()=>({}));
+    if(!res.ok) throw new Error(data.error||'Photo estimate failed.');
+    renderPhotoEstimateReview(data);
+  }catch(e){
+    showPhotoEstimateModal({status:'Could not estimate this photo. Please try another photo or log the meal manually.',showForm:false});
+  }
+}
+function saveReviewedPhotoEstimate(){
+  if(!_photoEstimateDraft) return;
+  const section=document.getElementById('photo-meal-section')?.value||photoEstimateSectionDefault();
+  const name=(document.getElementById('photo-meal-name')?.value||'Restaurant meal').trim()||'Restaurant meal';
+  const totals={
+    kcal:Math.round(Number(document.getElementById('photo-kcal')?.value)||0),
+    protein:roundMacro(document.getElementById('photo-protein')?.value),
+    carbs:roundMacro(document.getElementById('photo-carbs')?.value),
+    fat:roundMacro(document.getElementById('photo-fat')?.value),
+    fibre:0
+  };
+  const sourceItems=Array.isArray(_photoEstimateDraft.items)?_photoEstimateDraft.items:[];
+  const ingredients=sourceItems.length?sourceItems.map((item,idx)=>({
+    id:Date.now()+idx,
+    name:item.name||'Photo item',
+    weight:item.estimatedGrams!=null?Math.round(Number(item.estimatedGrams)||0):null,
+    kcal:item.calories!=null?Math.round(Number(item.calories)||0):null,
+    protein:item.protein!=null?roundMacro(item.protein):null,
+    carbs:item.carbs!=null?roundMacro(item.carbs):null,
+    fat:item.fat!=null?roundMacro(item.fat):null,
+    fibre:0,
+    source:'photo_estimate'
+  })):[{id:Date.now(),name,weight:null,kcal:totals.kcal,protein:totals.protein,carbs:totals.carbs,fat:totals.fat,fibre:0,source:'photo_estimate'}];
+  const log=getLog();
+  const date=selectedLogDate||localDateStr();
+  if(!log[date]) log[date]={meals:[],totals:{kcal:0,protein:0,carbs:0,fat:0,fibre:0}};
+  const mealObj={
+    id:Date.now(),
+    name,
+    time:new Date().toISOString(),
+    section,
+    source:'photo_estimate',
+    confidence:_photoEstimateDraft.confidence||'low',
+    notes:_photoEstimateDraft.notes||'',
+    ingredients,
+    savedIngredients:ingredients,
+    totals
+  };
+  log[date].meals.push(mealObj);
+  log[date].totals=sumMacros(log[date].meals.map(m=>m.totals));
+  saveLog(log);
+  closePhotoEstimateModal();
+  _photoEstimateDraft=null;
+  showToast('Photo estimate saved',2400);
   renderHome();
 }
 
@@ -1032,10 +1179,19 @@ function initDateNav(){
   });
 }
 
+function initPhotoEstimate(){
+  document.getElementById('photo-estimate-input')?.addEventListener('change',e=>handlePhotoEstimateFile(e.target.files&&e.target.files[0]));
+  document.getElementById('photo-estimate-close-btn')?.addEventListener('click',closePhotoEstimateModal);
+  document.getElementById('photo-estimate-cancel-btn')?.addEventListener('click',closePhotoEstimateModal);
+  document.getElementById('photo-estimate-modal')?.addEventListener('click',e=>{if(e.target===document.getElementById('photo-estimate-modal'))closePhotoEstimateModal();});
+  document.getElementById('photo-estimate-save-btn')?.addEventListener('click',saveReviewedPhotoEstimate);
+}
+
 function init(){
   setCurrentCountry(typeof getUserCountry==='function'?getUserCountry():'GLOBAL');
   updateClock(); setInterval(updateClock,10000);
   initDateNav();
+  initPhotoEstimate();
   renderHome();
   wireLogButtons();
   initProfile();
