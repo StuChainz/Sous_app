@@ -178,17 +178,25 @@ const EXTRA_ALIASES={
   'Egg':['eggs','whole egg'],
   'Bacon':['rasher','rashers'],
   'Sausages':['sausage','sausages'],
-  'Oats':['porridge oats'],
-  'Bread':['bread slice','slice','slices','toast'],
-  'White bread':['white toast','slice','slices','toast'],
-  'Rye bread':['rye toast','slice','slices','toast'],
-  'Bread roll':['roll','rolls','bun','buns','bap'],
-  'Protein powder':['whey','whey protein','scoop','scoops'],
-  'Olive oil':['oil'],
+  'Oats':['porridge oats','oatmeal','porridge','rolled oats'],
+  'Bread':['bread slice','slice of bread','slices of bread','toast','slice of toast','slices of toast'],
+  'White bread':['white toast','white bread slice','slice of white bread','white slice','white slices'],
+  'Rye bread':['rye toast','rye bread slice','slice of rye bread'],
+  'Bread roll':['roll','rolls','bun','buns','bap','baps'],
+  'Protein powder':['whey','whey protein','protein','protein scoop','scoop of whey'],
+  'Olive oil':['oil','evoo','extra virgin oil'],
   'Milk':['semi skimmed milk','semi-skimmed milk','skimmed milk'],
   'Whole milk':['whole milk','full fat milk'],
   'Oat milk':['oat drink'],
-  'Almond milk':['almond drink']
+  'Almond milk':['almond drink'],
+  'Peanut butter':['pb','peanut spread'],
+  'Courgette':['zucchini'],
+  'Peppers':['bell pepper','bell peppers','capsicum'],
+  'Chickpeas':['garbanzo beans','garbanzo'],
+  'Kidney beans':['red beans'],
+  'Black beans':['black bean'],
+  'Butter beans':['lima beans'],
+  'Coriander':['cilantro']
 };
 function foodIdFromName(name){
   return 'food_'+String(name||'')
@@ -248,19 +256,31 @@ function normaliseFoodSearchText(text){
   return String(text||'')
     .toLowerCase()
     .replace(/&/g,' and ')
+    .replace(/\byoghurt\b/g,'yogurt')
+    .replace(/\byoghurts\b/g,'yogurts')
+    .replace(/\bcourgettes?\b/g,'zucchini')
+    .replace(/\baubergines?\b/g,'eggplant')
     .replace(/[^a-z0-9]+/g,' ')
     .trim()
     .replace(/\s+/g,' ');
 }
 
 const UNSAFE_FOOD_MATCH_KEYS=new Set(['g','gram','grams','ml','slice','slices','scoop','scoops','serving','servings','piece','pieces']);
-const FOOD_MATCH_IGNORED_WORDS=new Set(['of','some','a','an','the']);
+const SAFE_SHORT_FOOD_MATCH_KEYS=new Set(['pb']);
+const FOOD_MATCH_IGNORED_WORDS=new Set([
+  'of','some','a','an','the',
+  'one','two','three','four','five','six','seven','eight','nine','ten',
+  'half','quarter',
+  'slice','slices','piece','pieces','serving','servings','portion','portions',
+  'scoop','scoops','cup','cups','tbsp','tsp','tablespoon','tablespoons','teaspoon','teaspoons',
+  'small','medium','large','big','little','fresh','raw','cooked'
+]);
 
 function getFoodMatchKeys(food){
   const nameKey=normaliseFoodSearchText(food.name);
   const aliases=[...(food.aliases||[]),...(food.kw||[])]
     .map(normaliseFoodSearchText)
-    .filter(term=>term&&term.length>=4&&!UNSAFE_FOOD_MATCH_KEYS.has(term));
+    .filter(term=>term&&(term.length>=4||SAFE_SHORT_FOOD_MATCH_KEYS.has(term))&&!UNSAFE_FOOD_MATCH_KEYS.has(term));
   return [...new Set([nameKey,...aliases].filter(Boolean))];
 }
 
@@ -327,11 +347,46 @@ function foodMatchCountryCode(countryCode){
   return 'GLOBAL';
 }
 
+function recentIngredientToFood(item){
+  const name=String(item?.name||'').trim();
+  const weight=Number(item?.weight)||Number(item?.serving?.grams)||0;
+  if(!name||!weight) return null;
+  return {
+    id:'recent_'+foodIdFromName(name),
+    name,
+    w:Math.round(weight),
+    kcal:Number(item.kcal)||0,
+    p:Number(item.protein)||0,
+    c:Number(item.carbs)||0,
+    f:Number(item.fat)||0,
+    fi:Number(item.fibre)||0,
+    icon:item.icon||'ti-clipboard',
+    type:item.type||'solid',
+    aliases:[name],
+    kw:[name],
+    source:'recent_ingredient',
+    countryCodes:FOOD_COUNTRY_CODES,
+    nutritionPer100g:{
+      calories:Math.round((Number(item.kcal)||0)*100/weight),
+      protein:Math.round((Number(item.protein)||0)*100/weight*10)/10,
+      carbs:Math.round((Number(item.carbs)||0)*100/weight*10)/10,
+      fat:Math.round((Number(item.fat)||0)*100/weight*10)/10,
+      fibre:Math.round((Number(item.fibre)||0)*100/weight*10)/10
+    }
+  };
+}
+
+function getRecentIngredientFoods(){
+  if(typeof getRecentIngredients!=='function') return [];
+  return getRecentIngredients().map(recentIngredientToFood).filter(Boolean);
+}
+
 function getFoodMatchFoods(countryCode,includeCustom=true){
   const code=foodMatchCountryCode(countryCode);
   const customFoods=includeCustom&&typeof getCustomFoods==='function'?getCustomFoods():[];
+  const recentFoods=includeCustom?getRecentIngredientFoods():[];
   const baseFoods=getPreferredFoods(code);
-  return customFoods.length?[...customFoods,...baseFoods]:baseFoods;
+  return [...recentFoods,...customFoods,...baseFoods];
 }
 
 function getFoodTextMatch(text,opts={}){
@@ -363,9 +418,40 @@ function getFoodTextMatch(text,opts={}){
   return best;
 }
 
-function matchFoodByText(text,opts={}){
+function resolveIngredientLocally(text,opts={}){
   const match=getFoodTextMatch(text,opts);
-  return match?match.food:null;
+  if(!match){
+    return {status:'unknown',food:null,confidence:'none',reason:'none',match:null};
+  }
+  const reason=match.matchType==='exact-name'
+    ?'exact'
+    :match.matchType==='exact-alias'
+      ?'alias'
+      :match.matchType==='covered-alias'
+        ?'alias'
+        :'fuzzy';
+  const resolvedReason=match.food?.source==='recent_ingredient'||String(match.food?.id||'').startsWith('cf_')?'memory':reason;
+  if(match.shouldConfirm){
+    const options=[match.food,...(match.competitors||[]).map(c=>c.food)]
+      .filter(Boolean)
+      .filter((food,index,arr)=>arr.findIndex(f=>f.id===food.id||f.name===food.name)===index)
+      .slice(0,4);
+    return {
+      status:'ambiguous',
+      food:match.food,
+      options,
+      confidence:match.confidence,
+      reason:resolvedReason,
+      match,
+      question:'Which one did you mean?'
+    };
+  }
+  return {status:'matched',food:match.food,confidence:match.confidence,reason:resolvedReason,match};
+}
+
+function matchFoodByText(text,opts={}){
+  const resolved=resolveIngredientLocally(text,opts);
+  return resolved.status==='matched'||resolved.status==='ambiguous'?resolved.food:null;
 }
 
 function foodMatchesCountry(food,countryCode){

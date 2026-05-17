@@ -91,6 +91,9 @@ function parseCustomMacroEntry(seg){
   const s=normaliseLogText(seg);
   const macroText=s.replace(/\bfat\s+free\b/gi,'').replace(/\bfull\s+fat\b/gi,'');
   if(!/(calorie|protein|carb|fat)/i.test(macroText)) return null;
+  if(!/(calorie|kcal|carb|fat|fibre|fiber)/i.test(macroText)&&/\b\d+(?:\.\d+)?\s*g\s+protein\b/i.test(macroText)){
+    return null;
+  }
   const kcal=parseMacroNumber(macroText,['calories','kcal']);
   const protein=parseMacroNumber(macroText,['protein','prot']);
   const carbs=parseMacroNumber(macroText,['carbs','carbohydrates','carb']);
@@ -128,6 +131,10 @@ function getAllFoods(){
   return customs.length?[...customs,...FOODS]:FOODS;
 }
 function findFoodByText(text){
+  if(typeof resolveIngredientLocally==='function'){
+    const resolved=resolveIngredientLocally(text);
+    return resolved.status==='matched'||resolved.status==='ambiguous'?resolved.food:null;
+  }
   if(typeof matchFoodByText==='function') return matchFoodByText(text);
   const s=normaliseLogText(text||'');
   let bestFood=null,bestLen=0;
@@ -273,7 +280,7 @@ function parseSingleSegment(seg){
   for(const ag of [...PARSER_AMBIG,...AMBIG]){
     for(const trig of ag.trigger){
       if(new RegExp('\\b'+trig+'\\b','i').test(seg)){
-        const textMatch=typeof getFoodTextMatch==='function'?getFoodTextMatch(seg,{includeCustom:false}):null;
+        const textMatch=typeof getFoodTextMatch==='function'?getFoodTextMatch(seg,{includeCustom:true}):null;
         const specificMatch=textMatch&&textMatch.key!==trig&&textMatch.key.length>trig.length;
         if(!specificMatch){
           const baseFoods=typeof getFoodMatchFoods==='function'?getFoodMatchFoods(null,false):FOODS;
@@ -368,6 +375,10 @@ function runParserTests(){
     '100g chicken breast 50g broccoli',
     'add 10g fat free greek yogurt and add 5g full fat greek yogurt',
     '2 eggs and toast',
+    'one slice of toast',
+    'pb',
+    'evoo',
+    'zucchini',
     'tablespoon olive oil',
     'change chicken breast to chicken thigh',
     'remove broccoli',
