@@ -165,6 +165,71 @@ function recalcMealItemFromFood(item,food,grams){
   Object.assign(item,scaled,{rawFood:food,customMacro:false,confidence:'high',needsConfirm:false});
   return item;
 }
+function normaliseMealSectionWord(text){
+  const s=String(text||'').toLowerCase().trim();
+  if(s==='breakfast') return 'breakfast';
+  if(s==='lunch') return 'lunch';
+  if(s==='dinner'||s==='tea'||s==='supper') return 'dinner';
+  if(s==='snack'||s==='snacks') return 'snacks';
+  return null;
+}
+function parseUsualMealCommand(text){
+  let s=normaliseLogText(text||'')
+    .replace(/\bas\s+yesterday\b/g,'')
+    .replace(/\bfrom\s+yesterday\b/g,'')
+    .replace(/\s+/g,' ')
+    .trim();
+  let m=s.match(/^(?:add|log|track|use)?\s*(?:my\s+|the\s+)?(?:usual|regular|same)(?:\s+meal)?(?:\s+(.+))?$/);
+  if(!m) return null;
+  let query=String(m[1]||'').trim();
+  query=query.replace(/^(?:for\s+)?(?:my\s+|the\s+)?/,'').replace(/\bmeal\b/g,'').trim();
+  const section=normaliseMealSectionWord(query);
+  return {command:'addUsualMeal',section,query:section?'':query};
+}
+function usualMealSearchText(usual){
+  return [
+    usual?.name,
+    usual?.section,
+    ...(usual?.ingredients||[]).map(i=>i.name)
+  ].filter(Boolean).join(' ');
+}
+function findUsualMealByCommand(cmd){
+  if(typeof getUsualMeals!=='function') return null;
+  const usuals=getUsualMeals()||{};
+  const sections=cmd.section?[cmd.section]:Object.keys(usuals);
+  const query=normaliseLogText(cmd.query||'').trim();
+  let best=null,bestScore=0;
+  for(const section of sections){
+    const list=Array.isArray(usuals[section])?usuals[section]:[];
+    list.forEach((u,index)=>{
+      let score=0;
+      if(cmd.section&&!query) score=1000-index;
+      if(query){
+        const name=normaliseLogText(u.name||'');
+        const haystack=normaliseLogText(usualMealSearchText(u));
+        if(name===query) score=900;
+        else if(name.includes(query)) score=700+query.length;
+        else if(haystack.includes(query)) score=500+query.length;
+        else {
+          const tokens=query.split(/\s+/).filter(t=>t.length>2);
+          score=tokens.reduce((sum,t)=>sum+(haystack.includes(t)?t.length:0),0);
+        }
+      }
+      if(score>bestScore){best={...u,section:u.section||section};bestScore=score;}
+    });
+  }
+  return bestScore>0?best:null;
+}
+function addUsualMealToCurrent(usual){
+  if(!usual||!Array.isArray(usual.ingredients)||!usual.ingredients.length) return false;
+  if(typeof addMealToCurrent==='function'){
+    addMealToCurrent(usual);
+  } else {
+    usual.ingredients.forEach((ing,i)=>meal.push({...ing,id:typeof nextIngId!=='undefined'?nextIngId++:Date.now()+i}));
+    if(typeof currentMealSection!=='undefined') currentMealSection=usual.section||currentMealSection;
+  }
+  return true;
+}
 function resolveReplacementFood(text){
   if(typeof resolveIngredientLocally==='function'){
     const resolved=resolveIngredientLocally(text);
@@ -177,6 +242,8 @@ function resolveReplacementFood(text){
 function parseCorrectionCommand(text){
   const s=normaliseLogText(text||'');
   if(/^(undo|undo last|undo last item|remove last|delete last)$/.test(s)) return {command:'undo'};
+  const usual=parseUsualMealCommand(s);
+  if(usual) return usual;
   let m=s.match(/^(?:remove|delete)\s+(.+)$/);
   if(m) return {command:'remove',target:m[1]};
   m=s.match(/^(?:change|make|set|edit)\s+(.+?)\s+(?:to|as)\s+(\d+(?:\.\d+)?)\s*g\b/);
@@ -239,6 +306,14 @@ function applyCorrectionCommand(cmd){
     recalcMealItemFromFood(old,food,old.weight||food.w);
     showToast(`Changed to ${old.name}`);
     speak(`Changed to ${old.name}.`);
+    return true;
+  }
+  if(cmd.command==='addUsualMeal'){
+    const usual=findUsualMealByCommand(cmd);
+    if(!usual){speak("I couldn't find that usual meal.");return true;}
+    if(!addUsualMealToCurrent(usual)){speak("That usual meal doesn't have ingredients yet.");return true;}
+    showToast(`Added ${usual.name}`);
+    speak(`Added ${usual.name}.`);
     return true;
   }
   return false;
@@ -389,6 +464,7 @@ function parseRecipeText(text){
 // Commands (undo, summary, etc.) are not food items — they are never uncertain.
 function parserIsUncertain(results){
   if(!results||!results.length) return true;
+  if(results.some(r=>r&&r.command)) return false;
   return results.filter(r=>!r.command).length===0;
 }
 
@@ -411,6 +487,9 @@ function runParserTests(){
     'replace chicken breast with chicken thigh',
     'actually chicken thigh not breast',
     'use olive oil instead',
+    'my usual breakfast',
+    'usual oats',
+    'same lunch',
     'change chicken breast to chicken thigh',
     'remove broccoli',
   ];

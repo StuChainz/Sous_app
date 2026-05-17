@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sous Local Parser Test</title>
+<style>
+  :root{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#1f1a12;background:#f4efe6;}
+  body{margin:0;padding:24px;}
+  main{max-width:860px;margin:0 auto;}
+  h1{font-size:26px;margin:0 0 8px;}
+  p{color:#6f6254;margin:0 0 18px;line-height:1.45;}
+  button{border:0;border-radius:8px;background:#c5532d;color:white;font-weight:700;padding:10px 14px;cursor:pointer;}
+  .grid{display:grid;gap:10px;margin-top:18px;}
+  .card{background:white;border:1px solid rgba(31,26,18,.1);border-radius:10px;padding:12px;}
+  .pass{border-left:5px solid #5c8a1f;}
+  .fail{border-left:5px solid #b3261e;}
+  .title{font-weight:700;margin-bottom:6px;}
+  code{font-family:"SF Mono",Menlo,monospace;background:#f4efe6;border-radius:5px;padding:2px 5px;}
+  pre{white-space:pre-wrap;background:#1f1a12;color:#f4efe6;border-radius:10px;padding:12px;overflow:auto;}
+</style>
+</head>
+<body>
+<main>
+  <h1>Sous Local Parser Test</h1>
+  <p>
+    This page bypasses the server and AI proxy. It loads the local Sous parser files directly,
+    then tests local matching, recent ingredient memory, and substitution corrections.
+  </p>
+  <button type="button" id="run-btn">Run tests</button>
+  <div id="results" class="grid"></div>
+</main>
+
+<script src="js/storage.js"></script>
+<script src="js/food-data.js"></script>
+<script src="js/parser.js"></script>
+<script>
+var meal=[];
+var spoken=[];
+var toasts=[];
+var testRecentIngredients=[];
+var testUsualMeals={};
+var resultsEl=document.getElementById('results');
+
+window.onerror=function(message,source,line,col,error){
+  showError('Browser error',[
+    String(message),
+    source?`Source: ${source}:${line}:${col}`:'',
+    error&&error.stack?error.stack:''
+  ].filter(Boolean).join('\n'));
+};
+
+function showError(name,details){
+  if(resultsEl) resultsEl.innerHTML=card(name,false,details);
+}
+
+function assertLoaded(){
+  const missing=[
+    'matchFoodByText',
+    'foodScale',
+    'parseText',
+    'applyCorrectionCommand'
+  ].filter(name=>typeof window[name]!=='function');
+  if(missing.length) throw new Error('Missing parser globals: '+missing.join(', '));
+}
+
+function speak(msg){spoken.push(msg);}
+function showToast(msg){toasts.push(msg);}
+
+function resetMeal(){
+  const whiteRice=matchFoodByText('white rice');
+  const chicken=matchFoodByText('chicken breast');
+  if(!whiteRice) throw new Error('Could not match white rice');
+  if(!chicken) throw new Error('Could not match chicken breast');
+  meal=[foodScale(whiteRice,100),foodScale(chicken,100)];
+  meal[0].rawFood=whiteRice;
+  meal[1].rawFood=chicken;
+}
+
+function seedRecentIngredient(){
+  testRecentIngredients=[{
+    name:'Protein yoghurt',
+    weight:180,
+    kcal:150,
+    protein:22,
+    carbs:12,
+    fat:1,
+    fibre:0,
+    icon:'ti-glass',
+    type:'solid',
+    lastUsed:Date.now()
+  }];
+}
+
+function seedUsualMeals(){
+  testUsualMeals={
+    breakfast:[{
+      name:'Oats breakfast',
+      section:'breakfast',
+      ingredients:[foodScale(matchFoodByText('oats'),40)]
+    }],
+    lunch:[{
+      name:'Chicken lunch',
+      section:'lunch',
+      ingredients:[foodScale(matchFoodByText('chicken breast'),120)]
+    }]
+  };
+}
+
+function card(name,passed,details){
+  return `<div class="card ${passed?'pass':'fail'}">
+    <div class="title">${passed?'PASS':'FAIL'} - ${name}</div>
+    <pre>${details}</pre>
+  </div>`;
+}
+
+function runCorrection(input,expectedMeal){
+  resetMeal();
+  spoken=[];
+  toasts=[];
+  const cmd=parseText(input)[0];
+  applyCorrectionCommand(cmd);
+  const actual=meal.map(i=>i.name);
+  const passed=JSON.stringify(actual)===JSON.stringify(expectedMeal);
+  return {
+    passed,
+    details:[
+      `Input: ${input}`,
+      `Command: ${JSON.stringify(cmd)}`,
+      `Meal: ${actual.join(', ')}`,
+      `Expected: ${expectedMeal.join(', ')}`,
+      `Spoken: ${spoken.join(' | ') || '(none)'}`
+    ].join('\n')
+  };
+}
+
+function runUsual(input,expectedMeal){
+  meal=[];
+  spoken=[];
+  toasts=[];
+  window.currentMealSection=null;
+  const cmd=parseText(input)[0];
+  applyCorrectionCommand(cmd);
+  const actual=meal.map(i=>i.name);
+  const passed=JSON.stringify(actual)===JSON.stringify(expectedMeal);
+  return {
+    passed,
+    details:[
+      `Input: ${input}`,
+      `Command: ${JSON.stringify(cmd)}`,
+      `Meal: ${actual.join(', ')}`,
+      `Expected: ${expectedMeal.join(', ')}`,
+      `Spoken: ${spoken.join(' | ') || '(none)'}`
+    ].join('\n')
+  };
+}
+
+function runTests(){
+  try{
+    assertLoaded();
+    seedRecentIngredient();
+    seedUsualMeals();
+    const tests=[];
+
+    const recent=parseText('90g protein yoghurt')[0];
+    tests.push({
+      name:'recent ingredient memory',
+      passed:recent&&recent.name==='Protein yoghurt'&&recent.weight===90&&recent.kcal===75,
+      details:[
+        'Input: 90g protein yoghurt',
+        `Parsed: ${recent?`${recent.name}, ${recent.weight}g, ${recent.kcal} kcal`:'NO MATCH'}`,
+        'Expected: Protein yoghurt, 90g, 75 kcal'
+      ].join('\n')
+    });
+
+    [
+      ['bread instead of rice',['Bread','Chicken breast']],
+      ['swap white rice for brown rice',['Brown rice','Chicken breast']],
+      ['replace chicken breast with chicken thigh',['White rice','Chicken thigh']],
+      ['actually chicken thigh not breast',['White rice','Chicken thigh']],
+      ['use olive oil instead',['White rice','Olive oil']]
+    ].forEach(([input,expected])=>{
+      tests.push({name:input,...runCorrection(input,expected)});
+    });
+
+    [
+      ['my usual breakfast',['Oats']],
+      ['usual oats',['Oats']],
+      ['same lunch',['Chicken breast']]
+    ].forEach(([input,expected])=>{
+      tests.push({name:input,...runUsual(input,expected)});
+    });
+
+    resultsEl.innerHTML=tests
+      .map(t=>card(t.name,t.passed,t.details))
+      .join('');
+  }catch(error){
+    showError('Test runner failed',error&&error.stack?error.stack:String(error));
+  }
+}
+
+window.runTests=runTests;
+window.getRecentIngredients=function(){return testRecentIngredients;};
+window.getUsualMeals=function(){return testUsualMeals;};
+window.getCustomFoods=function(){return [];};
+window.getUserCountry=function(){return 'GLOBAL';};
+document.getElementById('run-btn').addEventListener('click',runTests);
+resultsEl.innerHTML=card('Ready',true,'Click Run tests. If anything breaks, the error will appear here instead of silently doing nothing.');
+</script>
+</body>
+</html>

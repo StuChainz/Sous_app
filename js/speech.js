@@ -990,10 +990,51 @@ function commitQuantity(grams){
   renderCurrentMeal();
   processQueue();
 }
+function findUsualMealForIngredientName(name){
+  if(typeof getUsualMeals!=='function') return null;
+  const query=typeof normaliseLogText==='function'?normaliseLogText(name):String(name||'').toLowerCase().trim();
+  if(!query) return null;
+  const usuals=getUsualMeals()||{};
+  let best=null,bestScore=0;
+  Object.keys(usuals).forEach(section=>{
+    const list=Array.isArray(usuals[section])?usuals[section]:[];
+    list.forEach((u,index)=>{
+      const nameText=typeof normaliseLogText==='function'?normaliseLogText(u.name||''):String(u.name||'').toLowerCase();
+      const ingText=(u.ingredients||[]).map(i=>typeof normaliseLogText==='function'?normaliseLogText(i.name||''):String(i.name||'').toLowerCase()).join(' ');
+      let score=0;
+      if(nameText===query) score=900;
+      else if(nameText.includes(query)) score=700+query.length;
+      else if(ingText.split(/\s+/).includes(query)) score=650+query.length;
+      else if(ingText.includes(query)) score=500+query.length;
+      if(score>bestScore){best={...u,section:u.section||section,_usualIndex:index};bestScore=score;}
+    });
+  });
+  return bestScore>0?best:null;
+}
+function commitUsualFromQuantityPrompt(){
+  if(!pendingFood) return;
+  const usual=pendingFood.usualMealOption||findUsualMealForIngredientName(pendingFood.name);
+  if(!usual){showToast('No usual meal found for this');return;}
+  snapshotMeal();
+  if(typeof addMealToCurrent==='function') addMealToCurrent(usual);
+  else (usual.ingredients||[]).forEach(ing=>meal.push({...ing,id:nextIngId++}));
+  showToast('Added '+usual.name+' ✓');
+  pendingFood=null;
+  showLogScreen('listening');
+  renderCurrentMeal();
+  processQueue();
+}
 function askQuantity(item){
   pendingFood=item;
+  const usual=findUsualMealForIngredientName(item.name);
+  pendingFood.usualMealOption=usual||null;
   document.getElementById('qty-food-name').textContent=item.name;
   document.getElementById('qty-default-btn').textContent='Use default ('+item.weight+'g)';
+  const usualBtn=document.getElementById('qty-usual-btn');
+  if(usualBtn){
+    usualBtn.style.display=usual?'block':'none';
+    usualBtn.textContent=usual?'Use usual '+usual.name:'Use usual';
+  }
   document.getElementById('qty-input').value='';
   showLogScreen('quantity');
   pauseAlwaysOn();
@@ -1845,6 +1886,7 @@ function wireLogButtons(){
     renderCurrentMeal();
     processQueue();
   });
+  document.getElementById('qty-usual-btn')?.addEventListener('click',commitUsualFromQuantityPrompt);
   // Confirm screen — live macro update when weight input changes
   document.getElementById('confirm-qty-input').addEventListener('input',e=>{
     const grams=parseFloat(e.target.value);

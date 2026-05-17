@@ -238,6 +238,14 @@ function detectMixedPartial(transcript,results){
   return false;
 }
 
+function aiEscalationReason(transcript,results){
+  if(results&&results.some(r=>r&&r.command)) return 'none';
+  if(parserIsUncertain(results)) return 'empty';
+  if(detectMixedPartial(transcript,results)) return 'partial';
+  if(results&&results.some(r=>!r.command&&r.confidence==='low')) return 'low-confidence';
+  return 'none';
+}
+
 // Convert an AI draft's ingredients back into parser-shaped items so
 // handleParsed can process them through the existing confirmation flow.
 function aiDraftToParserResults(draft){
@@ -281,10 +289,11 @@ function aiDraftToParserResults(draft){
 // parser found food(s) but meaningful unresolved words remain in the transcript.
 async function handleTranscript(transcript,rawText){
   const results=parseText(transcript);
-  const uncertain=parserIsUncertain(results);
-  const mixedPartial=!uncertain&&detectMixedPartial(transcript,results);
+  const escalationReason=aiEscalationReason(transcript,results);
+  const uncertain=escalationReason==='empty'||escalationReason==='low-confidence';
+  const mixedPartial=escalationReason==='partial';
 
-  if(!uncertain&&!mixedPartial){
+  if(escalationReason==='none'){
     console.log('[Sous] parser →',results.filter(r=>!r.command).length,'food item(s)');
     handleParsed(results,rawText);
     return;
@@ -306,6 +315,8 @@ async function handleTranscript(transcript,rawText){
 
   if(mixedPartial){
     console.log('[Sous] parser partial match — unresolved meaningful words, trying AI for:',transcript.trim());
+  } else if(escalationReason==='low-confidence'){
+    console.log('[Sous] parser low confidence — trying AI for:',transcript.trim());
   } else {
     console.log('[Sous] parser uncertain — trying AI for:',transcript.trim());
   }
@@ -1030,4 +1041,4 @@ function init(){
   initPWA();
   if(window.speechSynthesis){window.speechSynthesis.onvoiceschanged=()=>window.speechSynthesis.getVoices();window.speechSynthesis.getVoices();}
 }
-init();
+if(!window.SOUS_SKIP_INIT) init();
