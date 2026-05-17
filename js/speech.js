@@ -12,6 +12,8 @@ let currentMealSection=null;
 let _inlineEditId=null,_inlineManualMacros=false,_confirmManualMacros=false;
 let _pendingFoodChoice=null;
 let sousRealtime=null;
+let _lastSpeakAt=0;
+let _suppressNextConfirmSpeechUntil=0;
 
 function snapshotMeal(){undoSnapshot=meal.map(i=>({...i}));updateUndoBtn();}
 function updateUndoBtn(){const r=document.getElementById('undo-row');if(r)r.style.display=undoSnapshot?'flex':'none';}
@@ -32,6 +34,7 @@ function undoLastAction(){
   if(!undoSnapshot) return;
   meal.length=0; undoSnapshot.forEach(i=>meal.push(i));
   undoSnapshot=null; updateUndoBtn(); renderCurrentMeal(); showToast('Undone');
+  speakCachedResponse('undone');
   _persistDraft();
 }
 
@@ -234,7 +237,7 @@ function announceAutoAdded(items,after){
   const transcript=document.getElementById('transcript-text');
   if(transcript) transcript.textContent=msg;
   showToast(msg,2600);
-  speak(msg,after);
+  speakCachedResponse('added',{},after);
 }
 function hideVoiceCorrectBar(){
   const b=document.getElementById('voice-correct-bar');if(b)b.style.display='none';
@@ -815,6 +818,21 @@ function showLogScreen(id){
 // TTS
 // ═══════════════════════════════════════════
 function speak(text,onEnd){
+  if(!text){if(onEnd) setTimeout(onEnd,0);return;}
+  try{
+    if(typeof localStorage!=='undefined'&&localStorage.getItem('sous_voice_feedback')==='0'){
+      console.log('[Sous Voice] silent mode enabled');
+      if(onEnd) setTimeout(onEnd,0);
+      return;
+    }
+  }catch(e){}
+  const now=Date.now();
+  if(now-_lastSpeakAt<500){
+    console.log('[Sous Voice] skipped (debounce)');
+    if(onEnd) setTimeout(onEnd,0);
+    return;
+  }
+  _lastSpeakAt=now;
   if(!window.speechSynthesis){if(onEnd)onEnd();return;}
   window.speechSynthesis.cancel();
   isSpeaking=true; setMicState('speaking');
@@ -845,9 +863,14 @@ function speakThenListen(text,onResult){
 }
 
 function speakCachedResponse(key,data={},onEnd){
-  const fallback=()=>speak(typeof getCachedResponse==='function'?getCachedResponse(key,data):'Okay.',onEnd);
+  const say=text=>{
+    if(!text) { if(onEnd) setTimeout(onEnd,0); return; }
+    console.log('[Sous Voice] speaking:',key);
+    speak(text,onEnd);
+  };
+  const fallback=()=>say(typeof getCachedResponse==='function'?getCachedResponse(key,data):'');
   if(typeof getCachedResponseAsync==='function'){
-    getCachedResponseAsync(key,data).then(text=>speak(text,onEnd)).catch(fallback);
+    getCachedResponseAsync(key,data).then(say).catch(fallback);
   } else fallback();
 }
 
@@ -918,7 +941,12 @@ function showConfirm(parsed){
   }
   showLogScreen('confirm');
   pauseAlwaysOn();
-  speak(`Check this: ${parsed.name}, ${itemWeightLabel(parsed)}. Confirm?`,()=>startConfirmListen());
+  if(Date.now()<_suppressNextConfirmSpeechUntil){
+    _suppressNextConfirmSpeechUntil=0;
+    setTimeout(startConfirmListen,200);
+  } else {
+    speak(`Check this: ${parsed.name}, ${itemWeightLabel(parsed)}. Confirm?`,()=>startConfirmListen());
+  }
 }
 function startConfirmListen(){
   const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
@@ -969,7 +997,7 @@ function doConfirm(){
   snapshotMeal(); meal.push(pendingFood); _persistDraft();
   _confirmManualMacros=false;
   const name=pendingFood.name;
-  speak(itemQueue.length ? 'Added. Next.' : 'Added.',()=>{
+  speakCachedResponse('added',{},()=>{
     pendingFood=null;
     processQueue();
     if(document.querySelector('.log-screen.active')?.id==='ls-listening') setTimeout(restartAlwaysOn,300);
@@ -994,6 +1022,7 @@ function commitQuantity(grams){
   const item=syncServingFromWeight({id:nextIngId++,name:food.name,weight:Math.round(grams),kcal:Math.round(food.kcal*r),protein:Math.round(food.p*r*10)/10,carbs:Math.round(food.c*r*10)/10,fat:Math.round(food.f*r*10)/10,fibre:Math.round((food.fi||0)*r*10)/10,icon:food.icon,type:food.type||'solid',rawFood:food});
   snapshotMeal(); meal.push(item); _persistDraft();
   showToast('Added '+item.name+' '+Math.round(grams)+'g ✓');
+  speakCachedResponse('added');
   pendingFood=null;
   showLogScreen('listening');
   renderCurrentMeal();
@@ -1028,6 +1057,7 @@ function commitUsualFromQuantityPrompt(){
   if(typeof addMealToCurrent==='function') addMealToCurrent(usual);
   else (usual.ingredients||[]).forEach(ing=>meal.push({...ing,id:nextIngId++}));
   showToast('Added '+usual.name+' ✓');
+  speakCachedResponse('added');
   pendingFood=null;
   showLogScreen('listening');
   renderCurrentMeal();
@@ -1238,6 +1268,7 @@ function commitMultiConfirm(){
   showLogScreen('listening');
   updateHome();
   showToast('Added '+count+' ingredient'+(count!==1?'s':'')+' ✓');
+  speakCachedResponse('added');
   setTimeout(restartAlwaysOn,400);
 }
 
@@ -1276,7 +1307,7 @@ function showSummary(announce=true){
     list.appendChild(d);
   });
   showLogScreen('summary');
-  if(announce) speak('Meal total: '+Math.round(t.kcal)+' calories.');
+  if(announce) speakCachedResponse('done');
 }
 
 // ═══════════════════════════════════════════
@@ -1573,6 +1604,7 @@ function deleteIngredient(id){
   const name=meal[idx].name;
   snapshotMeal(); meal.splice(idx,1); _persistDraft();
   closeEditModal(); _refreshAfterEdit(); showToast(name+' removed');
+  speakCachedResponse('deleted');
 }
 function deleteFromCurrentMeal(id){
   const idx=meal.findIndex(i=>i.id===id);
@@ -1580,6 +1612,7 @@ function deleteFromCurrentMeal(id){
   const name=meal[idx].name;
   snapshotMeal(); meal.splice(idx,1); _persistDraft();
   renderCurrentMeal(); showToast(name+' removed');
+  speakCachedResponse('deleted');
 }
 function stepIngWeight(id,delta){
   const item=meal.find(i=>i.id===id);
@@ -1787,9 +1820,12 @@ function handleRealtimeActionText(text){
     return;
   }
   if(action.type==='clarify'){
-    const msg=String(action.message||'').trim()||(typeof getCachedResponse==='function'?getCachedResponse('clarification_needed'):'I need one more detail.');
-    showToast(msg,2600);
-    speak(msg);
+    const msg=String(action.message||'').trim();
+    const uiMsg=msg||(typeof getCachedResponse==='function'?getCachedResponse('clarification_needed'):'I need one more detail.');
+    showToast(uiMsg,2600);
+    speakCachedResponse('clarification_needed',{},()=>{
+      if(msg&&msg.length<80) speak(msg);
+    });
     return;
   }
   if(action.type==='log_ingredients'){
@@ -1802,6 +1838,8 @@ function handleRealtimeActionText(text){
     }
     const el=document.getElementById('transcript-text');
     if(el) el.textContent='"'+transcript+'"';
+    speakCachedResponse(action.ingredients&&action.ingredients.length?'added':'logged');
+    _suppressNextConfirmSpeechUntil=Date.now()+3000;
     handleTranscript(transcript,transcript);
   }
 }
@@ -1820,8 +1858,7 @@ function handleRealtimeServerEvent(event){
   if(event.type==='error'){
     console.log('[Sous Realtime] error', event.error?.message||event.error||'Realtime error');
     stopSousRealtimeVoice(false);
-    speakCachedResponse('realtime_error');
-    setTimeout(restartAlwaysOn,300);
+    speakCachedResponse('realtime_error',{},()=>setTimeout(startTapRec,200));
   }
 }
 function finishSousRealtimeVoice(){
@@ -1883,7 +1920,6 @@ async function startSousRealtimeVoice(){
       console.log('[Sous Realtime] connected');
       isRecording=true;
       setMicState('recording');
-      speakCachedResponse('realtime_ready');
       clearTimeout(sousRealtime.idleTimer);
       sousRealtime.idleTimer=setTimeout(()=>stopSousRealtimeVoice(true),60000);
     });
@@ -1924,7 +1960,6 @@ function stopSousRealtimeVoice(announce=false){
   if(rt.audio) rt.audio.srcObject=null;
   isRecording=false;
   if(!isSpeaking) setMicState(alwaysOnActive?'listening':'idle');
-  if(announce) speakCachedResponse('realtime_stopped');
 }
 function startTapRec(){
   if(!SR){showToast('Speech not supported — use text input');return;}
@@ -2069,6 +2104,7 @@ function wireLogButtons(){
     const saveAsUsual=!!document.getElementById('sum-save-usual')?.checked;
     saveMealToLog(saveAsUsual);
     showToast(saveAsUsual?'Meal logged and saved for quick add 🎉':'Meal logged 🎉',2500);
+    speakCachedResponse('logged');
     currentQuickMode=false;
     setTimeout(()=>{meal=[];itemQueue=[];nextIngId=1;stopAllRec();switchTab('home');},1800);
   });
@@ -2100,6 +2136,7 @@ function wireLogButtons(){
     if(!pendingFood) return;
     snapshotMeal(); meal.push(syncServingFromWeight({...pendingFood,id:nextIngId++})); _persistDraft();
     showToast('Added '+pendingFood.name+' ✓');
+    speakCachedResponse('added');
     pendingFood=null;
     showLogScreen('listening');
     renderCurrentMeal();

@@ -927,6 +927,7 @@ function deleteMealFromHome(id){
   day.totals=sumMacros(day.meals.map(m=>m.totals));
   saveLog(log);
   renderHome();
+  if(typeof speakCachedResponse==='function') speakCachedResponse('deleted');
 }
 
 function startEditMeal(id){

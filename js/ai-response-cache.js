@@ -81,8 +81,8 @@ function getCachedResponse(eventKey,data={}){
   const template=
     AI_RESPONSE_RUNTIME_CACHE[eventKey]||
     AI_RESPONSE_STATIC_CACHE[eventKey]||
-    AI_RESPONSE_MAP[eventKey]||
-    'Okay.';
+    AI_RESPONSE_MAP[eventKey];
+  if(!template) return '';
   return applyCachedResponseTemplate(template,data);
 }
 
