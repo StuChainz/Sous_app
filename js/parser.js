@@ -165,6 +165,15 @@ function recalcMealItemFromFood(item,food,grams){
   Object.assign(item,scaled,{rawFood:food,customMacro:false,confidence:'high',needsConfirm:false});
   return item;
 }
+function resolveReplacementFood(text){
+  if(typeof resolveIngredientLocally==='function'){
+    const resolved=resolveIngredientLocally(text);
+    if(resolved.status==='matched') return {food:resolved.food};
+    if(resolved.status==='ambiguous') return {ambiguous:true,options:resolved.options||[],question:resolved.question};
+    return {food:null};
+  }
+  return {food:findFoodByText(text)};
+}
 function parseCorrectionCommand(text){
   const s=normaliseLogText(text||'');
   if(/^(undo|undo last|undo last item|remove last|delete last)$/.test(s)) return {command:'undo'};
@@ -172,12 +181,22 @@ function parseCorrectionCommand(text){
   if(m) return {command:'remove',target:m[1]};
   m=s.match(/^(?:change|make|set|edit)\s+(.+?)\s+(?:to|as)\s+(\d+(?:\.\d+)?)\s*g\b/);
   if(m) return {command:'changeWeight',target:m[1],grams:parseFloat(m[2])};
+  m=s.match(/^(?:swap|switch)\s+(.+?)\s+(?:for|to|with)\s+(.+)$/);
+  if(m) return {command:'changeFood',target:m[1],replacement:m[2]};
+  m=s.match(/^(?:replace)\s+(.+?)\s+(?:with|for)\s+(.+)$/);
+  if(m) return {command:'changeFood',target:m[1],replacement:m[2]};
+  m=s.match(/^(.+?)\s+instead\s+of\s+(.+)$/);
+  if(m) return {command:'changeFood',target:m[2],replacement:m[1]};
+  m=s.match(/^(?:use|make it|make that)\s+(.+?)\s+instead$/);
+  if(m) return {command:'changeLastFood',replacement:m[1]};
+  m=s.match(/^actually\s+(.+?)\s+not\s+(.+)$/);
+  if(m) return {command:'changeFood',target:m[2],replacement:m[1],fallbackToLast:true};
   m=s.match(/^(?:change|edit|replace)\s+(.+?)\s+(?:to|as|with)\s+(.+)$/);
   if(m) return {command:'changeFood',target:m[1],replacement:m[2]};
   m=s.match(/^actually\s+(?:that\s+was|it\s+was|it's|its)\s+(.+)$/);
   if(m) return {command:'changeLastFood',replacement:m[1]};
   m=s.match(/^(.+?)\s+not\s+(.+)$/);
-  if(m) return {command:'changeLastFood',replacement:m[1]};
+  if(m) return {command:'changeFood',target:m[2],replacement:m[1],fallbackToLast:true};
   return null;
 }
 function applyCorrectionCommand(cmd){
@@ -205,9 +224,16 @@ function applyCorrectionCommand(cmd){
     return true;
   }
   if(cmd.command==='changeFood'||cmd.command==='changeLastFood'){
-    const idx=cmd.command==='changeLastFood'?meal.length-1:findMealIndexByText(cmd.target);
+    let idx=cmd.command==='changeLastFood'?meal.length-1:findMealIndexByText(cmd.target);
+    if(idx<0&&cmd.fallbackToLast) idx=meal.length-1;
     if(idx<0){speak("Couldn't find that item.");return true;}
-    const food=findFoodByText(cmd.replacement);
+    const resolved=resolveReplacementFood(cmd.replacement);
+    if(resolved.ambiguous){
+      const names=(resolved.options||[]).map(f=>f.name).filter(Boolean).slice(0,3).join(', ');
+      speak(names?`Which one did you mean: ${names}?`:"I need a clearer replacement.");
+      return true;
+    }
+    const food=resolved.food;
     if(!food){speak("I couldn't match the replacement food.");return true;}
     const old=meal[idx];
     recalcMealItemFromFood(old,food,old.weight||food.w);
@@ -380,6 +406,11 @@ function runParserTests(){
     'evoo',
     'zucchini',
     'tablespoon olive oil',
+    'bread instead of rice',
+    'swap white rice for brown rice',
+    'replace chicken breast with chicken thigh',
+    'actually chicken thigh not breast',
+    'use olive oil instead',
     'change chicken breast to chicken thigh',
     'remove broccoli',
   ];
