@@ -33,7 +33,10 @@ function switchTab(tab,opts={}){
   document.getElementById('pane-'+tab).classList.add('active');
   document.querySelector(`.tab[data-tab="${tab}"]`).classList.add('active');
   const prev=currentTab; currentTab=tab;
-  if(prev==='log'&&tab!=='log'&&typeof stopAllRec==='function') stopAllRec();
+  if(prev==='log'&&tab!=='log'){
+    if(typeof stopAllVoiceActivity==='function') stopAllVoiceActivity('screen leave');
+    else if(typeof stopAllRec==='function') stopAllRec();
+  }
   if(tab==='home') renderHome();
   if(tab==='history') { if(typeof renderHistoryDay==='function') renderHistoryDay(); }
   if(tab==='recipes') { if(typeof renderRecipeList==='function') renderRecipeList(); }
@@ -549,7 +552,8 @@ function mrfCommit(){
 
   if(!items.length&&!before.length&&!after.length){
     showLogScreen('listening');
-    if(typeof restartAlwaysOn==='function') setTimeout(restartAlwaysOn,400);
+    if(typeof maybeResumeVoiceSession==='function') maybeResumeVoiceSession(400);
+    else if(typeof restartAlwaysOn==='function') setTimeout(restartAlwaysOn,400);
     return;
   }
 
@@ -567,7 +571,8 @@ function mrfCommit(){
 function mrfCancel(){
   _multiResolvePending=null;
   showLogScreen('listening');
-  if(typeof restartAlwaysOn==='function') setTimeout(restartAlwaysOn,400);
+  if(typeof maybeResumeVoiceSession==='function') maybeResumeVoiceSession(400);
+  else if(typeof restartAlwaysOn==='function') setTimeout(restartAlwaysOn,400);
 }
 
 function updateClock(){

@@ -572,7 +572,7 @@ html,body{height:100%;height:var(--app-height);min-height:-webkit-fill-available
         <div class="cta-btn" onclick="startCookingLog()">
           <div class="cta-icon"><i class="ti ti-microphone"></i></div>
           <div class="cta-label">Start cooking log</div>
-          <div class="cta-sub">Tap or say "Hey Sous"</div>
+          <div class="cta-sub">Tap mic to start voice logging</div>
         </div>
         <button class="btn-secondary" type="button" onclick="openPhotoEstimatePicker()" style="margin-top:10px;width:100%;"><i class="ti ti-camera" style="margin-right:6px;"></i>Estimate from photo</button>
         <input id="photo-estimate-input" type="file" accept="image/*" capture="environment" style="position:absolute;width:1px;height:1px;opacity:0;pointer-events:none;overflow:hidden;">
@@ -626,7 +626,7 @@ html,body{height:100%;height:var(--app-height);min-height:-webkit-fill-available
             <div class="pulse-ring" id="pr3"></div>
             <div class="mic-btn" id="mic-btn"><i class="ti ti-microphone"></i></div>
           </div>
-          <div class="listen-status" id="listen-status">Tap mic to speak</div>
+          <div class="listen-status" id="listen-status">Tap mic to start voice logging</div>
           <div class="waveform" id="waveform">
             <div class="wbar"></div><div class="wbar"></div><div class="wbar"></div><div class="wbar"></div><div class="wbar"></div>
             <div class="wbar"></div><div class="wbar"></div><div class="wbar"></div><div class="wbar"></div><div class="wbar"></div>
@@ -651,7 +651,7 @@ html,body{height:100%;height:var(--app-height);min-height:-webkit-fill-available
         </div>
         <button class="btn-secondary" id="finished-meal-btn" style="margin:12px 20px 0;width:calc(100% - 40px);">Finished meal</button>
         <div style="text-align:center;margin:8px 20px 0;"><span id="add-custom-btn" style="font-size:13px;color:var(--text-muted);cursor:pointer;text-decoration:underline;text-underline-offset:2px;">+ Add custom ingredient</span></div>
-        <div class="listen-hint">Say ingredients + amounts · "Hey Sous, done" when finished</div>
+        <div class="listen-hint">Say ingredients + amounts · tap Finished meal when done</div>
       </div>
 
       <!-- CONFIRM -->

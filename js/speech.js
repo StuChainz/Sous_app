@@ -2,7 +2,9 @@
 // LOG STATE
 // ═══════════════════════════════════════════
 let meal=[], itemQueue=[], pendingFood=null, currentAmbig=null;
-let tapRec=null, alwaysOnRec=null, isRecording=false, alwaysOnActive=false, isSpeaking=false;
+let tapRec=null, alwaysOnRec=null, clarificationRec=null, isRecording=false, alwaysOnActive=false, isSpeaking=false;
+let voiceSessionActive=false, voiceCurrentlyListening=false, processingTranscript=false, voiceSessionStoppedManually=false, voiceSessionUseRealtime=false;
+let voiceRestartTimer=null, voiceNoSpeechRetries=0;
 let _voiceMode=false;
 let nextIngId=1;
 let modalSelectedFood=null, modalActiveTab='search';
@@ -42,6 +44,106 @@ function undoLastAction(){
 // SPEECH RECOGNITION CONSTRUCTOR
 // ═══════════════════════════════════════════
 const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+
+function cookingModeEnabled(){
+  try{return localStorage.getItem('sous_cooking_mode')==='1';}
+  catch(e){return false;}
+}
+function logVoiceState(event,extra={}){
+  console.log('[Sous Voice State]',{
+    event,
+    voiceSessionActive,
+    voiceCurrentlyListening,
+    processingTranscript,
+    clarificationActive:!!clarificationRec,
+    realtimeActive:!!(sousRealtime&&sousRealtime.active),
+    recognitionExists:!!tapRec,
+    ...extra
+  });
+}
+function clearVoiceRestartTimer(){
+  if(voiceRestartTimer){
+    clearTimeout(voiceRestartTimer);
+    voiceRestartTimer=null;
+  }
+}
+function logRestartBlocked(reason){
+  console.log('[Sous Voice] restart blocked: '+reason);
+  logVoiceState('restart blocked',{reason});
+}
+function canRestartVoiceListening(){
+  if(!voiceSessionActive){logRestartBlocked('session inactive');return false;}
+  if(voiceCurrentlyListening||isRecording){logRestartBlocked('already listening');return false;}
+  if(processingTranscript){logRestartBlocked('processing transcript');return false;}
+  if(isSpeaking){logRestartBlocked('speaking');return false;}
+  if(clarificationRec){logRestartBlocked('clarification active');return false;}
+  const correction=document.getElementById('voice-correct-bar');
+  if(correction&&correction.style.display!=='none'){logRestartBlocked('clarification active');return false;}
+  if(voiceSessionStoppedManually){logRestartBlocked('manually stopped');return false;}
+  if(cookingModeEnabled()&&alwaysOnActive){logRestartBlocked('cooking mode owns recognizer');return false;}
+  if(sousRealtime&&sousRealtime.active){logRestartBlocked('realtime owns recognizer');return false;}
+  if(currentTab!=='log'){logRestartBlocked('not on log tab');return false;}
+  const active=document.querySelector('.log-screen.active');
+  if(active&&active.id!=='ls-listening'){logRestartBlocked('review active');return false;}
+  return true;
+}
+function setVoiceProcessing(active){
+  processingTranscript=!!active;
+  if(processingTranscript) setMicState('processing');
+}
+function scheduleVoiceSessionRestart(delay=450){
+  clearVoiceRestartTimer();
+  const safeDelay=Math.max(400,Math.min(700,Number(delay)||450));
+  logVoiceState('restart scheduled',{delay:safeDelay});
+  voiceRestartTimer=setTimeout(()=>{
+    voiceRestartTimer=null;
+    if(!canRestartVoiceListening()) return;
+    console.log('[Sous Voice] restarting for next item');
+    logVoiceState('restarting for next item');
+    if(voiceSessionUseRealtime) startSousRealtimeVoice();
+    else startTapRec({sessionRestart:true});
+  },safeDelay);
+}
+function maybeResumeVoiceSession(delay=450){
+  if(voiceSessionActive) scheduleVoiceSessionRestart(delay);
+  else if(cookingModeEnabled()) setTimeout(restartAlwaysOn,delay);
+}
+function beginVoiceSession(){
+  stopAllVoiceActivity('session starting');
+  voiceSessionActive=true;
+  voiceSessionStoppedManually=false;
+  voiceSessionUseRealtime=realtimeVoiceEnabled();
+  console.log('[Sous Voice] session started');
+  logVoiceState('session started',{useRealtime:voiceSessionUseRealtime});
+  if(voiceSessionUseRealtime) startSousRealtimeVoice();
+  else startTapRec();
+}
+function endVoiceSession(label='Voice logging stopped'){
+  if(!voiceSessionActive&&!isRecording&&!voiceCurrentlyListening&&!sousRealtime) return;
+  console.log('[Sous Voice] session stopped');
+  logVoiceState('session stopped');
+  stopAllVoiceActivity('session stopped');
+  setMicState('idle');
+  const status=document.getElementById('listen-status');
+  if(status) status.textContent=label;
+}
+function stopAllVoiceActivity(reason){
+  logVoiceState('hard cleanup',{reason});
+  clearVoiceRestartTimer();
+  voiceSessionActive=false;
+  voiceSessionStoppedManually=true;
+  voiceCurrentlyListening=false;
+  processingTranscript=false;
+  voiceSessionUseRealtime=false;
+  voiceNoSpeechRetries=0;
+  stopSousRealtimeVoice(false);
+  try{if(tapRec)tapRec.stop();}catch(e){}
+  try{if(clarificationRec)clarificationRec.stop();}catch(e){}
+  try{if(alwaysOnRec)alwaysOnRec.stop();}catch(e){}
+  clarificationRec=null;
+  isRecording=false;
+  alwaysOnActive=false;
+}
 
 // ═══════════════════════════════════════════
 // QUEUE HELPERS
@@ -477,7 +579,7 @@ function showFoodChoiceReview(state){
   document.getElementById('fc-carbs').value=_macroPer100FromItem(state.existingItem,'carbs','c');
   document.getElementById('fc-fat').value=_macroPer100FromItem(state.existingItem,'fat','f');
   document.getElementById('fc-create').onclick=()=>resolveFoodChoiceCreate(amount);
-  document.getElementById('fc-cancel').onclick=()=>{_pendingFoodChoice=null;showLogScreen('listening');setTimeout(restartAlwaysOn,400);};
+  document.getElementById('fc-cancel').onclick=()=>{_pendingFoodChoice=null;showLogScreen('listening');maybeResumeVoiceSession(400);};
   showLogScreen('food-choice');
   pauseAlwaysOn();
   requestAnimationFrame(()=>document.getElementById('fc-name')?.focus());
@@ -577,7 +679,7 @@ function handleParsed(results,rawText=''){
     const _activeScr=document.querySelector('.log-screen.active')?.id;
     if(handled && _activeScr==='ls-listening') renderCurrentMeal();
     updateHome();
-    if(handled && _activeScr==='ls-listening') setTimeout(restartAlwaysOn,400);
+    if(handled && _activeScr==='ls-listening') maybeResumeVoiceSession(400);
     return;
   }
   if(results[0].command==='summary'){
@@ -603,11 +705,11 @@ function processQueue(autoAdded=[]){
   if(!itemQueue.length){
     showLogScreen('listening');
     if(autoAdded.length){
-      announceAutoAdded(autoAdded,()=>setTimeout(restartAlwaysOn,250));
+      announceAutoAdded(autoAdded,()=>maybeResumeVoiceSession(250));
     } else {
       const transcript=document.getElementById('transcript-text');
       if(transcript) transcript.textContent='—';
-      setTimeout(restartAlwaysOn,400);
+      maybeResumeVoiceSession(400);
     }
     updateHome();
     return;
@@ -916,12 +1018,21 @@ function setMicState(state){
   btn.className='mic-btn'+(state!=='idle'?' '+state:'');
   prs.forEach(p=>{if(p)p.className='pulse-ring'+(['listening','recording'].includes(state)?' active':'');});
   wf.className='waveform'+(state==='recording'?' active':state==='speaking'?' speaking':'');
-  const map={
-    idle:     {dc:'aob-dot',          tc:'aob-text',    tt:'Say "Hey Sous" or tap mic',            st:'Tap to speak',         sc:'listen-status'},
-    listening:{dc:'aob-dot listening',tc:'aob-text on', tt:'Listening for "Hey Sous"…',            st:'Always on · tap to speak now', sc:'listen-status on'},
-    wake:     {dc:'aob-dot wake',     tc:'aob-text on', tt:'Wake word detected…',                  st:'Hey Sous — go ahead!', sc:'listen-status on'},
-    recording:{dc:'aob-dot active',   tc:'aob-text on', tt:'Recording…',                           st:'Listening…',           sc:'listen-status on'},
-    speaking: {dc:'aob-dot speaking', tc:'aob-text on', tt:'Speaking…',                            st:'Sous is talking…',     sc:'listen-status on'},
+  const cooking=cookingModeEnabled();
+  const map=cooking?{
+    idle:      {dc:'aob-dot',          tc:'aob-text',    tt:'Say "Hey Sous" or tap mic', st:'Tap to speak',              sc:'listen-status'},
+    listening: {dc:'aob-dot listening',tc:'aob-text on', tt:'Listening for "Hey Sous"…', st:'Always on · tap to speak',  sc:'listen-status on'},
+    wake:      {dc:'aob-dot wake',     tc:'aob-text on', tt:'Wake word detected…',       st:'Hey Sous — go ahead!',      sc:'listen-status on'},
+    recording: {dc:'aob-dot active',   tc:'aob-text on', tt:'Recording…',                st:'Listening… say a food',     sc:'listen-status on'},
+    processing:{dc:'aob-dot speaking', tc:'aob-text on', tt:'Adding…',                   st:'Adding…',                   sc:'listen-status on'},
+    speaking:  {dc:'aob-dot speaking', tc:'aob-text on', tt:'Sous is talking…',          st:'Sous is talking…',          sc:'listen-status on'},
+  }:{
+    idle:      {dc:'aob-dot',          tc:'aob-text',    tt:'Tap mic to start voice logging', st:voiceSessionActive?'Ready for next food':'Tap mic to start voice logging', sc:'listen-status'},
+    listening: {dc:'aob-dot listening',tc:'aob-text on', tt:'Listening… say a food',          st:'Listening… say a food', sc:'listen-status on'},
+    wake:      {dc:'aob-dot listening',tc:'aob-text on', tt:'Listening… say a food',          st:'Listening… say a food', sc:'listen-status on'},
+    recording: {dc:'aob-dot active',   tc:'aob-text on', tt:'Listening… say a food',          st:'Listening… say a food', sc:'listen-status on'},
+    processing:{dc:'aob-dot speaking', tc:'aob-text on', tt:'Adding…',                        st:'Adding…',               sc:'listen-status on'},
+    speaking:  {dc:'aob-dot speaking', tc:'aob-text on', tt:'Ready for next food',             st:'Ready for next food',   sc:'listen-status on'},
   };
   const m=map[state]||map.idle;
   dot.className=m.dc; txt.className=m.tc; txt.textContent=m.tt;
@@ -981,15 +1092,27 @@ function showConfirm(parsed){
 function startConfirmListen(){
   const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
   if(!SR||document.querySelector('.log-screen.active')?.id!=='ls-confirm') return;
+  if(clarificationRec){
+    console.log('[Sous Voice] duplicate recognizer blocked');
+    logVoiceState('duplicate recognizer blocked',{source:'confirm'});
+    return;
+  }
+  if(isRecording||voiceCurrentlyListening||sousRealtime){console.log('[Sous Voice] recognizer conflict avoided');}
+  try{if(tapRec)tapRec.stop();}catch(e){}
+  stopSousRealtimeVoice(false);
   const r=new SR(); r.lang='en-GB'; r.interimResults=false; r.continuous=false; r.maxAlternatives=3;
+  clarificationRec=r;
+  r.onstart=()=>setMicState('recording');
   r.onresult=e=>{
+    clarificationRec=null;
     const t=e.results[0][0].transcript.toLowerCase().trim();
     document.getElementById('transcript-text').textContent='"'+t+'"';
     if(/yes|confirm|correct|add|yep|yeah|right|ok/.test(t)) doConfirm();
     else if(/change|no|wrong|different|cancel|again/.test(t)) doChange();
     else showToast('Say "yes" to confirm or "change" to try again');
   };
-  r.onerror=()=>{}; r.onend=()=>{};
+  r.onerror=()=>{clarificationRec=null;};
+  r.onend=()=>{clarificationRec=null;};
   try{r.start();}catch(e){}
 }
 function doConfirm(){
@@ -1030,12 +1153,12 @@ function doConfirm(){
   speakCachedResponse('added',{},()=>{
     pendingFood=null;
     processQueue();
-    if(document.querySelector('.log-screen.active')?.id==='ls-listening') setTimeout(restartAlwaysOn,300);
+    if(document.querySelector('.log-screen.active')?.id==='ls-listening') maybeResumeVoiceSession(300);
   });
 }
 function doChange(){
   pendingFood=null;
-  speak('OK, what would you like to add?',()=>{showLogScreen('listening');setTimeout(restartAlwaysOn,300);});
+  speak('OK, what would you like to add?',()=>{showLogScreen('listening');maybeResumeVoiceSession(300);});
 }
 
 // ═══════════════════════════════════════════
@@ -1057,6 +1180,7 @@ function commitQuantity(grams){
   showLogScreen('listening');
   renderCurrentMeal();
   processQueue();
+  maybeResumeVoiceSession(400);
 }
 function findUsualMealForIngredientName(name){
   if(typeof getUsualMeals!=='function') return null;
@@ -1092,6 +1216,7 @@ function commitUsualFromQuantityPrompt(){
   showLogScreen('listening');
   renderCurrentMeal();
   processQueue();
+  maybeResumeVoiceSession(400);
 }
 function askQuantity(item){
   pendingFood=item;
@@ -1299,7 +1424,7 @@ function commitMultiConfirm(){
   updateHome();
   showToast('Added '+count+' ingredient'+(count!==1?'s':'')+' ✓');
   speakCachedResponse('added');
-  setTimeout(restartAlwaysOn,400);
+  maybeResumeVoiceSession(400);
 }
 
 // ═══════════════════════════════════════════
@@ -1762,30 +1887,61 @@ function saveMealToLog(saveAsUsual=false){
 function buildTapRec(){
   if(!SR) return null;
   const r=new SR(); r.lang='en-GB'; r.interimResults=true; r.continuous=false; r.maxAlternatives=3;
-  r.onstart=()=>{isRecording=true;setMicState('recording');};
+  r.onstart=()=>{isRecording=true;voiceCurrentlyListening=true;console.log('[Sous Voice] listening');logVoiceState('recognition actually started');setMicState('recording');};
   r.onresult=e=>{
     let interim='',final='',finalConf=null;
     for(let i=e.resultIndex;i<e.results.length;i++){const res=e.results[i];if(res.isFinal){final+=res[0].transcript;if(finalConf===null)finalConf=res[0].confidence;}else interim+=res[0].transcript;}
     const el=document.getElementById('transcript-text');
     if(el) el.textContent='"'+(final||interim)+'"';
     if(final){
+      voiceNoSpeechRetries=0;
+      logVoiceState('speech result received',{transcript:final.trim(),confidence:finalConf});
       stopTapRec();
       const isLow=typeof finalConf==='number'&&finalConf>0&&finalConf<0.75;
       _voiceMode=true;
-      if(isLow) showVoiceCorrection(final.trim());
-      else handleTranscript(final.trim(),final.trim());
+      setVoiceProcessing(true);
+      console.log('[Sous Voice] processing transcript');
+      logVoiceState('transcript processing started',{transcript:final.trim(),lowConfidence:isLow});
+      const done=()=>{
+        setVoiceProcessing(false);
+        logVoiceState('transcript processing finished');
+        if(document.querySelector('.log-screen.active')?.id==='ls-listening') scheduleVoiceSessionRestart(350);
+      };
+      if(isLow){showVoiceCorrection(final.trim());done();}
+      else Promise.resolve(handleTranscript(final.trim(),final.trim())).then(done).catch(e=>{console.warn('[Sous Voice] transcript error',e);done();});
     }
   };
   r.onerror=e=>{
+    const err=e.error||'unknown';
+    logVoiceState('recognition error',{error:err});
     stopTapRec();
-    if(e.error==='not-allowed') document.getElementById('perm-warn').style.display='block';
-    else if(e.error==='no-speech') showVoiceRetry("Didn't catch that — try again");
-    else if(e.error!=='aborted') showVoiceRetry("Couldn't understand that");
+    if(err==='not-allowed'||err==='audio-capture'){
+      document.getElementById('perm-warn').style.display='block';
+      speakCachedResponse('realtime_error');
+      endVoiceSession();
+    } else if(err==='no-speech'&&voiceSessionActive){
+      if(voiceNoSpeechRetries>=2){showVoiceRetry("Didn't catch that — try again");endVoiceSession();return;}
+      voiceNoSpeechRetries++;
+      showToast("Didn't catch that — listening again");
+      scheduleVoiceSessionRestart(600);
+    } else if(err==='no-speech') showVoiceRetry("Didn't catch that — try again");
+    else if(err==='network'||err==='service-not-allowed'){
+      showVoiceRetry("Voice service is unavailable — try again");
+      endVoiceSession();
+    } else if(err!=='aborted'){
+      showVoiceRetry("Couldn't understand that");
+      endVoiceSession();
+    }
   };
-  r.onend=()=>stopTapRec();
+  r.onend=()=>{logVoiceState('recognition ended');stopTapRec();};
   return r;
 }
-function stopTapRec(){isRecording=false;if(!isSpeaking)setMicState(alwaysOnActive?'listening':'idle');}
+function stopTapRec(){
+  if(isRecording||voiceCurrentlyListening) console.log('[Sous Voice] tap listen stop');
+  isRecording=false;
+  voiceCurrentlyListening=false;
+  if(!isSpeaking&&!processingTranscript)setMicState(alwaysOnActive&&cookingModeEnabled()?'listening':'idle');
+}
 function realtimeVoiceEnabled(){
   try{
     return localStorage.getItem('sous_realtime_voice')==='1' || new URLSearchParams(location.search).get('realtime')==='1';
@@ -1908,14 +2064,19 @@ function routeRealtimeTranscriptToReview(transcript){
 function handleRealtimeActionText(text){
   const raw=String(text||'').trim();
   if(!raw) return;
+  logVoiceState('speech result received',{source:'realtime',raw});
   let action=normalizeRealtimeAction(parseRealtimeAction(raw));
   if(!action){
     console.log('[Sous Realtime] error', 'Invalid action JSON; using transcript parser');
     const fallback=raw.replace(/```(?:json)?|```/gi,'').trim();
     const el=document.getElementById('transcript-text');
     if(el&&fallback) el.textContent='"'+fallback+'"';
+    console.log('[Sous Voice] processing transcript');
+    setVoiceProcessing(true);
     routeRealtimeTranscriptToReview(fallback);
+    setVoiceProcessing(false);
     stopSousRealtimeVoice(false);
+    maybeResumeVoiceSession(500);
     return;
   }
   console.log('[Sous Realtime] action received');
@@ -1949,12 +2110,20 @@ function handleRealtimeActionText(text){
     if(el) el.textContent='"'+transcript+'"';
     speakCachedResponse(action.ingredients&&action.ingredients.length?'added':'logged');
     _suppressNextConfirmSpeechUntil=Date.now()+3000;
+    console.log('[Sous Voice] processing transcript');
+    setVoiceProcessing(true);
     routeRealtimeTranscriptToReview(transcript);
+    setVoiceProcessing(false);
     stopSousRealtimeVoice(false);
+    if(document.querySelector('.log-screen.active')?.id==='ls-listening') maybeResumeVoiceSession(500);
   }
 }
 function handleRealtimeServerEvent(event){
   if(!event||!event.type) return;
+  if(event.type==='input_audio_buffer.speech_stopped'){
+    finishSousRealtimeVoice();
+    return;
+  }
   if(event.type.endsWith('.delta')){
     const delta=event.delta||event.text||event.transcript||'';
     if(delta&&sousRealtime) sousRealtime.textBuffer=(sousRealtime.textBuffer||'')+delta;
@@ -1968,7 +2137,8 @@ function handleRealtimeServerEvent(event){
   if(event.type==='error'){
     console.log('[Sous Realtime] error', event.error?.message||event.error||'Realtime error');
     stopSousRealtimeVoice(false);
-    speakCachedResponse('realtime_error',{},()=>setTimeout(startTapRec,200));
+    voiceSessionUseRealtime=false;
+    speakCachedResponse('realtime_error',{},()=>voiceSessionActive?setTimeout(()=>startTapRec({sessionRestart:true}),200):setTimeout(startTapRec,200));
   }
 }
 function finishSousRealtimeVoice(){
@@ -1991,14 +2161,20 @@ function finishSousRealtimeVoice(){
   }
 }
 async function startSousRealtimeVoice(){
+  logVoiceState('recognition start requested',{source:'realtime'});
   if(sousRealtime&&sousRealtime.active){
-    stopSousRealtimeVoice(true);
+    console.log('[Sous Voice] duplicate recognizer blocked');
+    logVoiceState('duplicate recognizer blocked',{source:'realtime'});
     return;
   }
   if(!navigator.mediaDevices?.getUserMedia||!window.RTCPeerConnection){
-    startTapRec();
+    startTapRec({sessionRestart:voiceSessionActive});
     return;
   }
+  if(isRecording||voiceCurrentlyListening||clarificationRec){console.log('[Sous Voice] recognizer conflict avoided');}
+  try{if(tapRec)tapRec.stop();}catch(e){}
+  try{if(clarificationRec)clarificationRec.stop();}catch(e){}
+  clarificationRec=null;
   hideVoiceCorrectBar();
   pauseAlwaysOn();
   const el=document.getElementById('transcript-text'); if(el) el.textContent='—';
@@ -2029,6 +2205,9 @@ async function startSousRealtimeVoice(){
     dc.addEventListener('open',()=>{
       console.log('[Sous Realtime] connected');
       isRecording=true;
+      voiceCurrentlyListening=true;
+      console.log('[Sous Voice] listening');
+      logVoiceState('recognition actually started',{source:'realtime'});
       setMicState('recording');
       clearTimeout(sousRealtime.idleTimer);
       sousRealtime.idleTimer=setTimeout(()=>stopSousRealtimeVoice(true),60000);
@@ -2056,7 +2235,8 @@ async function startSousRealtimeVoice(){
   }catch(e){
     console.log('[Sous Realtime] error', e.message);
     stopSousRealtimeVoice(false);
-    speakCachedResponse('realtime_error',{},()=>setTimeout(startTapRec,200));
+    voiceSessionUseRealtime=false;
+    speakCachedResponse('realtime_error',{},()=>voiceSessionActive?setTimeout(()=>startTapRec({sessionRestart:true}),200):setTimeout(startTapRec,200));
   }
 }
 function stopSousRealtimeVoice(announce=false){
@@ -2069,24 +2249,51 @@ function stopSousRealtimeVoice(announce=false){
   try{rt.stream&&rt.stream.getTracks().forEach(track=>track.stop());}catch(e){}
   if(rt.audio) rt.audio.srcObject=null;
   isRecording=false;
-  if(!isSpeaking) setMicState(alwaysOnActive?'listening':'idle');
+  voiceCurrentlyListening=false;
+  logVoiceState('recognition ended',{source:'realtime'});
+  if(!isSpeaking&&!processingTranscript) setMicState(alwaysOnActive&&cookingModeEnabled()?'listening':'idle');
 }
-function startTapRec(){
+function startTapRec(opts={}){
   if(!SR){showToast('Speech not supported — use text input');return;}
-  if(!tapRec) tapRec=buildTapRec();
+  if(opts.sessionRestart&&!canRestartVoiceListening()) return;
+  logVoiceState('recognition start requested',{sessionRestart:!!opts.sessionRestart});
   hideVoiceCorrectBar();
-  if(isRecording){try{tapRec.stop();}catch(e){}return;}
+  if(isRecording||voiceCurrentlyListening){
+    console.log('[Sous Voice] duplicate recognizer blocked');
+    logVoiceState('duplicate recognizer blocked');
+    return;
+  }
+  if(!tapRec) tapRec=buildTapRec();
+  if(sousRealtime&&sousRealtime.active){console.log('[Sous Voice] recognizer conflict avoided');stopSousRealtimeVoice(false);}
+  if(clarificationRec){console.log('[Sous Voice] recognizer conflict avoided');try{clarificationRec.stop();}catch(e){}clarificationRec=null;}
   pauseAlwaysOn();
   const el=document.getElementById('transcript-text'); if(el) el.textContent='—';
   const inp=document.getElementById('text-input'); if(inp) inp.value='';
-  try{tapRec.start();}catch(e){tapRec=buildTapRec();try{tapRec.start();}catch(e2){}}
+  console.log('[Sous Voice] tap listen start');
+  try{tapRec.start();}
+  catch(e){
+    logVoiceState('recognition error',{error:e.name||e.message||'start failed'});
+    tapRec=buildTapRec();
+    try{tapRec.start();}
+    catch(e2){logVoiceState('recognition error',{error:e2.name||e2.message||'restart failed'});}
+  }
 }
 function startClarificationListen(onResult){
   if(!SR) return;
+  if(clarificationRec){
+    console.log('[Sous Voice] duplicate recognizer blocked');
+    logVoiceState('duplicate recognizer blocked',{source:'clarification'});
+    return;
+  }
+  if(isRecording||voiceCurrentlyListening||sousRealtime){console.log('[Sous Voice] recognizer conflict avoided');}
+  try{if(tapRec)tapRec.stop();}catch(e){}
+  stopSousRealtimeVoice(false);
   const r=new SR(); r.lang='en-GB'; r.interimResults=false; r.continuous=false; r.maxAlternatives=3;
+  clarificationRec=r;
   r.onstart=()=>setMicState('recording');
-  r.onresult=e=>{const t=e.results[0][0].transcript;const el=document.getElementById('transcript-text');if(el)el.textContent='"'+t+'"';setMicState('idle');onResult(t);};
-  r.onerror=()=>setMicState('idle'); r.onend=()=>setMicState('idle');
+  r.onresult=e=>{const t=e.results[0][0].transcript;const el=document.getElementById('transcript-text');if(el)el.textContent='"'+t+'"';clarificationRec=null;setMicState('idle');onResult(t);maybeResumeVoiceSession(400);};
+  r.onerror=()=>{clarificationRec=null;setMicState('idle');maybeResumeVoiceSession(400);};
+  r.onend=()=>{clarificationRec=null;setMicState('idle');};
   try{r.start();}catch(e){}
 }
 function buildAlwaysOn(){
@@ -2105,12 +2312,13 @@ function buildAlwaysOn(){
     const results=parseText(t);
     if(results&&results.length) handleParsed(results);
   };
-  r.onerror=e=>{alwaysOnActive=false;if(e.error==='not-allowed')document.getElementById('perm-warn').style.display='block';else if(e.error!=='aborted'&&e.error!=='no-speech')setTimeout(restartAlwaysOn,1000);};
-  r.onend=()=>{alwaysOnActive=false;if(!isRecording&&!isSpeaking)setTimeout(restartAlwaysOn,500);};
+  r.onerror=e=>{alwaysOnActive=false;if(e.error==='not-allowed')document.getElementById('perm-warn').style.display='block';else if(cookingModeEnabled()&&e.error!=='aborted'&&e.error!=='no-speech')setTimeout(restartAlwaysOn,1000);};
+  r.onend=()=>{alwaysOnActive=false;if(cookingModeEnabled()&&!isRecording&&!isSpeaking)setTimeout(restartAlwaysOn,500);};
   return r;
 }
 function pauseAlwaysOn(){if(alwaysOnRec){try{alwaysOnRec.stop();}catch(e){}}alwaysOnActive=false;}
 function restartAlwaysOn(){
+  if(!cookingModeEnabled()){console.log('[Sous Voice] cooking mode disabled');return;}
   const active=document.querySelector('.log-screen.active');
   if(!active||active.id!=='ls-listening'||currentTab!=='log') return;
   if(isRecording||isSpeaking) return;
@@ -2118,15 +2326,13 @@ function restartAlwaysOn(){
   try{alwaysOnRec.start();setMicState('listening');}catch(e){}
 }
 function startAlwaysOn(){
+  if(!cookingModeEnabled()){console.log('[Sous Voice] cooking mode disabled');return;}
   if(!SR){document.getElementById('perm-warn').style.display='block';return;}
   alwaysOnRec=buildAlwaysOn();
   try{alwaysOnRec.start();}catch(e){document.getElementById('perm-warn').style.display='block';}
 }
 function stopAllRec(){
-  stopSousRealtimeVoice(false);
-  try{if(tapRec)tapRec.stop();}catch(e){}
-  try{if(alwaysOnRec)alwaysOnRec.stop();}catch(e){}
-  isRecording=false;alwaysOnActive=false;
+  stopAllVoiceActivity('stop all recognition');
   if(window.speechSynthesis)window.speechSynthesis.cancel();
   isSpeaking=false;
 }
@@ -2151,9 +2357,9 @@ function startFreshLog(presetSection=null){
   const pw=document.getElementById('perm-warn'); if(pw) pw.style.display='none';
   if(hasDraft){
     showToast('Restored your in-progress meal',2800);
-    speak('Picked up where you left off.',()=>setTimeout(startAlwaysOn,200));
+    speak('Picked up where you left off.',()=>{if(cookingModeEnabled())setTimeout(startAlwaysOn,200);else console.log('[Sous Voice] cooking mode disabled');});
   } else {
-    speak('Ready.',()=>setTimeout(startAlwaysOn,200));
+    speak('Ready.',()=>{if(cookingModeEnabled())setTimeout(startAlwaysOn,200);else console.log('[Sous Voice] cooking mode disabled');});
   }
 }
 function startSilentLog(presetSection=null,quick=false){
@@ -2180,7 +2386,8 @@ function startSilentLog(presetSection=null,quick=false){
 function resumeLog(){
   stopAllRec();
   const active=document.querySelector('.log-screen.active');
-  if(!active||active.id==='ls-listening') setTimeout(restartAlwaysOn,400);
+  if(cookingModeEnabled()&&(!active||active.id==='ls-listening')) setTimeout(restartAlwaysOn,400);
+  else console.log('[Sous Voice] cooking mode disabled');
 }
 
 // ═══════════════════════════════════════════
@@ -2191,22 +2398,20 @@ function wireLogButtons(){
   document.getElementById('finished-meal-btn').addEventListener('click',()=>{if(!meal.length){showToast('Add some ingredients first!');return;}stopAllRec();showSummary();});
   document.getElementById('mic-btn').addEventListener('click',()=>{
     if(isSpeaking){window.speechSynthesis&&window.speechSynthesis.cancel();isSpeaking=false;}
-    if(sousRealtime&&sousRealtime.active){finishSousRealtimeVoice();return;}
-    if(isRecording){try{tapRec&&tapRec.stop();}catch(e){}}
-    else if(realtimeVoiceEnabled()) startSousRealtimeVoice();
-    else startTapRec();
+    if(voiceSessionActive){endVoiceSession();return;}
+    beginVoiceSession();
   });
-  document.getElementById('send-btn').addEventListener('click',submitText);
-  document.getElementById('voice-retry-btn').addEventListener('click',()=>{hideVoiceCorrectBar();startTapRec();});
+  document.getElementById('send-btn').addEventListener('click',()=>{endVoiceSession();submitText();});
+  document.getElementById('voice-retry-btn').addEventListener('click',()=>{hideVoiceCorrectBar();if(!voiceSessionActive)beginVoiceSession();else startTapRec({sessionRestart:true});});
   // voice-create-food-btn onclick is set dynamically in showNoMatchFallback with the raw text closure
   document.getElementById('text-input').addEventListener('keydown',e=>{if(e.key==='Enter')submitText();});
   document.getElementById('confirm-btn').addEventListener('click',doConfirm);
   document.getElementById('change-btn').addEventListener('click',doChange);
   document.getElementById('summary-btn-conf').addEventListener('click',()=>{if(meal.length){stopAllRec();showSummary();}else showToast('Add ingredients first!');});
   document.getElementById('ambig-custom').addEventListener('click',()=>{currentAmbig=null;openCustomEntry();});
-  document.getElementById('ambig-skip').addEventListener('click',()=>{currentAmbig=null;showLogScreen('listening');setTimeout(restartAlwaysOn,400);});
+  document.getElementById('ambig-skip').addEventListener('click',()=>{currentAmbig=null;showLogScreen('listening');maybeResumeVoiceSession(400);});
   document.getElementById('mc-add-btn').addEventListener('click',commitMultiConfirm);
-  document.getElementById('mc-cancel-btn').addEventListener('click',()=>{pendingBatch=[];showLogScreen('listening');setTimeout(restartAlwaysOn,400);});
+  document.getElementById('mc-cancel-btn').addEventListener('click',()=>{pendingBatch=[];showLogScreen('listening');maybeResumeVoiceSession(400);});
   document.getElementById('add-custom-btn').addEventListener('click',()=>openCustomEntry());
   document.getElementById('add-more-btn').addEventListener('click',()=>openAddModal());
   document.getElementById('sum-section-select').addEventListener('change',e=>{currentMealSection=e.target.value;});
@@ -2251,6 +2456,7 @@ function wireLogButtons(){
     showLogScreen('listening');
     renderCurrentMeal();
     processQueue();
+    maybeResumeVoiceSession(400);
   });
   document.getElementById('qty-usual-btn')?.addEventListener('click',commitUsualFromQuantityPrompt);
   // Confirm screen — live macro update when weight input changes
