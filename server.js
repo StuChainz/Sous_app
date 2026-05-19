@@ -445,6 +445,8 @@ app.post('/api/interpret', async (req, res) => {
   }
 });
 
-app.listen(PORT, '127.0.0.1', () => {
-  console.log(`Sous proxy server running at http://localhost:${PORT}`);
+const HOST = process.env.HOST || '0.0.0.0';
+
+app.listen(PORT, HOST, () => {
+  console.log(`Sous proxy server running at http://${HOST}:${PORT}`);
 });
