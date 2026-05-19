@@ -1039,8 +1039,13 @@ function likelyNeedsFoodRecoveryPrompt(rawText,item){
   };
   const familyKey=family.includes('yog')?'yogurt':family.split(/\s+/).slice(-1)[0];
   const allowed=allowedByFamily[familyKey]||new Set();
+  const ignored=new Set([
+    'add','log','track','please','some','about','approximately','approx',
+    'i','had','ate','have','hey','sous','sue','of','a','an','the'
+  ]);
   const extras=heard.split(/\s+/).filter(token=>
     token&&
+    !ignored.has(token)&&
     token!==familyKey&&
     !family.split(/\s+/).includes(token)&&
     !/^\d/.test(token)&&

@@ -159,6 +159,12 @@ const extraResponses = [
   ["clarify_milk", "What type of milk?"],
   ["clarify_cheese", "What type of cheese?"],
   ["clarify_rice", "Cooked or dry?"],
+
+  // Confirm / correction / session
+  ["confirm_check", "Check this."],
+  ["confirm_yes_no", "Confirm?"],
+  ["correction_not_found", "Couldn't find it."],
+  ["session_ready", "Ready."],
 ];
 
 for (const [key, text] of extraResponses) {
