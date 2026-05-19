@@ -351,6 +351,8 @@ function parseCorrectionCommand(text){
   if(m) return {command:'remove',target:cleanCorrectionTarget(m[1])};
   m=s.match(/^(?:actually\s+)?(?:make|change|set|edit)\s+(?:that|it|last|last item)(?:\s+(?:to|as))?\s+(.+)$/);
   if(m&&extractQuantity(m[1])) return {command:'changeLastWeight',quantityText:m[1]};
+  m=s.match(/^(?:actually\s+)?(?:change|edit|replace|swap|switch)\s+(?:that|it|last|last item)\s+(?:to|as|with|for)\s+(.+)$/);
+  if(m) return {command:'changeLastFood',replacement:m[1]};
   m=s.match(/^(?:actually\s+)?(?:that|it|last|last item)\s+(?:was|is|should be)\s+(.+)$/);
   if(m&&extractQuantity(m[1])) return {command:'changeLastWeight',quantityText:m[1]};
   m=s.match(/^(?:actually\s+)?(?:make|change|set|edit)\s+(.+?)\s+(?:to|as)\s+(.+)$/);

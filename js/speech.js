@@ -17,6 +17,9 @@ let sousRealtime=null;
 let _lastSpeakAt=0;
 let _suppressNextConfirmSpeechUntil=0;
 let clarificationState=null;
+let voiceRecoveryState={issue:null,attempts:0};
+const VOICE_RESTART_MIN_MS=250;
+const VOICE_RESTART_DEFAULT_MS=320;
 const VOICE_DEBUG_KEY='sous_voice_debug_trace';
 const VOICE_DEBUG_LIMIT=80;
 
@@ -111,6 +114,42 @@ function clearVoiceRestartTimer(){
     voiceRestartTimer=null;
   }
 }
+function resetVoiceRecovery(){
+  voiceRecoveryState={issue:null,attempts:0};
+}
+function voiceRecoveryPrompt(issue){
+  if(issue==='partial') return 'Say that again';
+  return "Didn't catch that";
+}
+function transcriptRecoveryIssue(transcript,isLowConfidence){
+  if(!voiceSessionActive||clarificationState?.active) return null;
+  if(isLowConfidence) return 'low_confidence';
+  if(typeof parseText!=='function') return null;
+  const results=parseText(transcript);
+  const reason=typeof aiEscalationReason==='function'
+    ?aiEscalationReason(transcript,results)
+    :(!results||!results.length?'empty':'none');
+  if(reason==='empty') return 'empty';
+  if(reason==='partial') return 'partial';
+  return null;
+}
+function maybeRecoverVoiceTranscript(issue,transcript){
+  if(!issue||!voiceSessionActive) return false;
+  if(voiceRecoveryState.issue===issue) voiceRecoveryState.attempts++;
+  else voiceRecoveryState={issue,attempts:1};
+  voiceDebugTrace('voice_recovery',{
+    issue,
+    attempt:voiceRecoveryState.attempts,
+    transcript
+  });
+  if(voiceRecoveryState.attempts>1) return false;
+  const prompt=voiceRecoveryPrompt(issue);
+  const el=document.getElementById('transcript-text');
+  if(el) el.textContent=prompt;
+  showToast(prompt);
+  speak(prompt,()=>scheduleVoiceSessionRestart(300));
+  return true;
+}
 function logRestartBlocked(reason){
   console.log('[Sous Voice] restart blocked: '+reason);
   logVoiceState('restart blocked',{reason});
@@ -136,9 +175,9 @@ function setVoiceProcessing(active){
   processingTranscript=!!active;
   if(processingTranscript) setMicState('processing');
 }
-function scheduleVoiceSessionRestart(delay=450){
+function scheduleVoiceSessionRestart(delay=VOICE_RESTART_DEFAULT_MS){
   clearVoiceRestartTimer();
-  const safeDelay=Math.max(400,Math.min(700,Number(delay)||450));
+  const safeDelay=Math.max(VOICE_RESTART_MIN_MS,Math.min(700,Number(delay)||VOICE_RESTART_DEFAULT_MS));
   logVoiceState('restart scheduled',{delay:safeDelay});
   voiceRestartTimer=setTimeout(()=>{
     voiceRestartTimer=null;
@@ -149,7 +188,7 @@ function scheduleVoiceSessionRestart(delay=450){
     else startTapRec({sessionRestart:true});
   },safeDelay);
 }
-function maybeResumeVoiceSession(delay=450){
+function maybeResumeVoiceSession(delay=VOICE_RESTART_DEFAULT_MS){
   if(voiceSessionActive) scheduleVoiceSessionRestart(delay);
   else if(cookingModeEnabled()) setTimeout(restartAlwaysOn,delay);
 }
@@ -181,6 +220,7 @@ function stopAllVoiceActivity(reason){
   processingTranscript=false;
   voiceSessionUseRealtime=false;
   voiceNoSpeechRetries=0;
+  resetVoiceRecovery();
   clarificationState=null;
   stopSousRealtimeVoice(false);
   try{if(tapRec)tapRec.stop();}catch(e){}
@@ -693,6 +733,37 @@ function parseClarificationInput(baseItem,answer){
   }
   return fallback;
 }
+const VOICE_CLARIFY_AMBIGUOUS_LABELS=new Set([
+  'cheese','milk','yoghurt','yogurt','greek yoghurt','greek yogurt',
+  'rice','bread','chicken','pork','lamb','turkey','fish','tuna'
+]);
+function shouldVoiceClarifyAmbiguous(item){
+  const label=typeof normaliseLogText==='function'?normaliseLogText(item?.label||''):String(item?.label||'').toLowerCase().trim();
+  return VOICE_CLARIFY_AMBIGUOUS_LABELS.has(label);
+}
+function resolveAmbiguousDefault(item){
+  const food=item?.matches&&item.matches[0];
+  if(!food) return null;
+  const amount=item.amount!=null?Math.max(1,Math.round(item.amount)):food.w;
+  const r=amount/(food.w||100);
+  return {
+    name:food.name,
+    weight:amount,
+    kcal:Math.round(food.kcal*r),
+    protein:Math.round(food.p*r*10)/10,
+    carbs:Math.round(food.c*r*10)/10,
+    fat:Math.round(food.f*r*10)/10,
+    fibre:Math.round((food.fi||0)*r*10)/10,
+    icon:food.icon,
+    type:food.type||'solid',
+    rawFood:food,
+    confidence:'high',
+    needsConfirm:false,
+    weightSpecified:item.amount!=null,
+    foodChoiceConfirmed:true,
+    heardName:item.label||food.name
+  };
+}
 function maybeStartIngredientClarification(results,rawText){
   if(clarificationState?.active||!isClarificationVoiceContext()) return false;
   if(!Array.isArray(results)||!results.length) return false;
@@ -700,6 +771,14 @@ function maybeStartIngredientClarification(results,rawText){
   if(foodResults.length!==1) return false;
   const item=foodResults[0];
   if(item.ambiguous){
+    if(!shouldVoiceClarifyAmbiguous(item)){
+      const resolved=resolveAmbiguousDefault(item);
+      if(resolved){
+        voiceDebugTrace('ambiguous_default',{label:item.label,selected:resolved.name,amount:resolved.weight});
+        handleParsed([resolved],rawText);
+        return true;
+      }
+    }
     beginIngredientClarification(item.label||rawText||'ingredient',()=>showMultiConfirm(foodResults));
     return true;
   }
@@ -915,6 +994,7 @@ function showVoiceRetry(msg){
 
 function handleParsed(results,rawText=''){
   voiceDebugTrace('handle_parsed_enter',{rawText,results:voiceDebugResultSummary(results)});
+  if(results&&results.length) resetVoiceRecovery();
   if(!results||!results.length){
     const rt=(rawText||'').trim();
     voiceDebugTrace('final_action',{action:rt.length>1?'fallback_resolve_ui':'voice_retry',rawText:rt});
@@ -948,7 +1028,7 @@ function handleParsed(results,rawText=''){
     const _activeScr=document.querySelector('.log-screen.active')?.id;
     if(handled && _activeScr==='ls-listening') renderCurrentMeal();
     updateHome();
-    if(handled && _activeScr==='ls-listening') maybeResumeVoiceSession(400);
+    if(handled && _activeScr==='ls-listening') maybeResumeVoiceSession(250);
     return;
   }
   if(results[0].command==='summary'){
@@ -991,7 +1071,7 @@ function processQueue(autoAdded=[]){
     } else {
       const transcript=document.getElementById('transcript-text');
       if(transcript) transcript.textContent='—';
-      maybeResumeVoiceSession(400);
+      maybeResumeVoiceSession(VOICE_RESTART_DEFAULT_MS);
     }
     updateHome();
     return;
@@ -1466,7 +1546,7 @@ function commitQuantity(grams){
   showLogScreen('listening');
   renderCurrentMeal();
   processQueue();
-  maybeResumeVoiceSession(400);
+  maybeResumeVoiceSession(250);
 }
 function findUsualMealForIngredientName(name){
   if(typeof getUsualMeals!=='function') return null;
@@ -1505,7 +1585,7 @@ function commitUsualFromQuantityPrompt(){
   showLogScreen('listening');
   renderCurrentMeal();
   processQueue();
-  maybeResumeVoiceSession(400);
+  maybeResumeVoiceSession(250);
 }
 function askQuantity(item){
   pendingFood=item;
@@ -1712,7 +1792,7 @@ function commitMultiConfirm(){
   updateHome();
   showToast('Added '+count+' ingredient'+(count!==1?'s':'')+' ✓');
   speakCachedResponse('added');
-  maybeResumeVoiceSession(400);
+  maybeResumeVoiceSession(250);
 }
 
 // ═══════════════════════════════════════════
@@ -2224,19 +2304,26 @@ function buildTapRec(){
     setVoiceProcessing(true);
     console.log('[Sous Voice] processing transcript');
     logVoiceState('transcript processing started',{transcript,lowConfidence:isLow});
-    const done=()=>{
+    const done=(opts={})=>{
       setVoiceProcessing(false);
       logVoiceState('transcript processing finished');
-      if(document.querySelector('.log-screen.active')?.id==='ls-listening') scheduleVoiceSessionRestart(500);
+      if(opts.restart!==false&&document.querySelector('.log-screen.active')?.id==='ls-listening') scheduleVoiceSessionRestart(VOICE_RESTART_DEFAULT_MS);
     };
     if(clarificationState?.active){
       voiceDebugTrace('transcript_routed',{route:'clarification',transcript});
       Promise.resolve(handleClarification(transcript)).then(done).catch(e=>{console.warn('[Sous Voice] clarification error',e);done();});
-    } else if(isLow){
-      voiceDebugTrace('transcript_routed',{route:'low_confidence_review',transcript});
-      showVoiceCorrection(transcript);done();
-    }
-    else {
+    } else {
+      const recoveryIssue=transcriptRecoveryIssue(transcript,isLow);
+      if(maybeRecoverVoiceTranscript(recoveryIssue,transcript)){
+        voiceDebugTrace('transcript_routed',{route:'voice_recovery',issue:recoveryIssue,transcript});
+        done({restart:false});
+        return;
+      }
+      if(isLow){
+        voiceDebugTrace('transcript_routed',{route:'low_confidence_review',transcript});
+        showVoiceCorrection(transcript);done();
+        return;
+      }
       voiceDebugTrace('transcript_routed',{route:'normal_parser',transcript});
       Promise.resolve(handleTranscript(transcript,transcript)).then(done).catch(e=>{console.warn('[Sous Voice] transcript error',e);done();});
     }
@@ -2282,8 +2369,10 @@ function buildTapRec(){
     } else if(err==='no-speech'&&voiceSessionActive){
       if(voiceNoSpeechRetries>=2){showVoiceRetry("Didn't catch that — try again");endVoiceSession();return;}
       voiceNoSpeechRetries++;
-      showToast("Didn't catch that — listening again");
-      scheduleVoiceSessionRestart(600);
+      resetVoiceRecovery();
+      voiceDebugTrace('voice_recovery',{issue:'no_speech',attempt:voiceNoSpeechRetries});
+      showToast("Didn't catch that");
+      speak("Didn't catch that",()=>scheduleVoiceSessionRestart(300));
     } else if(err==='no-speech') showVoiceRetry("Didn't catch that — try again");
     else if(err==='network'||err==='service-not-allowed'){
       showVoiceRetry("Voice service is unavailable — try again");
@@ -2443,7 +2532,7 @@ function handleRealtimeActionText(text){
     routeRealtimeTranscriptToReview(fallback);
     setVoiceProcessing(false);
     stopSousRealtimeVoice(false);
-    maybeResumeVoiceSession(500);
+    maybeResumeVoiceSession(VOICE_RESTART_DEFAULT_MS);
     return;
   }
   console.log('[Sous Realtime] action received');
@@ -2482,7 +2571,7 @@ function handleRealtimeActionText(text){
     routeRealtimeTranscriptToReview(transcript);
     setVoiceProcessing(false);
     stopSousRealtimeVoice(false);
-    if(document.querySelector('.log-screen.active')?.id==='ls-listening') maybeResumeVoiceSession(500);
+    if(document.querySelector('.log-screen.active')?.id==='ls-listening') maybeResumeVoiceSession(VOICE_RESTART_DEFAULT_MS);
   }
 }
 function handleRealtimeServerEvent(event){
@@ -2842,7 +2931,7 @@ function wireLogButtons(){
     showLogScreen('listening');
     renderCurrentMeal();
     processQueue();
-    maybeResumeVoiceSession(400);
+    maybeResumeVoiceSession(250);
   });
   document.getElementById('qty-usual-btn')?.addEventListener('click',commitUsualFromQuantityPrompt);
   // Confirm screen — live macro update when weight input changes
