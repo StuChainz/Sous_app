@@ -24,6 +24,8 @@ const VOICE_RESTART_MIN_MS=250;
 const VOICE_RESTART_DEFAULT_MS=320;
 const VOICE_POST_SPEECH_QUIET_MS=550;
 const VOICE_LISTENING_STALL_MS=15000;
+const VOICE_AUDIO_START_TIMEOUT_MS=1800;
+const VOICE_TTS_START_TIMEOUT_MS=2500;
 const VOICE_PROCESSING_TIMEOUT_MS=10000;
 const VOICE_SPEAKING_TIMEOUT_MS=14000;
 const VOICE_SESSION_STATES=new Set(['idle','listening','processing','speaking','restarting','error']);
@@ -111,10 +113,12 @@ function voiceDebugOverlayEnabled(){
 function voiceSelfTestEnabled(){
   try{
     const value=localStorage.getItem(VOICE_SELF_TEST_KEY);
-    return value==='true'||value==='1'||new URLSearchParams(location.search).get('voiceSelfTest')==='1';
+    return value!=='0'&&(value==='true'||value==='1'||new URLSearchParams(location.search).get('voiceSelfTest')==='1'||window.SousVoiceSelfTest===true);
   }
   catch(e){return false;}
 }
+window.enableSousVoiceSelfTest=()=>{try{localStorage.setItem(VOICE_SELF_TEST_KEY,'1');}catch(e){};window.SousVoiceSelfTest=true;return true;};
+window.disableSousVoiceSelfTest=()=>{try{localStorage.removeItem(VOICE_SELF_TEST_KEY);}catch(e){};window.SousVoiceSelfTest=false;return true;};
 function latestVoiceDebugEntry(list,predicate){
   for(let i=list.length-1;i>=0;i--){
     if(predicate(list[i])) return list[i];
@@ -1933,9 +1937,12 @@ function speak(text,onEnd,opts={}){
   if(!window.speechSynthesis){finishSkippedVoiceFeedback(onEnd);return;}
   window.speechSynthesis.cancel();
   let finished=false;
+  let started=false;
+  let startTimer=null;
   const finish=reason=>{
     if(finished) return;
     finished=true;
+    if(startTimer){clearTimeout(startTimer);startTimer=null;}
     setVoiceSpeaking(false,reason,null,{restart:!onEnd});
     if(onEnd) setTimeout(onEnd,VOICE_POST_SPEECH_QUIET_MS);
   };
@@ -1959,10 +1966,22 @@ function speak(text,onEnd,opts={}){
   };
   const pref=voices.slice().sort((a,b)=>score(b)-score(a))[0];
   if(pref) u.voice=pref;
+  u.onstart=()=>{started=true;if(startTimer){clearTimeout(startTimer);startTimer=null;}voiceDebugTrace('feedback_audio_started',{route:'browser_tts'});};
   u.onend=()=>finish('speech ended');
   u.onerror=()=>{voiceDebugTrace('voice_error',{source:'speech',error:'speech_error'});finish('speech error');};
   setTimeout(()=>{
-    try{window.speechSynthesis.speak(u);}
+    try{
+      window.speechSynthesis.speak(u);
+      startTimer=setTimeout(()=>{
+        if(finished||started) return;
+        try{
+          if(window.speechSynthesis&&window.speechSynthesis.speaking) return;
+          window.speechSynthesis&&window.speechSynthesis.cancel();
+        }catch(e){}
+        voiceDebugTrace('voice_error',{source:'speech',error:'speech_start_timeout'});
+        finish('speech start timeout');
+      },VOICE_TTS_START_TIMEOUT_MS);
+    }
     catch(e){finish('speech failed');}
   },30);
 }
@@ -2012,14 +2031,25 @@ function speakCachedResponse(key,data={},onEnd){
   const tryAudio=(audioUrl,text)=>{
     const audio=new Audio(audioUrl);
     let finished=false;
+    let started=false;
+    let audioStartTimer=null;
     const finish=reason=>{
       if(finished) return;
       finished=true;
+      if(audioStartTimer){clearTimeout(audioStartTimer);audioStartTimer=null;}
       setVoiceSpeaking(false,reason,null,{restart:!onEnd});
       if(onEnd) setTimeout(onEnd,VOICE_POST_SPEECH_QUIET_MS);
     };
+    const markStarted=reason=>{
+      if(started) return;
+      started=true;
+      if(audioStartTimer){clearTimeout(audioStartTimer);audioStartTimer=null;}
+      voiceDebugTrace('feedback_audio_started',{key,route:'cached_audio',reason});
+    };
     audio.onended=()=>finish('cached speech ended');
+    audio.onplaying=()=>markStarted('playing');
     audio.onerror=()=>{
+      if(audioStartTimer){clearTimeout(audioStartTimer);audioStartTimer=null;}
       voiceDebugTrace('voice_error',{source:'cached_speech',error:'audio_error',key});
       setVoiceSpeaking(false,'cached speech error');
       fallbackTTS(text);
@@ -2028,7 +2058,15 @@ function speakCachedResponse(key,data={},onEnd){
     console.log('[Sous Voice] speaking:',key);
     voiceDebugTrace('feedback_audio',{key,route:'cached_audio',audioUrl});
     setVoiceSpeaking(true,'cached speech '+key,()=>finish('cached speech timeout'));
-    audio.play().catch(()=>{
+    audioStartTimer=setTimeout(()=>{
+      if(finished||started) return;
+      voiceDebugTrace('voice_error',{source:'cached_speech',error:'audio_start_timeout',key});
+      try{audio.pause();audio.src='';}catch(e){}
+      setVoiceSpeaking(false,'cached speech start timeout');
+      fallbackTTS(text);
+    },VOICE_AUDIO_START_TIMEOUT_MS);
+    audio.play().then(()=>markStarted('play_resolved')).catch(()=>{
+      if(audioStartTimer){clearTimeout(audioStartTimer);audioStartTimer=null;}
       voiceDebugTrace('voice_error',{source:'cached_speech',error:'play_failed',key});
       setVoiceSpeaking(false,'cached speech failed');
       fallbackTTS(text);
