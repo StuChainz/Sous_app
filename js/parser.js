@@ -488,9 +488,23 @@ function splitOnSeparators(text){
 // Split parts further where a new quantity begins mid-segment.
 function splitOnNewQuantity(parts){
   const re=/(?=\b\d+(?:\.\d+)?\s*(?:g\b|kg\b|ml\b|l\b|tbsp\b|tsp\b|oz\b|cups?\b|calories\b|kcal\b))/i;
+  const leadingQuantityRe=/^(\d+(?:\.\d+)?\s*(?:g\b|kg\b|ml\b|l\b|tbsp\b|tsp\b|oz\b|cups?\b|calories\b|kcal\b))\s*(.*)$/i;
+  const hasQuantityRe=/\b\d+(?:\.\d+)?\s*(?:g\b|kg\b|ml\b|l\b|tbsp\b|tsp\b|oz\b|cups?\b|calories\b|kcal\b)/i;
   return parts.flatMap(part=>{
     const chunks=part.split(re).map(s=>s.trim()).filter(Boolean);
-    return chunks.length>1?chunks:[part];
+    if(chunks.length<=1) return [part];
+    const merged=[];
+    chunks.forEach(chunk=>{
+      const m=chunk.match(leadingQuantityRe);
+      const prev=merged[merged.length-1];
+      if(m&&prev&&!hasQuantityRe.test(prev)){
+        merged[merged.length-1]=`${prev} ${m[1]}`.trim();
+        if(m[2]) merged.push(m[2].trim());
+      } else {
+        merged.push(chunk);
+      }
+    });
+    return merged;
   });
 }
 function splitIngredients(text){
