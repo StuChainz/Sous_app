@@ -32,6 +32,7 @@ const VOICE_SESSION_STATES=new Set(['idle','listening','processing','speaking','
 const VOICE_DEBUG_KEY='sous_voice_debug_trace';
 const VOICE_DEBUG_OVERLAY_KEY='sous_voice_debug_overlay';
 const VOICE_SELF_TEST_KEY='sous_voice_self_test';
+const VOICE_SELF_TEST_DEFAULT=true;
 const VOICE_DEBUG_LIMIT=80;
 
 function voiceDebugClarificationSnapshot(){
@@ -113,12 +114,23 @@ function voiceDebugOverlayEnabled(){
 function voiceSelfTestEnabled(){
   try{
     const value=localStorage.getItem(VOICE_SELF_TEST_KEY);
-    return value!=='0'&&(value==='true'||value==='1'||new URLSearchParams(location.search).get('voiceSelfTest')==='1'||window.SousVoiceSelfTest===true);
+    return value!=='0'&&(VOICE_SELF_TEST_DEFAULT||value==='true'||value==='1'||new URLSearchParams(location.search).get('voiceSelfTest')==='1'||window.SousVoiceSelfTest===true);
   }
   catch(e){return false;}
 }
 window.enableSousVoiceSelfTest=()=>{try{localStorage.setItem(VOICE_SELF_TEST_KEY,'1');}catch(e){};window.SousVoiceSelfTest=true;return true;};
-window.disableSousVoiceSelfTest=()=>{try{localStorage.removeItem(VOICE_SELF_TEST_KEY);}catch(e){};window.SousVoiceSelfTest=false;return true;};
+window.disableSousVoiceSelfTest=()=>{try{localStorage.setItem(VOICE_SELF_TEST_KEY,'0');}catch(e){};window.SousVoiceSelfTest=false;return true;};
+function isVoiceSelfTestEcho(transcript){
+  return voiceSelfTestEnabled()&&/\bself\s*test\s*marker\b|\bmarker\s+banana\b/i.test(String(transcript||''));
+}
+function handleVoiceSelfTestEcho(source,transcript){
+  voiceDebugTrace('voice_self_test_echo_detected',{source,transcript});
+  const msg='Self-listening detected';
+  const el=document.getElementById('transcript-text');
+  if(el) el.textContent=msg+': "'+transcript+'"';
+  showToast(msg,5000);
+  return true;
+}
 function latestVoiceDebugEntry(list,predicate){
   for(let i=list.length-1;i>=0;i--){
     if(predicate(list[i])) return list[i];
@@ -3247,6 +3259,11 @@ function buildTapRec(){
     logVoiceState('speech result received',{transcript,confidence:finalConf});
     voiceDebugTrace('transcript_heard',{source:'tap',transcript,confidence:finalConf});
     stopTapRec();
+    if(isVoiceSelfTestEcho(transcript)){
+      handleVoiceSelfTestEcho('tap',transcript);
+      if(voiceSessionActive) scheduleVoiceSessionRestart(VOICE_RESTART_DEFAULT_MS);
+      return;
+    }
     const isLow=typeof finalConf==='number'&&finalConf>0&&finalConf<0.75;
     _voiceMode=true;
     setVoiceProcessing(true,'transcript processing');
@@ -3478,6 +3495,11 @@ function routeRealtimeTranscriptToReview(transcript){
   const text=String(transcript||'').trim();
   if(!text) return false;
   voiceDebugTrace('transcript_heard',{source:'realtime',transcript:text});
+  if(isVoiceSelfTestEcho(text)){
+    handleVoiceSelfTestEcho('realtime',text);
+    if(voiceSessionActive) scheduleVoiceSessionRestart(VOICE_RESTART_DEFAULT_MS);
+    return true;
+  }
   if(clarificationState?.active){
     voiceDebugTrace('transcript_routed',{route:'clarification',source:'realtime',transcript:text});
     handleClarification(text);
