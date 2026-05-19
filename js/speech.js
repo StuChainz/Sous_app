@@ -944,6 +944,7 @@ function maybeShowFoodChoiceReview(results,rawText){
   if(!rawText||!Array.isArray(results)||!results.length) return false;
   const foodResults=results.filter(r=>!r.command);
   if(!foodResults.length) return false;
+  if(foodResults.length>1) return false;
   const segments=_extractHeardFoodSegments(rawText,foodResults.length);
   let foodIdx=0;
   for(let i=0;i<results.length;i++){
@@ -972,6 +973,7 @@ function getPendingFoodChoiceReview(results,rawText){
   if(!rawText||!Array.isArray(results)||!results.length) return null;
   const foodResults=results.filter(r=>!r.command);
   if(!foodResults.length) return null;
+  if(foodResults.length>1) return null;
   const segments=_extractHeardFoodSegments(rawText,foodResults.length);
   let foodIdx=0;
   for(let i=0;i<results.length;i++){
@@ -2307,9 +2309,131 @@ function resolveAmbig(food,amount){
 // MULTI-CONFIRM (batch ingredient review)
 // ═══════════════════════════════════════════
 let pendingBatch=[];
+function _uniqueFoodsByName(foods){
+  const seen=new Set();
+  return (foods||[]).filter(food=>{
+    const key=String(food?.name||'').toLowerCase();
+    if(!food||!food.name||seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+function _multiConfirmFamilyOptions(heard){
+  const db=typeof getFoodDatabase==='function'?getFoodDatabase():typeof FOODS!=='undefined'?FOODS:[];
+  const text=_multiConfirmTextKey(heard);
+  if(/\bcheese\b/.test(text)){
+    return db.filter(food=>{
+      const keys=[food.name,...(food.kw||[]),...(food.aliases||[])].map(_multiConfirmTextKey);
+      return food.icon==='ti-cheese'||keys.some(key=>/\b(?:cheese|cheddar|mozzarella|parmesan|feta)\b/.test(key));
+    }).slice(0,8);
+  }
+  return [];
+}
+function _multiConfirmOptionsForItem(item){
+  if(item?.ambiguous) return _uniqueFoodsByName(item.matches||[]);
+  const food=item?.rawFood||null;
+  if(!food) return [];
+  const heard=typeof normaliseLogText==='function'
+    ?normaliseLogText(item.heardName||item.name||food.name)
+    :String(item.heardName||item.name||food.name).toLowerCase().trim();
+  const familyMatch=/(cheese|milk|bread|rice|yoghurt|yogurt|chicken|fish|tuna)\b/.test(heard);
+  const related=familyMatch&&typeof _relatedFoodMatches==='function'
+    ?_relatedFoodMatches(heard,food,7)
+    :[];
+  return _uniqueFoodsByName([food,...related,..._multiConfirmFamilyOptions(heard)]);
+}
+function _entryFood(entry){
+  if(entry.showCreate) return null;
+  return entry.options&&entry.options.length?entry.options[entry.selectedIdx||0]:entry.food;
+}
+function _multiConfirmTextKey(value){
+  const text=typeof normaliseLogText==='function'?normaliseLogText(value||''):String(value||'').toLowerCase().trim();
+  return text.replace(/[^a-z0-9]+/g,' ').trim();
+}
+function _multiConfirmEntryScore(entry,item){
+  const itemKeys=[
+    item?.name,
+    item?.label,
+    item?.rawFood?.name,
+    ...(item?.rawFood?.aliases||[]),
+    ...(item?.rawFood?.kw||[])
+  ].map(_multiConfirmTextKey).filter(Boolean);
+  const entryKeys=[
+    entry.label,
+    entry.rawItem?.heardName,
+    entry.rawItem?.name,
+    entry.food?.name,
+    ...((entry.options||[]).flatMap(food=>[food.name,...(food.aliases||[]),...(food.kw||[])]))
+  ].map(_multiConfirmTextKey).filter(Boolean);
+  let score=0;
+  itemKeys.forEach(itemKey=>{
+    entryKeys.forEach(entryKey=>{
+      if(!itemKey||!entryKey) return;
+      if(itemKey===entryKey) score=Math.max(score,100);
+      else if(itemKey.includes(entryKey)||entryKey.includes(itemKey)) score=Math.max(score,60+Math.min(itemKey.length,entryKey.length));
+    });
+  });
+  return score;
+}
+function _selectEntryFood(entry,item){
+  if(!entry||!item?.rawFood||!entry.options?.length) return false;
+  const idx=entry.options.findIndex(food=>food.name===item.rawFood.name||food.id===item.rawFood.id);
+  if(idx<0) return false;
+  entry.selectedIdx=idx;
+  entry.showCreate=false;
+  entry.manualMacros=false;
+  return true;
+}
+function handleMultiConfirmVoiceFill(transcript){
+  const active=document.querySelector('.log-screen.active')?.id;
+  if(active!=='ls-multi-confirm'||!pendingBatch.length) return false;
+  const results=typeof parseText==='function'?parseText(transcript).filter(r=>r&&!r.command):[];
+  if(!results.length){
+    showToast("Didn't catch the amounts");
+    return true;
+  }
+  const used=new Set();
+  let updated=0;
+  results.forEach(item=>{
+    let bestIdx=-1,bestScore=0;
+    pendingBatch.forEach((entry,idx)=>{
+      if(used.has(idx)) return;
+      const score=_multiConfirmEntryScore(entry,item);
+      if(score>bestScore){bestScore=score;bestIdx=idx;}
+    });
+    if(bestIdx<0||bestScore<50) return;
+    const entry=pendingBatch[bestIdx];
+    used.add(bestIdx);
+    _selectEntryFood(entry,item);
+    const amount=item.ambiguous?item.amount:item.weight;
+    if((item.weightSpecified||item.ambiguous)&&amount!=null){
+      entry.weight=Math.max(1,Math.round(amount));
+      entry.weightSpecified=true;
+    }
+    _updateEntryMacros(entry);
+    updated++;
+  });
+  if(updated){
+    renderMultiConfirm();
+    showToast('Updated '+updated+' amount'+(updated!==1?'s':''));
+    voiceDebugTrace('multi_confirm_voice_fill',{transcript,updated});
+  } else {
+    showToast("Didn't match those amounts");
+    voiceDebugTrace('multi_confirm_voice_fill_miss',{transcript,results:voiceDebugResultSummary(results)});
+  }
+  return true;
+}
+function promptMultiConfirmQuantityFill(){
+  if(!pendingBatch.length) return;
+  if(!pendingBatch.some(entry=>!entry.weightSpecified)) return;
+  if(!(voiceSessionActive||voiceCurrentlyListening||isRecording)) return;
+  const transcript=document.getElementById('transcript-text');
+  if(transcript) transcript.textContent='How much?';
+  speakThenListen('How much?',handleMultiConfirmVoiceFill,'clarify_amount',{});
+}
 function _updateEntryMacros(entry){
   if(entry.manualMacros) return;
-  const food=entry.ambiguous?entry.options[entry.selectedIdx]:entry.food;
+  const food=_entryFood(entry);
   const w=Math.max(1,Math.round(entry.weight||1));
   if(food){
     const r=w/food.w;
@@ -2335,14 +2459,19 @@ function batchNeedsMultiConfirm(results){
 }
 function showMultiConfirm(results){
   pendingBatch=results.filter(r=>!r.command).map(r=>{
+    const options=_multiConfirmOptionsForItem(r);
     let entry;
-    if(r.ambiguous) entry={ambiguous:true,label:r.label,options:r.matches,selectedIdx:0,weight:r.amount||100,manualMacros:false};
-    else entry={ambiguous:false,label:r.name,options:null,food:r.rawFood||null,weight:r.weight||r.rawFood?.w||100,rawItem:r,manualMacros:false};
+    if(r.ambiguous) entry={ambiguous:true,label:r.label,options,selectedIdx:0,weight:r.amount||100,weightSpecified:r.amount!=null,manualMacros:false,showCreate:false,customName:r.label||'',customKcal:'',customProtein:'',customCarbs:'',customFat:''};
+    else {
+      const selectedIdx=Math.max(0,options.findIndex(food=>r.rawFood&&(food.name===r.rawFood.name||food.id===r.rawFood.id)));
+      entry={ambiguous:false,label:r.name,options,selectedIdx,food:r.rawFood||null,weight:r.weight||r.rawFood?.w||100,weightSpecified:!!r.weightSpecified,rawItem:r,manualMacros:false,showCreate:false,customName:r.heardName||r.name||'',customKcal:'',customProtein:'',customCarbs:'',customFat:''};
+    }
     _updateEntryMacros(entry);
     return entry;
   });
   renderMultiConfirm();
   showLogScreen('multi-confirm');
+  setTimeout(promptMultiConfirmQuantityFill,120);
 }
 function renderMultiConfirm(){
   const list=document.getElementById('mc-list');
@@ -2351,22 +2480,68 @@ function renderMultiConfirm(){
   pendingBatch.forEach((entry,idx)=>{
     const card=document.createElement('div');
     card.style.cssText='background:var(--card);border:.5px solid var(--border);border-radius:10px;padding:10px 12px;margin-bottom:8px;';
-    if(entry.ambiguous){
-      const wrap=document.createElement('div');
-      wrap.style.cssText='display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px;';
+    const title=document.createElement('div');
+    title.style.cssText='font-size:12px;color:var(--text-muted);margin-bottom:5px;';
+    title.textContent=entry.ambiguous?`Heard "${entry.label}"`:entry.label;
+    card.appendChild(title);
+    if(entry.options&&entry.options.length){
+      const select=document.createElement('select');
+      select.style.cssText='width:100%;font-size:14px;background:var(--card);border:.5px solid var(--border);border-radius:7px;padding:7px 8px;color:var(--text);font-family:inherit;margin-bottom:8px;';
       entry.options.forEach((food,fi)=>{
-        const chip=document.createElement('button');
-        chip.type='button'; chip.textContent=food.name;
-        const sel=fi===entry.selectedIdx;
-        chip.style.cssText='font-size:12px;padding:5px 11px;border-radius:20px;cursor:pointer;font-family:inherit;border:.5px solid '+(sel?'var(--accent);background:var(--accent);color:#fff;':'var(--border);background:var(--card-2);color:var(--text);');
-        chip.addEventListener('click',()=>{entry.selectedIdx=fi;_updateEntryMacros(entry);renderMultiConfirm();});
-        wrap.appendChild(chip);
+        const opt=document.createElement('option');
+        opt.value=String(fi);
+        opt.textContent=food.name;
+        select.appendChild(opt);
       });
-      card.appendChild(wrap);
-    } else {
-      const nm=document.createElement('div');
-      nm.style.cssText='font-size:14px;font-weight:500;color:var(--text);margin-bottom:8px;';
-      nm.textContent=entry.label; card.appendChild(nm);
+      const customOpt=document.createElement('option');
+      customOpt.value='new';
+      customOpt.textContent='+ New item';
+      select.appendChild(customOpt);
+      select.value=entry.showCreate?'new':String(entry.selectedIdx||0);
+      select.addEventListener('change',()=>{
+        if(select.value==='new'){
+          entry.showCreate=true;
+          if(!entry.customName) entry.customName=entry.label||'New item';
+        } else {
+          entry.showCreate=false;
+          entry.selectedIdx=parseInt(select.value,10)||0;
+          entry.manualMacros=false;
+        }
+        _updateEntryMacros(entry);
+        renderMultiConfirm();
+      });
+      card.appendChild(select);
+    }
+    if(entry.showCreate){
+      const customWrap=document.createElement('div');
+      customWrap.style.cssText='border:.5px solid var(--border);border-radius:8px;padding:8px;margin-bottom:8px;background:var(--bg-2);';
+      const nameInput=document.createElement('input');
+      nameInput.type='text';
+      nameInput.value=entry.customName||entry.label||'';
+      nameInput.placeholder='Food name';
+      nameInput.style.cssText='width:100%;box-sizing:border-box;font-size:13px;background:var(--card);border:.5px solid var(--border);border-radius:6px;padding:6px 8px;color:var(--text);font-family:inherit;outline:none;margin-bottom:6px;';
+      nameInput.addEventListener('input',()=>{entry.customName=nameInput.value;});
+      customWrap.appendChild(nameInput);
+      const grid=document.createElement('div');
+      grid.style.cssText='display:grid;grid-template-columns:1fr 1fr;gap:5px;';
+      [
+        ['customKcal','kcal / 100g'],
+        ['customProtein','protein g'],
+        ['customCarbs','carbs g'],
+        ['customFat','fat g']
+      ].forEach(([key,placeholder])=>{
+        const inp=document.createElement('input');
+        inp.type='number';
+        inp.value=entry[key]||'';
+        inp.placeholder=placeholder;
+        inp.min='0';
+        inp.step='0.1';
+        inp.style.cssText='font-size:12px;background:var(--card);border:.5px solid var(--border);border-radius:6px;padding:5px 6px;color:var(--text);font-family:inherit;outline:none;';
+        inp.addEventListener('input',()=>{entry[key]=inp.value;});
+        grid.appendChild(inp);
+      });
+      customWrap.appendChild(grid);
+      card.appendChild(customWrap);
     }
     const qRow=document.createElement('div');
     qRow.style.cssText='display:flex;align-items:center;gap:6px;';
@@ -2377,7 +2552,14 @@ function renderMultiConfirm(){
     const wtIn=document.createElement('input');
     wtIn.type='number'; wtIn.value=Math.round(entry.weight); wtIn.min=1;
     wtIn.style.cssText='width:60px;text-align:center;font-size:14px;background:var(--card);border:.5px solid var(--border);border-radius:6px;padding:5px 6px;color:var(--text);font-family:inherit;outline:none;';
-    wtIn.addEventListener('change',()=>{entry.weight=Math.max(1,parseFloat(wtIn.value)||1);_updateEntryMacros(entry);renderMultiConfirm();});
+    const applyWeightInput=({rerender=false}={})=>{
+      entry.weight=Math.max(1,parseFloat(wtIn.value)||1);
+      entry.weightSpecified=true;
+      _updateEntryMacros(entry);
+      if(rerender) renderMultiConfirm();
+    };
+    wtIn.addEventListener('input',()=>applyWeightInput());
+    wtIn.addEventListener('change',()=>applyWeightInput({rerender:true}));
     const plusBtn=document.createElement('button');
     plusBtn.textContent='+'; plusBtn.type='button'; plusBtn.style.cssText=btnStyle;
     plusBtn.addEventListener('click',()=>{entry.weight=(entry.weight||0)+10;_updateEntryMacros(entry);renderMultiConfirm();});
@@ -2417,10 +2599,21 @@ function commitMultiConfirm(){
   snapshotMeal();
   let overrideCandidate=null;
   pendingBatch.forEach(entry=>{
-    const food=entry.ambiguous?entry.options[entry.selectedIdx]:entry.food;
+    const food=_entryFood(entry);
     const w=Math.max(1,Math.round(entry.weight));
     let item;
-    if(entry.manualMacros){
+    if(entry.showCreate&&entry.customName&&entry.customName.trim()){
+      const name=entry.customName.trim();
+      const kcal=parseFloat(entry.customKcal)||0;
+      const protein=parseFloat(entry.customProtein)||0;
+      const carbs=parseFloat(entry.customCarbs)||0;
+      const fat=parseFloat(entry.customFat)||0;
+      const cf=typeof addCustomFood==='function'
+        ?addCustomFood({name,w:100,kcal,p:protein,c:carbs,f:fat,fi:0,icon:'ti-clipboard',type:'solid'})
+        :{name,w:100,kcal,p:protein,c:carbs,f:fat,fi:0,icon:'ti-clipboard',type:'solid'};
+      const r=w/(cf.w||100);
+      item={name:cf.name,weight:w,kcal:Math.round(cf.kcal*r),protein:Math.round(cf.p*r*10)/10,carbs:Math.round(cf.c*r*10)/10,fat:Math.round(cf.f*r*10)/10,fibre:0,icon:cf.icon,rawFood:cf};
+    } else if(entry.manualMacros){
       const base=food?{name:food.name,icon:food.icon,rawFood:food}:{...(entry.rawItem||{})};
       item={...base,weight:w,kcal:entry.editKcal||0,protein:entry.editProtein||0,carbs:entry.editCarbs||0,fat:entry.editFat||0,fibre:food?Math.round((food.fi||0)*w/food.w*10)/10:(entry.rawItem?.fibre||0)};
       if(food&&w){
@@ -2963,7 +3156,11 @@ function buildTapRec(){
       logVoiceState('transcript processing finished');
       if(opts.restart!==false&&document.querySelector('.log-screen.active')?.id==='ls-listening') scheduleVoiceSessionRestart(VOICE_RESTART_DEFAULT_MS);
     };
-    if(clarificationState?.active){
+    if(document.querySelector('.log-screen.active')?.id==='ls-multi-confirm'){
+      voiceDebugTrace('transcript_routed',{route:'multi_confirm_fill',transcript});
+      try{handleMultiConfirmVoiceFill(transcript);}catch(e){console.warn('[Sous Voice] multi-confirm fill error',e);}
+      done({restart:false});
+    } else if(clarificationState?.active){
       voiceDebugTrace('transcript_routed',{route:'clarification',transcript});
       Promise.resolve(handleClarification(transcript)).then(()=>done({restart:false})).catch(e=>{console.warn('[Sous Voice] clarification error',e);done({restart:false});});
     } else {

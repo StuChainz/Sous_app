@@ -210,8 +210,15 @@ function detectMixedPartial(transcript,results){
   // Strip each matched food's name and keyword aliases
   for(const result of foodResults){
     const food=result.rawFood;
-    const terms=[food.name.toLowerCase(),...(food.kw||[])];
+    const terms=[
+      food.name.toLowerCase(),
+      result.heardName,
+      result.rawFoodName,
+      ...(food.kw||[]),
+      ...(food.aliases||[])
+    ];
     for(const kw of terms){
+      if(!kw) continue;
       const esc=kw.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
       text=text.replace(new RegExp('\\b'+esc+'\\b','gi'),' ');
     }
@@ -220,8 +227,10 @@ function detectMixedPartial(transcript,results){
   // Strip ambiguous trigger labels and their option names so they don't
   // count as unresolved — e.g. "chicken" from the chicken ambig trigger.
   for(const result of ambigResults){
-    const label=String(result.label||'').toLowerCase().trim();
-    if(label){
+    const labels=[result.label,result.heardName,result.rawFoodName];
+    for(const rawLabel of labels){
+      const label=String(rawLabel||'').toLowerCase().trim();
+      if(!label) continue;
       const esc=label.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
       text=text.replace(new RegExp('\\b'+esc+'\\b','gi'),' ');
     }

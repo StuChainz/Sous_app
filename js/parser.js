@@ -16,7 +16,8 @@ const NATURAL_QUANTITY_UNITS={
   drizzle:{solid:10,liquid:10},
   pinch:{solid:1,liquid:1},
   knob:{solid:10,liquid:10},
-  pat:{solid:10,liquid:10}
+  pat:{solid:10,liquid:10},
+  spoon:{solid:15,liquid:15}
 };
 function normalizeUnit(unit){
   return String(unit||'g').toLowerCase().replace(/s$/,'');
@@ -133,8 +134,11 @@ function extractQuantity(seg){
   m=s.match(new RegExp('\\b('+numberPattern+')\\s*(?:of\\s+)?('+COUNT_UNIT_PATTERN+')\\b','i'));
   if(m){const num=parseSpokenNumber(m[1]);if(num!=null)return{count:num,unit:normalizeCountUnit(m[2])};}
   // "a handful of nuts", "small splash of milk"
-  m=s.match(/\b(?:(small|large|big)\s+)?(?:a\s+|an\s+)?(handful|splash|drizzle|pinch|knob|pat)\b/i);
+  m=s.match(/\b(?:(small|large|big)\s+)?(?:a\s+|an\s+)?(handful|splash|drizzle|pinch|knob|pat|spoon)\b/i);
   if(m) return{naturalUnit:m[2].toLowerCase(),size:m[1]||null,count:1};
+  // "scoop whey" / "protein powder scoop" → implied one scoop where the food supports it.
+  m=s.match(/\bscoops?\b/i);
+  if(m) return{count:1,unit:'scoop'};
   // Unit alone, no leading number → implied 1 of that unit ("tablespoon olive oil")
   m=s.match(new RegExp('\\b('+UNIT_PATTERN+')','i'));
   if(m){const unit=normalizeUnit(m[1]);return{grams:UNIT_TO_GRAMS[unit]};}
@@ -203,14 +207,30 @@ function getAllFoods(){
   if(typeof getFoodMatchFoods==='function') return getFoodMatchFoods(null,true);
   return customs.length?[...customs,...FOODS]:FOODS;
 }
+function localFoodAliasFallback(text){
+  const s=normaliseLogText(text||'');
+  const foodText=s.replace(/\b(?:tbsp|tsp|cup|g|kg|ml|l|oz|of|a|an|one|two|three|four|five|six|seven|eight|nine|ten|\d+(?:\.\d+)?)\b/g,'').trim();
+  if(foodText==='oil') return getAllFoods().find(food=>normaliseLogText(food.name)==='olive oil')||null;
+  if(/\b[a-z]{4,}s\b/.test(foodText)){
+    const singular=foodText.replace(/\b([a-z]{4,})s\b/g,'$1');
+    if(singular!==foodText){
+      const match=typeof getFoodTextMatch==='function'?getFoodTextMatch(singular,{includeCustom:true}):null;
+      if(match) return match.food;
+    }
+  }
+  return null;
+}
 function findFoodByText(text){
   if(typeof resolveIngredientLocally==='function'){
     const resolved=resolveIngredientLocally(text);
-    return resolved.status==='matched'||resolved.status==='ambiguous'?resolved.food:null;
+    if(resolved.status==='matched'||resolved.status==='ambiguous') return resolved.food;
+    return localFoodAliasFallback(text);
   }
   if(typeof matchFoodByText==='function') return matchFoodByText(text);
   const s=normaliseLogText(text||'');
   let bestFood=null,bestLen=0;
+  bestFood=localFoodAliasFallback(text);
+  if(bestFood) return bestFood;
   for(const food of getAllFoods()){
     for(const kw of [...(food.kw||[]),food.name.toLowerCase()]){
       if(s.includes(kw)&&kw.length>bestLen){bestFood=food;bestLen=kw.length;}
@@ -344,7 +364,8 @@ function resolveReplacementFood(text){
 }
 function parseCorrectionCommand(text){
   const s=normaliseLogText(text||'').replace(/[,.;:]+/g,' ').replace(/\s+/g,' ').trim();
-  if(/^(undo|undo that|undo it|undo last|undo last item|remove last|delete last)$/.test(s)) return {command:'undo'};
+  if(/^(undo|undo that|undo it|undo last|undo last item|remove last|remove last item|delete last|delete last item)$/.test(s)) return {command:'undo'};
+  if(/^(clear|clear meal|clear this meal|clear the meal|start again|start over|reset meal|reset this meal)$/.test(s)) return {command:'clear'};
   const usual=parseUsualMealCommand(s);
   if(usual) return usual;
   let m=s.match(/^(?:remove|delete)\s+(.+)$/);
@@ -395,6 +416,12 @@ function applyCorrectionCommand(cmd){
     if(idx<0){speak("Couldn't find that item.");return true;}
     const removed=meal.splice(idx,1)[0];
     showToast(`Removed ${removed.name}`); speak(`Removed ${removed.name}.`); return true;
+  }
+  if(cmd.command==='clear'){
+    meal.length=0;
+    showToast('Cleared meal');
+    speak('Cleared.');
+    return true;
   }
   if(cmd.command==='changeWeight'){
     const idx=findMealIndexByText(cmd.target);
@@ -481,6 +508,8 @@ function splitOnSeparators(text){
     .replace(/\s*[,;]\s*/g,' and ')
     .replace(/\s*&\s*/g,' and ')
     .replace(/\s+plus\s+/g,' and ')
+    .replace(/\s+with\s+/g,' and ')
+    .replace(/\s+on\s+/g,' and ')
     .split(/\s+and\s+/i)
     .map(s=>s.replace(/__ANDAHALF__/g,'and a half').trim())
     .filter(Boolean);
@@ -518,7 +547,60 @@ const PARSER_AMBIG=[
    options:['Greek yoghurt','Fat free Greek yoghurt','Full fat Greek yoghurt'],
    question:'Which Greek yoghurt — regular, fat free, or full fat?'},
 ];
+const NON_LIST_FOOD_PHRASES=new Set(['cauliflower rice']);
 
+function parserAmbiguityForExactPhrase(seg,qty){
+  const normalized=typeof normaliseFoodSearchText==='function'?normaliseFoodSearchText(seg):normaliseLogText(seg);
+  for(const ag of [...PARSER_AMBIG,...AMBIG]){
+    for(const trig of ag.trigger){
+      const t=typeof normaliseFoodSearchText==='function'?normaliseFoodSearchText(trig):normaliseLogText(trig);
+      if(t!==normalized) continue;
+      const baseFoods=typeof getFoodMatchFoods==='function'?getFoodMatchFoods(null,false):FOODS;
+      const options=baseFoods.filter(f=>ag.options.includes(f.name));
+      const resolvedAmount=qty&&options[0]?quantityToGramsForFood(qty,options[0]):null;
+      return{ambiguous:true,matches:options,amount:resolvedAmount!=null?resolvedAmount:100,label:trig,question:ag.question,heardName:seg};
+    }
+  }
+  return null;
+}
+function parseExactFoodPhrase(seg){
+  seg=cleanSegment(stripSegmentPrefix(normaliseLogText(seg)));
+  if(!seg) return null;
+  const qty=extractQuantity(seg);
+  const ambiguous=parserAmbiguityForExactPhrase(seg,qty);
+  if(ambiguous) return ambiguous;
+  const searchText=typeof meaningfulFoodMatchText==='function'?meaningfulFoodMatchText(seg):seg;
+  const match=typeof getFoodTextMatch==='function'?getFoodTextMatch(seg,{includeCustom:true}):null;
+  if(!match||!match.food) return null;
+  const exact=match.matchType==='exact-name'||match.matchType==='exact-alias'||match.matchType==='covered-alias'||match.key===searchText;
+  if(!exact) return null;
+  const grams=qty?quantityToGramsForFood(qty,match.food):null;
+  return{...foodScale(match.food,grams),rawFood:match.food,confidence:'high',needsConfirm:false,weightSpecified:grams!==null,heardName:seg};
+}
+function parseBareFoodListSegment(seg){
+  const s=cleanSegment(stripSegmentPrefix(normaliseLogText(seg)));
+  if(!s) return null;
+  if(NON_LIST_FOOD_PHRASES.has(s)) return null;
+  const tokens=s.split(/\s+/).filter(Boolean);
+  if(tokens.length<2) return null;
+  const results=[];
+  let i=0;
+  while(i<tokens.length){
+    let found=null,foundEnd=i+1;
+    for(let j=tokens.length;j>i;j--){
+      const phrase=tokens.slice(i,j).join(' ');
+      const parsed=parseExactFoodPhrase(phrase);
+      if(parsed){found=parsed;foundEnd=j;break;}
+    }
+    if(found){
+      results.push(found);
+      i=foundEnd;
+    } else {
+      i++;
+    }
+  }
+  return results.length>1?results:null;
+}
 function parseSingleSegment(seg){
   seg=cleanSegment(stripSegmentPrefix(normaliseLogText(seg)));
 
@@ -549,7 +631,7 @@ function parseSingleSegment(seg){
   if(grams==null&&qty){
     grams=quantityToGramsForFood(qty,bestFood);
   }
-  return{...foodScale(bestFood,grams),rawFood:bestFood,confidence:'high',needsConfirm:false,weightSpecified:grams!==null};
+  return{...foodScale(bestFood,grams),rawFood:bestFood,confidence:'high',needsConfirm:false,weightSpecified:grams!==null,heardName:seg};
 }
 function parseText(text){
   text=normaliseLogText(text);
@@ -563,8 +645,12 @@ function parseText(text){
   const results=[];
   for(const seg of splitIngredients(text)){
     if(seg.length<2) continue;
-    const p=parseSingleSegment(seg);
-    if(p) results.push(p);
+    const multi=parseBareFoodListSegment(seg);
+    if(multi) results.push(...multi);
+    else {
+      const p=parseSingleSegment(seg);
+      if(p) results.push(p);
+    }
   }
   return results;
 }
