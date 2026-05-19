@@ -22,11 +22,13 @@ let clarificationState=null;
 let voiceRecoveryState={issue:null,attempts:0};
 const VOICE_RESTART_MIN_MS=250;
 const VOICE_RESTART_DEFAULT_MS=320;
+const VOICE_POST_SPEECH_QUIET_MS=550;
 const VOICE_PROCESSING_TIMEOUT_MS=10000;
-const VOICE_SPEAKING_TIMEOUT_MS=9000;
+const VOICE_SPEAKING_TIMEOUT_MS=14000;
 const VOICE_SESSION_STATES=new Set(['idle','listening','processing','speaking','restarting','error']);
 const VOICE_DEBUG_KEY='sous_voice_debug_trace';
 const VOICE_DEBUG_OVERLAY_KEY='sous_voice_debug_overlay';
+const VOICE_SELF_TEST_KEY='sous_voice_self_test';
 const VOICE_DEBUG_LIMIT=80;
 
 function voiceDebugClarificationSnapshot(){
@@ -103,6 +105,10 @@ window.clearSousVoiceDebug=()=>{try{localStorage.removeItem(VOICE_DEBUG_KEY);}ca
 
 function voiceDebugOverlayEnabled(){
   try{return !voiceDebugOverlayDismissed&&localStorage.getItem(VOICE_DEBUG_OVERLAY_KEY)==='true';}
+  catch(e){return false;}
+}
+function voiceSelfTestEnabled(){
+  try{return localStorage.getItem(VOICE_SELF_TEST_KEY)==='true';}
   catch(e){return false;}
 }
 function latestVoiceDebugEntry(list,predicate){
@@ -472,7 +478,7 @@ function setVoiceProcessing(active,reason='processing',opts={}){
     setVoiceSessionState(voiceSessionActive?'restarting':'idle',reason+' finished');
   }
 }
-function setVoiceSpeaking(active,reason='speaking',onTimeout){
+function setVoiceSpeaking(active,reason='speaking',onTimeout,opts={}){
   clearVoiceSpeakingTimer();
   isSpeaking=!!active;
   if(isSpeaking){
@@ -493,7 +499,7 @@ function setVoiceSpeaking(active,reason='speaking',onTimeout){
     },VOICE_SPEAKING_TIMEOUT_MS);
   } else {
     if(voiceSessionState==='speaking') setVoiceSessionState(voiceSessionActive?'restarting':'idle',reason+' finished');
-    if(voiceSessionActive&&document.querySelector('.log-screen.active')?.id==='ls-listening') scheduleVoiceSessionRestart(VOICE_RESTART_MIN_MS);
+    if(opts.restart!==false&&voiceSessionActive&&document.querySelector('.log-screen.active')?.id==='ls-listening') scheduleVoiceSessionRestart(VOICE_POST_SPEECH_QUIET_MS);
     else if(!voiceSessionActive) setMicState('idle');
   }
 }
@@ -1891,8 +1897,8 @@ function speak(text,onEnd,opts={}){
   const finish=reason=>{
     if(finished) return;
     finished=true;
-    setVoiceSpeaking(false,reason);
-    if(onEnd) onEnd();
+    setVoiceSpeaking(false,reason,null,{restart:!onEnd});
+    if(onEnd) setTimeout(onEnd,VOICE_POST_SPEECH_QUIET_MS);
   };
   setVoiceSpeaking(true,'speech synthesis',()=>finish('speech timeout'));
   if(!opts.skipCache) voiceDebugTrace('feedback_audio',{key:null,route:'browser_tts'});
@@ -1966,8 +1972,8 @@ function speakCachedResponse(key,data={},onEnd){
     const finish=reason=>{
       if(finished) return;
       finished=true;
-      setVoiceSpeaking(false,reason);
-      if(onEnd) onEnd();
+      setVoiceSpeaking(false,reason,null,{restart:!onEnd});
+      if(onEnd) setTimeout(onEnd,VOICE_POST_SPEECH_QUIET_MS);
     };
     audio.onended=()=>finish('cached speech ended');
     audio.onerror=()=>{
@@ -2012,7 +2018,21 @@ function maybeSpeakFlowCue(reason,onEnd){
   return true;
 }
 function speakSuccessCue(onEnd){
-  speakCachedResponse('added',{},()=>maybeSpeakFlowCue('after_success',onEnd));
+  if(voiceSelfTestEnabled()){
+    speak('Added. Self test marker banana.',()=>{
+      if(onEnd) onEnd();
+      else if(voiceSessionActive&&document.querySelector('.log-screen.active')?.id==='ls-listening'){
+        scheduleVoiceSessionRestart(VOICE_RESTART_DEFAULT_MS);
+      }
+    },{skipCache:true});
+    return;
+  }
+  speakCachedResponse('added',{},()=>{
+    const spokeFlowCue=maybeSpeakFlowCue('after_success',onEnd);
+    if(!spokeFlowCue&&!onEnd&&voiceSessionActive&&document.querySelector('.log-screen.active')?.id==='ls-listening'){
+      scheduleVoiceSessionRestart(VOICE_RESTART_DEFAULT_MS);
+    }
+  });
 }
 function speakRecoveryCue(onEnd){
   speakCachedResponse('recovery',{},onEnd);
@@ -3529,7 +3549,13 @@ async function startSousRealtimeVoice(){
 
     const pc=new RTCPeerConnection();
     const dc=pc.createDataChannel('oai-events');
-    const stream=await navigator.mediaDevices.getUserMedia({audio:true});
+    const stream=await navigator.mediaDevices.getUserMedia({
+      audio:{
+        echoCancellation:true,
+        noiseSuppression:true,
+        autoGainControl:true
+      }
+    });
     stream.getAudioTracks().forEach(track=>pc.addTrack(track,stream));
     const audio=document.createElement('audio');
     audio.autoplay=true;
