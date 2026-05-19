@@ -1043,7 +1043,12 @@ function likelyNeedsFoodRecoveryPrompt(rawText,item){
   const allowed=allowedByFamily[familyKey]||new Set();
   const ignored=new Set([
     'add','log','track','please','some','about','approximately','approx',
-    'i','had','ate','have','hey','sous','sue','of','a','an','the'
+    'i','had','ate','have','hey','sous','sue','of','a','an','the',
+    'one','two','three','four','five','six','seven','eight','nine','ten',
+    'eleven','twelve','couple','half','quarter',
+    'slice','slices','piece','pieces','serving','servings','portion','portions',
+    'scoop','scoops','cup','cups','pot','pots','can','cans','tin','tins',
+    'handful','splash','drizzle','pinch','knob','pat'
   ]);
   const extras=heard.split(/\s+/).filter(token=>
     token&&
@@ -1205,13 +1210,12 @@ function parseClarificationInput(baseItem,answer,state=clarificationState){
     ?clarificationQuantityText(state.knownQuantity,state.knownUnit)
     :'';
   const answerQtyText=answerQty.known?clarificationQuantityText(answerQty.grams,answerQty.unit):'';
-  const fullInput=normaliseClarificationInput(`${carryQty} ${baseItem} ${answer}`);
+  const fullInput=normaliseClarificationInput(`${carryQty} ${answer} ${baseItem}`);
   const candidates=[
     fullInput,
     quantityFirstClarificationInput(fullInput),
-    normaliseClarificationInput(`${carryQty} ${answer} ${baseItem}`),
-    quantityFirstClarificationInput(`${carryQty} ${answer} ${baseItem}`),
     normaliseClarificationInput(`${carryQty} ${baseItem} ${answer}`),
+    quantityFirstClarificationInput(`${carryQty} ${baseItem} ${answer}`),
     normaliseClarificationInput(answer),
     quantityFirstClarificationInput(answer)
   ].filter((text,index,arr)=>text&&arr.indexOf(text)===index);
