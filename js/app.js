@@ -296,6 +296,14 @@ async function handleTranscript(transcript,rawText){
   const escalationReason=aiEscalationReason(transcript,results);
   const uncertain=escalationReason==='empty'||escalationReason==='low-confidence';
   const mixedPartial=escalationReason==='partial';
+  if(typeof voiceDebugTrace==='function'){
+    voiceDebugTrace('parser_result',{
+      source:'handleTranscript',
+      transcript:transcript.trim(),
+      escalationReason,
+      results:typeof voiceDebugResultSummary==='function'?voiceDebugResultSummary(results):results
+    });
+  }
 
   if(escalationReason==='none'){
     console.log('[Sous] parser →',results.filter(r=>!r.command).length,'food item(s)');
@@ -327,6 +335,7 @@ async function handleTranscript(transcript,rawText){
 
   if(canUseAIInterpretation()){
     console.log('[Sous] AI allowed');
+    if(typeof voiceDebugTrace==='function') voiceDebugTrace('ai_escalation',{transcript:transcript.trim(),reason:escalationReason,allowed:true});
     try{
       if(typeof interpretMealWithAI==='function'){
         const draft=await interpretMealWithAI({
@@ -335,6 +344,13 @@ async function handleTranscript(transcript,rawText){
           countryCode:typeof currentCountry!=='undefined'?currentCountry:null
         });
         const aiItems=aiDraftToParserResults(draft);
+        if(typeof voiceDebugTrace==='function'){
+          voiceDebugTrace('ai_result',{
+            transcript:transcript.trim(),
+            items:typeof voiceDebugResultSummary==='function'?voiceDebugResultSummary(aiItems||[]):aiItems||[],
+            needsConfirmation:!!(draft&&draft.needsConfirmation)
+          });
+        }
         if(aiItems&&aiItems.length){
           console.log('[Sous] AI →',aiItems.length,'ingredient(s) (needs confirmation)');
           // Route unknown items (not in local database) through the multi-food
@@ -357,9 +373,11 @@ async function handleTranscript(transcript,rawText){
       }
     }catch(e){
       console.warn('[Sous] AI fallback error:',e);
+      if(typeof voiceDebugTrace==='function') voiceDebugTrace('ai_error',{transcript:transcript.trim(),message:e?.message||String(e)});
     }
   } else {
     console.log('[Sous] AI blocked: free plan');
+    if(typeof voiceDebugTrace==='function') voiceDebugTrace('ai_escalation',{transcript:transcript.trim(),reason:escalationReason,allowed:false});
   }
 
   // AI unavailable or returned nothing — use parser results

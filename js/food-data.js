@@ -15,7 +15,7 @@
 // type:'liquid' means the UI should prefer ml; missing type defaults to solid/g.
 const FOODS=[
   // Poultry
-  {name:'Chicken breast',  w:100,kcal:165,p:31,  c:0,   f:3.6, fi:0,   icon:'ti-meat',       kw:['chicken breast','chicken breasts','breast','chicken fillet','chicken fillets','grilled chicken breast','chicken breast fillet'],defaultUnit:'breast',units:[{label:'breast',grams:170},{label:'g',grams:1}]},
+  {name:'Chicken breast',  w:100,kcal:165,p:31,  c:0,   f:3.6, fi:0,   icon:'ti-meat',       kw:['chicken breast','chicken breasts','breast','grilled chicken breast'],defaultUnit:'breast',units:[{label:'breast',grams:170},{label:'g',grams:1}]},
   {name:'Chicken thigh',   w:100,kcal:209,p:26,  c:0,   f:11,  fi:0,   icon:'ti-meat',       kw:['chicken thigh','chicken thighs','thigh','thighs','boneless thigh','boneless thighs','chicken thigh fillet']},
   {name:'Chicken drumstick',w:100,kcal:185,p:27, c:0,   f:8,   fi:0,   icon:'ti-meat',       kw:['chicken drumstick','drumstick','drumsticks']},
   {name:'Chicken mince',   w:100,kcal:170,p:20,  c:0,   f:10,  fi:0,   icon:'ti-meat',       kw:['chicken mince','minced chicken']},
@@ -168,7 +168,7 @@ const FOODS=[
   {name:'Digestive biscuit',w:15,kcal:72, p:1,   c:9.5, f:3.2, fi:0.5, icon:'ti-cookie',     kw:['digestive biscuit','digestive biscuits','digestive'],countryCodes:['GB'],source:'curated',defaultUnit:'biscuit',units:[{label:'biscuit',grams:15,defaultQty:2},{label:'g',grams:1}],nutritionPer100g:{calories:480,protein:6.7,carbs:63.3,fat:21.3,fibre:3.3}},
   {name:'Chocolate biscuit',w:18,kcal:90, p:1,   c:11,  f:4.5, fi:0.5, icon:'ti-cookie',     kw:['chocolate biscuit','chocolate biscuits','choc biscuit','choccy biscuit'],countryCodes:['GB'],source:'curated',defaultUnit:'biscuit',units:[{label:'biscuit',grams:18,defaultQty:2},{label:'g',grams:1}],nutritionPer100g:{calories:500,protein:5.6,carbs:61.1,fat:25,fibre:2.8}},
   {name:'Jacket potato',   w:250,kcal:232,p:6.3, c:53,  f:0.3, fi:5.5, icon:'ti-plant-2',    kw:['jacket potato','baked potato','jacket spud','spud'],countryCodes:['GB'],source:'curated',defaultUnit:'potato',units:[{label:'potato',grams:250},{label:'g',grams:1}],nutritionPer100g:{calories:93,protein:2.5,carbs:21.2,fat:0.1,fibre:2.2}},
-  {name:'Chicken breast fillet',w:170,kcal:280,p:52.7,c:0,f:6.1,fi:0,  icon:'ti-meat',       kw:['chicken breast fillet','chicken fillet','chicken breast','skinless chicken breast fillet'],countryCodes:['GB'],source:'curated',defaultUnit:'fillet',units:[{label:'fillet',grams:170},{label:'g',grams:1}],nutritionPer100g:{calories:165,protein:31,carbs:0,fat:3.6,fibre:0}},
+  {name:'Chicken breast fillet',w:170,kcal:280,p:52.7,c:0,f:6.1,fi:0,  icon:'ti-meat',       kw:['chicken breast fillet','chicken fillet','chicken breast','skinless chicken breast fillet'],countryCodes:['GLOBAL','GB'],source:'curated',defaultUnit:'fillet',units:[{label:'fillet',grams:170},{label:'g',grams:1}],nutritionPer100g:{calories:165,protein:31,carbs:0,fat:3.6,fibre:0}},
 ];
 
 const FOOD_SCHEMA_VERSION=1;
@@ -183,9 +183,9 @@ const EXTRA_ALIASES={
   'White bread':['white toast','white bread slice','slice of white bread','white slice','white slices'],
   'Rye bread':['rye toast','rye bread slice','slice of rye bread'],
   'Bread roll':['roll','rolls','bun','buns','bap','baps'],
-  'Protein powder':['whey','whey protein','protein','protein scoop','scoop of whey'],
+  'Protein powder':['whey','whey protein','protein','protein scoop','scoop of whey','choc protein','chocolate protein','choc protein powder','chocolate protein powder'],
   'Olive oil':['oil','evoo','extra virgin oil'],
-  'Milk':['semi skimmed milk','semi-skimmed milk','skimmed milk'],
+  'Milk':['semi skimmed milk','semi-skimmed milk','semi skimmed','semi-skimmed','skimmed milk'],
   'Whole milk':['whole milk','full fat milk'],
   'Oat milk':['oat drink'],
   'Almond milk':['almond drink'],
@@ -196,7 +196,9 @@ const EXTRA_ALIASES={
   'Kidney beans':['red beans'],
   'Black beans':['black bean'],
   'Butter beans':['lima beans'],
-  'Coriander':['cilantro']
+  'Coriander':['cilantro'],
+  'Cheddar':['grated cheese','grated cheddar','mature cheese','mature cheddar','cheese'],
+  'Chicken breast fillet':['chicken fillet','chicken fillets','breast fillet','breast fillets']
 };
 function foodIdFromName(name){
   return 'food_'+String(name||'')

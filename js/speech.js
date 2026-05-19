@@ -17,6 +17,49 @@ let sousRealtime=null;
 let _lastSpeakAt=0;
 let _suppressNextConfirmSpeechUntil=0;
 let clarificationState=null;
+const VOICE_DEBUG_KEY='sous_voice_debug_trace';
+const VOICE_DEBUG_LIMIT=80;
+
+function voiceDebugClarificationSnapshot(){
+  return clarificationState?.active?{
+    active:true,
+    baseItem:clarificationState.baseItem,
+    step:clarificationState.step,
+    attempts:clarificationState.attempts||0
+  }:null;
+}
+function voiceDebugResultSummary(results){
+  return (results||[]).map(r=>{
+    if(!r) return null;
+    if(r.command) return {command:r.command,target:r.target||null,replacement:r.replacement||null,grams:r.grams||null};
+    if(r.ambiguous) return {ambiguous:true,label:r.label||null,amount:r.amount||null,matches:(r.matches||[]).map(f=>f.name).slice(0,4)};
+    return {
+      name:r.name||null,
+      weight:r.weight||null,
+      weightSpecified:!!r.weightSpecified,
+      confidence:r.confidence||null,
+      needsConfirm:!!r.needsConfirm,
+      rawFood:r.rawFood?.name||null
+    };
+  }).filter(Boolean);
+}
+function voiceDebugTrace(event,data={}){
+  const entry={
+    t:new Date().toISOString(),
+    event,
+    clarification:voiceDebugClarificationSnapshot(),
+    ...data
+  };
+  try{
+    const list=JSON.parse(localStorage.getItem(VOICE_DEBUG_KEY)||'[]');
+    list.push(entry);
+    localStorage.setItem(VOICE_DEBUG_KEY,JSON.stringify(list.slice(-VOICE_DEBUG_LIMIT)));
+  }catch(e){}
+  console.debug('[Sous Voice Debug]',entry);
+  return entry;
+}
+window.sousVoiceDebug=()=>{try{return JSON.parse(localStorage.getItem(VOICE_DEBUG_KEY)||'[]');}catch(e){return[];}};
+window.clearSousVoiceDebug=()=>{try{localStorage.removeItem(VOICE_DEBUG_KEY);}catch(e){};return true;};
 
 function snapshotMeal(){undoSnapshot=meal.map(i=>({...i}));updateUndoBtn();}
 function updateUndoBtn(){const r=document.getElementById('undo-row');if(r)r.style.display=undoSnapshot?'flex':'none';}
@@ -346,6 +389,7 @@ function addIngredientToMeal(item, options = {}) {
 
   console.log('[Sous Meal] ingredient added via shared pathway');
   console.log('[Sous Meal] source:', source);
+  voiceDebugTrace('final_action',{action:'ingredient_added',source,item:voiceDebugResultSummary([item])[0]});
 
   // Persist draft (skip for batch callers that persist once after the loop)
   if (!skipPersist) _persistDraft();
@@ -579,6 +623,7 @@ function beginIngredientClarification(baseItem,fallback){
     attempts:0,
     fallback:typeof fallback==='function'?fallback:null
   };
+  voiceDebugTrace('clarification_started',{baseItem:base});
   pauseAlwaysOn();
   try{if(tapRec)tapRec.stop();}catch(e){}
   showLogScreen('listening');
@@ -591,6 +636,7 @@ function clearIngredientClarification(){
 }
 function cancelIngredientClarification({resume=true}={}){
   if(!clarificationState?.active) return;
+  voiceDebugTrace('clarification_cancelled',{resume});
   clearIngredientClarification();
   try{if(clarificationRec)clarificationRec.stop();}catch(e){}
   clarificationRec=null;
@@ -598,6 +644,7 @@ function cancelIngredientClarification({resume=true}={}){
 }
 function fallbackIngredientClarification(){
   const fallback=clarificationState?.fallback;
+  voiceDebugTrace('clarification_fallback');
   clearIngredientClarification();
   if(typeof fallback==='function') fallback();
   else maybeResumeVoiceSession(400);
@@ -680,6 +727,7 @@ function maybeStartIngredientClarification(results,rawText){
 function handleClarification(transcript){
   if(!clarificationState?.active) return;
   const answer=String(transcript||'').trim();
+  voiceDebugTrace('clarification_heard',{transcript:answer});
   if(!answer){
     clarificationState.attempts++;
     if(clarificationState.attempts>=2){fallbackIngredientClarification();return;}
@@ -709,6 +757,7 @@ function handleClarification(transcript){
 
   const parsed=parseClarificationInput(clarificationState.baseItem,answer);
   const results=parsed.results;
+  voiceDebugTrace('clarification_parsed',{input:parsed.text,results:voiceDebugResultSummary(results)});
   if(shouldAskAgainForClarification(results,parsed.text)){
     clarificationState.attempts++;
     if(clarificationState.attempts>=2){fallbackIngredientClarification();return;}
@@ -719,6 +768,7 @@ function handleClarification(transcript){
   }
 
   clearIngredientClarification();
+  voiceDebugTrace('clarification_resolved',{input:parsed.text,results:voiceDebugResultSummary(results)});
   speak('Got it',()=>handleParsed(results,parsed.text));
 }
 function _ensureFoodChoiceScreen(){
@@ -864,8 +914,10 @@ function showVoiceRetry(msg){
 }
 
 function handleParsed(results,rawText=''){
+  voiceDebugTrace('handle_parsed_enter',{rawText,results:voiceDebugResultSummary(results)});
   if(!results||!results.length){
     const rt=(rawText||'').trim();
+    voiceDebugTrace('final_action',{action:rt.length>1?'fallback_resolve_ui':'voice_retry',rawText:rt});
     if(rt.length>1){
       const qty=typeof extractQuantity==='function'?extractQuantity(rt):null;
       const rawName=_foodChoiceDisplayName(rt)||_normaliseChoiceText(rt)||rt;
@@ -891,6 +943,7 @@ function handleParsed(results,rawText=''){
   _voiceMode=false;
   if(results.length===1 && results[0].command && !['summary'].includes(results[0].command)){
     const handled=applyCorrectionCommand(results[0]);
+    voiceDebugTrace('final_action',{action:'command',command:results[0].command,handled});
     refreshSummaryIfVisible();
     const _activeScr=document.querySelector('.log-screen.active')?.id;
     if(handled && _activeScr==='ls-listening') renderCurrentMeal();
@@ -899,22 +952,34 @@ function handleParsed(results,rawText=''){
     return;
   }
   if(results[0].command==='summary'){
+    voiceDebugTrace('final_action',{action:'summary'});
     if(!meal.length){showToast('Add some ingredients first!');return;}
     stopAllRec(); showSummary(); return;
   }
-  if(maybeStartIngredientClarification(results,rawText)) return;
-  if(maybeShowFoodChoiceReview(results,rawText)) return;
+  if(maybeStartIngredientClarification(results,rawText)){
+    voiceDebugTrace('final_action',{action:'voice_clarification'});
+    return;
+  }
+  if(maybeShowFoodChoiceReview(results,rawText)){
+    voiceDebugTrace('final_action',{action:'food_choice_review'});
+    return;
+  }
   showBatchHeard(results);
   const foodResults=results.filter(r=>!r.command);
   const reviewItems=foodResults.filter(r=>!isClearIngredient(r));
   if(reviewItems.length){
     const clearItems=foodResults.filter(isClearIngredient);
     autoAddClearItems(clearItems);
+    voiceDebugTrace('final_action',{action:'multi_confirm',reviewItems:voiceDebugResultSummary(reviewItems),autoAdded:voiceDebugResultSummary(clearItems)});
     showMultiConfirm(reviewItems);
     return;
   }
-  if(batchNeedsMultiConfirm(results)){showMultiConfirm(results);return;}
+  if(batchNeedsMultiConfirm(results)){
+    voiceDebugTrace('final_action',{action:'multi_confirm',reviewItems:voiceDebugResultSummary(results.filter(r=>!r.command))});
+    showMultiConfirm(results);return;
+  }
   itemQueue.push(...results);
+  voiceDebugTrace('final_action',{action:'queue',queued:voiceDebugResultSummary(results)});
   processQueue([]);
 }
 function processQueue(autoAdded=[]){
@@ -1378,7 +1443,15 @@ function doChange(){
 // QUANTITY PROMPT (voice — high confidence, no weight)
 // ═══════════════════════════════════════════
 function parseGramsFromText(text){
-  const m=text.match(/(\d+(?:\.\d+)?)\s*(?:g(?:rams?)?)?/i);
+  if(typeof extractQuantity==='function'){
+    const qty=extractQuantity(text);
+    const food=pendingFood?.rawFood||null;
+    const grams=typeof quantityToGramsForFood==='function'
+      ?quantityToGramsForFood(qty,food)
+      :qty?.grams;
+    if(grams!=null) return grams;
+  }
+  const m=String(text||'').match(/(\d+(?:\.\d+)?)\s*(?:g(?:rams?)?)?/i);
   return m?parseFloat(m[1]):null;
 }
 function commitQuantity(grams){
@@ -2144,6 +2217,7 @@ function buildTapRec(){
 
     voiceNoSpeechRetries=0;
     logVoiceState('speech result received',{transcript,confidence:finalConf});
+    voiceDebugTrace('transcript_heard',{source:'tap',transcript,confidence:finalConf});
     stopTapRec();
     const isLow=typeof finalConf==='number'&&finalConf>0&&finalConf<0.75;
     _voiceMode=true;
@@ -2156,9 +2230,16 @@ function buildTapRec(){
       if(document.querySelector('.log-screen.active')?.id==='ls-listening') scheduleVoiceSessionRestart(500);
     };
     if(clarificationState?.active){
+      voiceDebugTrace('transcript_routed',{route:'clarification',transcript});
       Promise.resolve(handleClarification(transcript)).then(done).catch(e=>{console.warn('[Sous Voice] clarification error',e);done();});
-    } else if(isLow){showVoiceCorrection(transcript);done();}
-    else Promise.resolve(handleTranscript(transcript,transcript)).then(done).catch(e=>{console.warn('[Sous Voice] transcript error',e);done();});
+    } else if(isLow){
+      voiceDebugTrace('transcript_routed',{route:'low_confidence_review',transcript});
+      showVoiceCorrection(transcript);done();
+    }
+    else {
+      voiceDebugTrace('transcript_routed',{route:'normal_parser',transcript});
+      Promise.resolve(handleTranscript(transcript,transcript)).then(done).catch(e=>{console.warn('[Sous Voice] transcript error',e);done();});
+    }
   }
 
   const r=new SR(); r.lang='en-GB'; r.interimResults=true; r.continuous=true; r.maxAlternatives=3;
@@ -2335,11 +2416,14 @@ function forceRealtimeReviewResults(results){
 function routeRealtimeTranscriptToReview(transcript){
   const text=String(transcript||'').trim();
   if(!text) return false;
+  voiceDebugTrace('transcript_heard',{source:'realtime',transcript:text});
   if(clarificationState?.active){
+    voiceDebugTrace('transcript_routed',{route:'clarification',source:'realtime',transcript:text});
     handleClarification(text);
     return true;
   }
   const results=typeof parseText==='function'?parseText(text):[];
+  voiceDebugTrace('parser_result',{source:'realtime',transcript:text,results:voiceDebugResultSummary(results),forcedReview:true});
   const forced=forceRealtimeReviewResults(results);
   handleParsed(forced,text);
   return Array.isArray(forced)&&forced.some(item=>item&&!item.command);
@@ -2594,13 +2678,19 @@ function buildAlwaysOn(){
     if(isRecording||isSpeaking) return;
     const t=e.results[e.results.length-1][0].transcript.toLowerCase().trim();
     const el=document.getElementById('transcript-text'); if(el) el.textContent='"'+t+'"';
-    if(clarificationState?.active){handleClarification(t);return;}
+    voiceDebugTrace('transcript_heard',{source:'always_on',transcript:t});
+    if(clarificationState?.active){
+      voiceDebugTrace('transcript_routed',{route:'clarification',source:'always_on',transcript:t});
+      handleClarification(t);return;
+    }
     if(/hey\s+s[uo][eu]/.test(t)){
+      voiceDebugTrace('transcript_routed',{route:'wake_word',source:'always_on',transcript:t});
       setMicState('wake');
       setTimeout(()=>{try{r.stop();}catch(e){}alwaysOnActive=false;if(!tapRec)tapRec=buildTapRec();try{tapRec.start();}catch(e){}},500);
       return;
     }
     const results=parseText(t);
+    voiceDebugTrace('parser_result',{source:'always_on',transcript:t,results:voiceDebugResultSummary(results)});
     if(results&&results.length) handleParsed(results);
   };
   r.onerror=e=>{alwaysOnActive=false;if(e.error==='not-allowed')document.getElementById('perm-warn').style.display='block';else if(cookingModeEnabled()&&e.error!=='aborted'&&e.error!=='no-speech')setTimeout(restartAlwaysOn,1000);};

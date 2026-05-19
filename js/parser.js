@@ -5,9 +5,46 @@ const UNIT_TO_GRAMS={
   g:1,kg:1000,ml:1,l:1000,oz:28.35,tbsp:15,tsp:5,cup:240
 };
 const UNIT_PATTERN='g\\b|kg\\b|ml\\b|l\\b|oz\\b|tbsp\\b|tsp\\b|cups?\\b';
-const COUNT_UNIT_PATTERN='pieces?|slices?|servings?|portions?|cans?|tins?';
+const COUNT_UNIT_PATTERN='pieces?|slices?|servings?|portions?|cans?|tins?|scoops?|rashers?|fillets?|breasts?|eggs?|wraps?|rolls?|pots?|biscuits?|crumpets?|muffins?';
+const SPOKEN_NUMBERS={
+  a:1,an:1,one:1,two:2,three:3,four:4,five:5,six:6,seven:7,eight:8,nine:9,ten:10,
+  eleven:11,twelve:12,couple:2
+};
+const NATURAL_QUANTITY_UNITS={
+  handful:{solid:30,liquid:30},
+  splash:{solid:10,liquid:15},
+  drizzle:{solid:10,liquid:10},
+  pinch:{solid:1,liquid:1},
+  knob:{solid:10,liquid:10},
+  pat:{solid:10,liquid:10}
+};
 function normalizeUnit(unit){
   return String(unit||'g').toLowerCase().replace(/s$/,'');
+}
+function normalizeCountUnit(unit){
+  const u=String(unit||'').toLowerCase().trim().replace(/s$/,'');
+  if(u==='rasher') return 'rasher';
+  if(u==='fillet') return 'fillet';
+  if(u==='breast') return 'breast';
+  if(u==='egg') return 'egg';
+  if(u==='wrap') return 'wrap';
+  if(u==='roll') return 'roll';
+  if(u==='pot') return 'pot';
+  if(u==='biscuit') return 'biscuit';
+  if(u==='crumpet') return 'crumpet';
+  if(u==='muffin') return 'muffin';
+  if(u==='scoop') return 'scoop';
+  if(u==='slice') return 'slice';
+  if(u==='can') return 'tin';
+  if(u==='serving'||u==='portion'||u==='piece') return u;
+  return u;
+}
+function parseSpokenNumber(value){
+  const s=String(value||'').toLowerCase().trim();
+  if(!s) return null;
+  if(/^\d+(?:\.\d+)?$/.test(s)) return parseFloat(s);
+  if(Object.prototype.hasOwnProperty.call(SPOKEN_NUMBERS,s)) return SPOKEN_NUMBERS[s];
+  return null;
 }
 function normaliseLogText(text){
   return String(text||'')
@@ -46,28 +83,64 @@ function parseAmount(text){
   const num=parseFloat(m[1]),unit=normalizeUnit(m[2]);
   return num*(UNIT_TO_GRAMS[unit]||1);
 }
+function findServingUnit(food,label){
+  if(!food||!label||!Array.isArray(food.units)) return null;
+  const wanted=normalizeCountUnit(label);
+  return food.units.find(unit=>normalizeCountUnit(unit.label)===wanted)||null;
+}
+function quantityToGramsForFood(qty,food){
+  if(!qty) return null;
+  if(qty.grams!=null) return qty.grams;
+  if(qty.multiplier!=null) return food?Math.round((food.w||100)*qty.multiplier):null;
+  if(qty.naturalUnit){
+    const unit=NATURAL_QUANTITY_UNITS[qty.naturalUnit];
+    if(!unit) return null;
+    const size=String(qty.size||'').toLowerCase();
+    let grams=food?.type==='liquid'?unit.liquid:unit.solid;
+    if(size==='small') grams*=0.7;
+    if(size==='large'||size==='big') grams*=1.5;
+    return Math.max(1,Math.round(grams*(qty.count||1)));
+  }
+  if(qty.count!=null){
+    const serving=findServingUnit(food,qty.unit);
+    if(serving&&serving.grams) return Math.round(Number(serving.grams)*qty.count);
+    return food?Math.round((food.w||100)*qty.count):null;
+  }
+  return null;
+}
 // Structured quantity extraction for parseSingleSegment.
 // Returns one of:
 //   {grams: N}       explicit weight/volume — "100g", "1 tbsp", "tablespoon"
-//   {count: N}       bare integer, no unit  — "2 eggs"  (caller scales by food.w)
+//   {count: N, unit}  count/serving unit     — "2 eggs", "two slices"
 //   {multiplier: M}  relative word          — "half"    (caller scales by food.w)
 //   null             no quantity found
 function extractQuantity(seg){
   const s=normaliseLogText(seg);
+  const numberPattern='\\d+(?:\\.\\d+)?|a|an|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|couple';
+  // "one and a half cups milk"
+  let m=s.match(new RegExp('\\b('+numberPattern+')\\s+and\\s+a\\s+half\\s*('+UNIT_PATTERN+')','i'));
+  if(m){const num=parseSpokenNumber(m[1]);const unit=normalizeUnit(m[2]);if(num!=null)return{grams:(num+0.5)*(UNIT_TO_GRAMS[unit]||1)};}
+  // "half a cup milk" / "quarter cup oats" → explicit fraction of a unit
+  m=s.match(new RegExp('\\b(half|quarter)\\s+(?:a\\s+|an\\s+)?('+UNIT_PATTERN+')','i'));
+  if(m){const unit=normalizeUnit(m[2]);return{grams:(m[1].toLowerCase()==='half'?0.5:0.25)*(UNIT_TO_GRAMS[unit]||1)};}
   // "half [food]" → half the food's default serving
   if(/\bhalf\b/i.test(s)) return{multiplier:0.5};
+  if(/\bquarter\b/i.test(s)) return{multiplier:0.25};
   // Number + explicit unit → grams
-  let m=s.match(new RegExp('(\\d+(?:\\.\\d+)?)\\s*('+UNIT_PATTERN+')','i'));
-  if(m){const unit=normalizeUnit(m[2]);return{grams:parseFloat(m[1])*(UNIT_TO_GRAMS[unit]||1)};}
+  m=s.match(new RegExp('\\b('+numberPattern+')\\s*('+UNIT_PATTERN+')','i'));
+  if(m){const num=parseSpokenNumber(m[1]);const unit=normalizeUnit(m[2]);if(num!=null)return{grams:num*(UNIT_TO_GRAMS[unit]||1)};}
   // Number + count word → count ("1 slice bread"); caller scales by food.w
-  m=s.match(new RegExp('\\b(\\d+(?:\\.\\d+)?)\\s*(?:'+COUNT_UNIT_PATTERN+')\\b','i'));
-  if(m) return{count:parseFloat(m[1])};
+  m=s.match(new RegExp('\\b('+numberPattern+')\\s*(?:of\\s+)?('+COUNT_UNIT_PATTERN+')\\b','i'));
+  if(m){const num=parseSpokenNumber(m[1]);if(num!=null)return{count:num,unit:normalizeCountUnit(m[2])};}
+  // "a handful of nuts", "small splash of milk"
+  m=s.match(/\b(?:(small|large|big)\s+)?(?:a\s+|an\s+)?(handful|splash|drizzle|pinch|knob|pat)\b/i);
+  if(m) return{naturalUnit:m[2].toLowerCase(),size:m[1]||null,count:1};
   // Unit alone, no leading number → implied 1 of that unit ("tablespoon olive oil")
   m=s.match(new RegExp('\\b('+UNIT_PATTERN+')','i'));
   if(m){const unit=normalizeUnit(m[1]);return{grams:UNIT_TO_GRAMS[unit]};}
   // Bare integer, no unit → count ("2 eggs"); caller scales by food.w
-  m=s.match(/\b(\d+(?:\.\d+)?)\b/);
-  if(m) return{count:parseFloat(m[1])};
+  m=s.match(new RegExp('\\b('+numberPattern+')\\b','i'));
+  if(m){const num=parseSpokenNumber(m[1]);if(num!=null)return{count:num};}
   return null;
 }
 function foodScale(food,grams){
@@ -150,12 +223,26 @@ function findMealIndexByText(text){
   if(!meal.length) return -1;
   let best=-1,bestScore=0;
   meal.forEach((item,i)=>{
-    const name=(item.name||'').toLowerCase();
+    const food=item.rawFood||(typeof findFoodByText==='function'?findFoodByText(item.name):null);
+    const names=[
+      item.name,
+      item.heardName,
+      food?.name,
+      ...(food?.aliases||[]),
+      ...(food?.kw||[])
+    ].map(n=>normaliseLogText(n||'')).filter(Boolean);
     let score=0;
-    if(s.includes(name)) score=name.length+20;
-    else {
-      for(const part of name.split(/\s+/).filter(w=>w.length>2)) if(s.includes(part)) score+=part.length;
-    }
+    names.forEach((name,idx)=>{
+      if(!name) return;
+      let candidate=0;
+      if(s===name) candidate=120+name.length;
+      else if(s.includes(name)||name.includes(s)) candidate=80+Math.min(s.length,name.length);
+      else {
+        for(const part of name.split(/\s+/).filter(w=>w.length>2)) if(s.includes(part)) candidate+=part.length;
+      }
+      if(idx>1) candidate-=10;
+      if(candidate>score) score=candidate;
+    });
     if(score>bestScore){best=i;bestScore=score;}
   });
   return bestScore>0?best:-1;
@@ -164,6 +251,22 @@ function recalcMealItemFromFood(item,food,grams){
   const scaled=foodScale(food,grams||item.weight||food.w);
   Object.assign(item,scaled,{rawFood:food,customMacro:false,confidence:'high',needsConfirm:false});
   return item;
+}
+function gramsFromQuantityText(text,food){
+  const qty=typeof extractQuantity==='function'?extractQuantity(text):null;
+  if(typeof quantityToGramsForFood==='function'){
+    const grams=quantityToGramsForFood(qty,food);
+    if(grams!=null) return grams;
+  }
+  if(qty&&qty.grams!=null) return qty.grams;
+  const m=String(text||'').match(/(\d+(?:\.\d+)?)\s*g\b/i);
+  return m?parseFloat(m[1]):null;
+}
+function cleanCorrectionTarget(text){
+  return normaliseLogText(text||'')
+    .replace(/^(?:the|that|this|my)\s+/,'')
+    .replace(/\s+/g,' ')
+    .trim();
 }
 function normaliseMealSectionWord(text){
   const s=String(text||'').toLowerCase().trim();
@@ -240,30 +343,42 @@ function resolveReplacementFood(text){
   return {food:findFoodByText(text)};
 }
 function parseCorrectionCommand(text){
-  const s=normaliseLogText(text||'');
-  if(/^(undo|undo last|undo last item|remove last|delete last)$/.test(s)) return {command:'undo'};
+  const s=normaliseLogText(text||'').replace(/[,.;:]+/g,' ').replace(/\s+/g,' ').trim();
+  if(/^(undo|undo that|undo it|undo last|undo last item|remove last|delete last)$/.test(s)) return {command:'undo'};
   const usual=parseUsualMealCommand(s);
   if(usual) return usual;
   let m=s.match(/^(?:remove|delete)\s+(.+)$/);
-  if(m) return {command:'remove',target:m[1]};
-  m=s.match(/^(?:change|make|set|edit)\s+(.+?)\s+(?:to|as)\s+(\d+(?:\.\d+)?)\s*g\b/);
-  if(m) return {command:'changeWeight',target:m[1],grams:parseFloat(m[2])};
+  if(m) return {command:'remove',target:cleanCorrectionTarget(m[1])};
+  m=s.match(/^(?:actually\s+)?(?:make|change|set|edit)\s+(?:that|it|last|last item)(?:\s+(?:to|as))?\s+(.+)$/);
+  if(m&&extractQuantity(m[1])) return {command:'changeLastWeight',quantityText:m[1]};
+  m=s.match(/^(?:actually\s+)?(?:that|it|last|last item)\s+(?:was|is|should be)\s+(.+)$/);
+  if(m&&extractQuantity(m[1])) return {command:'changeLastWeight',quantityText:m[1]};
+  m=s.match(/^(?:actually\s+)?(?:make|change|set|edit)\s+(.+?)\s+(?:to|as)\s+(.+)$/);
+  if(m&&extractQuantity(m[2])) return {command:'changeWeight',target:cleanCorrectionTarget(m[1]),quantityText:m[2]};
   m=s.match(/^(?:swap|switch)\s+(.+?)\s+(?:for|to|with)\s+(.+)$/);
-  if(m) return {command:'changeFood',target:m[1],replacement:m[2]};
+  if(m) return {command:'changeFood',target:cleanCorrectionTarget(m[1]),replacement:m[2]};
   m=s.match(/^(?:replace)\s+(.+?)\s+(?:with|for)\s+(.+)$/);
-  if(m) return {command:'changeFood',target:m[1],replacement:m[2]};
+  if(m) return {command:'changeFood',target:cleanCorrectionTarget(m[1]),replacement:m[2]};
   m=s.match(/^(.+?)\s+instead\s+of\s+(.+)$/);
-  if(m) return {command:'changeFood',target:m[2],replacement:m[1]};
+  if(m) return {command:'changeFood',target:cleanCorrectionTarget(m[2]),replacement:m[1]};
   m=s.match(/^(?:use|make it|make that)\s+(.+?)\s+instead$/);
   if(m) return {command:'changeLastFood',replacement:m[1]};
+  m=s.match(/^(?:no|nope|nah)\s+(.+)$/);
+  if(m) return extractQuantity(m[1])
+    ?{command:'changeLastWeight',quantityText:m[1]}
+    :{command:'changeLastFood',replacement:m[1]};
   m=s.match(/^actually\s+(.+?)\s+not\s+(.+)$/);
-  if(m) return {command:'changeFood',target:m[2],replacement:m[1],fallbackToLast:true};
+  if(m) return {command:'changeFood',target:cleanCorrectionTarget(m[2]),replacement:m[1],fallbackToLast:true};
   m=s.match(/^(?:change|edit|replace)\s+(.+?)\s+(?:to|as|with)\s+(.+)$/);
-  if(m) return {command:'changeFood',target:m[1],replacement:m[2]};
+  if(m) return {command:'changeFood',target:cleanCorrectionTarget(m[1]),replacement:m[2]};
   m=s.match(/^actually\s+(?:that\s+was|it\s+was|it's|its)\s+(.+)$/);
   if(m) return {command:'changeLastFood',replacement:m[1]};
+  m=s.match(/^actually\s+(.+)$/);
+  if(m) return extractQuantity(m[1])
+    ?{command:'changeLastWeight',quantityText:m[1]}
+    :{command:'changeLastFood',replacement:m[1]};
   m=s.match(/^(.+?)\s+not\s+(.+)$/);
-  if(m) return {command:'changeFood',target:m[2],replacement:m[1],fallbackToLast:true};
+  if(m) return {command:'changeFood',target:cleanCorrectionTarget(m[2]),replacement:m[1],fallbackToLast:true};
   return null;
 }
 function applyCorrectionCommand(cmd){
@@ -284,10 +399,27 @@ function applyCorrectionCommand(cmd){
     if(idx<0){speak("Couldn't find that item.");return true;}
     const item=meal[idx];
     const food=item.rawFood||findFoodByText(item.name);
-    if(food) recalcMealItemFromFood(item,food,cmd.grams);
-    else { item.weight=Math.round(cmd.grams); }
-    showToast(`Updated ${item.name} to ${Math.round(cmd.grams)}g`);
-    speak(`Updated ${item.name} to ${Math.round(cmd.grams)} grams.`);
+    const grams=cmd.grams!=null?cmd.grams:gramsFromQuantityText(cmd.quantityText,food);
+    if(!grams){speak("I couldn't catch the amount.");return true;}
+    if(food) recalcMealItemFromFood(item,food,grams);
+    else { item.weight=Math.round(grams); }
+    if(typeof syncServingFromWeight==='function') syncServingFromWeight(item);
+    showToast(`Updated ${item.name} to ${Math.round(grams)}g`);
+    speak(`Updated ${item.name} to ${Math.round(grams)} grams.`);
+    return true;
+  }
+  if(cmd.command==='changeLastWeight'){
+    const idx=meal.length-1;
+    if(idx<0){speak("Nothing to update.");return true;}
+    const item=meal[idx];
+    const food=item.rawFood||findFoodByText(item.name);
+    const grams=cmd.grams!=null?cmd.grams:gramsFromQuantityText(cmd.quantityText,food);
+    if(!grams){speak("I couldn't catch the amount.");return true;}
+    if(food) recalcMealItemFromFood(item,food,grams);
+    else { item.weight=Math.round(grams); }
+    if(typeof syncServingFromWeight==='function') syncServingFromWeight(item);
+    showToast(`Updated ${item.name} to ${Math.round(grams)}g`);
+    speak(`Updated ${item.name} to ${Math.round(grams)} grams.`);
     return true;
   }
   if(cmd.command==='changeFood'||cmd.command==='changeLastFood'){
@@ -341,12 +473,14 @@ function cleanSegment(s){
 }
 // Split normalised text on spoken conjunctions and punctuation separators.
 function splitOnSeparators(text){
+  const numberPattern='\\d+(?:\\.\\d+)?|a|an|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|couple';
   return text
+    .replace(new RegExp('\\b('+numberPattern+')\\s+and\\s+a\\s+half\\s+('+UNIT_PATTERN+')','gi'),'$1 __ANDAHALF__ $2')
     .replace(/\s*[,;]\s*/g,' and ')
     .replace(/\s*&\s*/g,' and ')
     .replace(/\s+plus\s+/g,' and ')
     .split(/\s+and\s+/i)
-    .map(s=>s.trim())
+    .map(s=>s.replace(/__ANDAHALF__/g,'and a half').trim())
     .filter(Boolean);
 }
 // Split parts further where a new quantity begins mid-segment.
@@ -386,8 +520,8 @@ function parseSingleSegment(seg){
         if(!specificMatch){
           const baseFoods=typeof getFoodMatchFoods==='function'?getFoodMatchFoods(null,false):FOODS;
           const options=baseFoods.filter(f=>ag.options.includes(f.name));
-          const countAmount=qty&&qty.count!=null&&options[0]?Math.round(options[0].w*qty.count):null;
-          return{ambiguous:true,matches:options,amount:explicitGrams!=null?explicitGrams:(countAmount||100),label:trig,question:ag.question};
+          const resolvedAmount=qty&&options[0]?quantityToGramsForFood(qty,options[0]):null;
+          return{ambiguous:true,matches:options,amount:resolvedAmount!=null?resolvedAmount:100,label:trig,question:ag.question};
         }
       }
     }
@@ -397,8 +531,7 @@ function parseSingleSegment(seg){
   // Resolve grams: explicit weight → multiplier×food.w → count×food.w → food default
   let grams=explicitGrams;
   if(grams==null&&qty){
-    if(qty.multiplier!=null) grams=Math.round(bestFood.w*qty.multiplier);
-    else if(qty.count!=null)  grams=Math.round(bestFood.w*qty.count);
+    grams=quantityToGramsForFood(qty,bestFood);
   }
   return{...foodScale(bestFood,grams),rawFood:bestFood,confidence:'high',needsConfirm:false,weightSpecified:grams!==null};
 }
