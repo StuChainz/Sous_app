@@ -16,6 +16,7 @@ let _pendingFoodChoice=null;
 let sousRealtime=null;
 let _lastSpeakAt=0;
 let _suppressNextConfirmSpeechUntil=0;
+let clarificationState=null;
 
 function snapshotMeal(){undoSnapshot=meal.map(i=>({...i}));updateUndoBtn();}
 function updateUndoBtn(){const r=document.getElementById('undo-row');if(r)r.style.display=undoSnapshot?'flex':'none';}
@@ -55,7 +56,7 @@ function logVoiceState(event,extra={}){
     voiceSessionActive,
     voiceCurrentlyListening,
     processingTranscript,
-    clarificationActive:!!clarificationRec,
+    clarificationActive:!!(clarificationRec||clarificationState?.active),
     realtimeActive:!!(sousRealtime&&sousRealtime.active),
     recognitionExists:!!tapRec,
     ...extra
@@ -76,6 +77,7 @@ function canRestartVoiceListening(){
   if(voiceCurrentlyListening||isRecording){logRestartBlocked('already listening');return false;}
   if(processingTranscript){logRestartBlocked('processing transcript');return false;}
   if(isSpeaking){logRestartBlocked('speaking');return false;}
+  if(clarificationState?.active){logRestartBlocked('clarification active');return false;}
   if(clarificationRec){logRestartBlocked('clarification active');return false;}
   const correction=document.getElementById('voice-correct-bar');
   if(correction&&correction.style.display!=='none'){logRestartBlocked('clarification active');return false;}
@@ -136,6 +138,7 @@ function stopAllVoiceActivity(reason){
   processingTranscript=false;
   voiceSessionUseRealtime=false;
   voiceNoSpeechRetries=0;
+  clarificationState=null;
   stopSousRealtimeVoice(false);
   try{if(tapRec)tapRec.stop();}catch(e){}
   try{if(clarificationRec)clarificationRec.stop();}catch(e){}
@@ -505,6 +508,187 @@ function maybeShowFoodChoiceReview(results,rawText){
   }
   return false;
 }
+function getPendingFoodChoiceReview(results,rawText){
+  if(!rawText||!Array.isArray(results)||!results.length) return null;
+  const foodResults=results.filter(r=>!r.command);
+  if(!foodResults.length) return null;
+  const segments=_extractHeardFoodSegments(rawText,foodResults.length);
+  let foodIdx=0;
+  for(let i=0;i<results.length;i++){
+    const item=results[i];
+    if(item.command) continue;
+    const rawSegment=segments[foodIdx]||rawText;
+    foodIdx++;
+    const review=_foodChoiceReviewFor(item,rawSegment);
+    if(review){
+      const rawName=_foodChoiceDisplayName(rawSegment)||review.heard;
+      return{
+        rawName,
+        originalText:rawSegment,
+        existingItem:item,
+        existingFood:item.rawFood,
+        relatedMatches:_relatedFoodMatches(rawName,item.rawFood),
+        before:results.slice(0,i),
+        after:results.slice(i+1)
+      };
+    }
+  }
+  return null;
+}
+function isClarificationVoiceContext(){
+  return !!(_voiceMode||voiceSessionActive||voiceCurrentlyListening||isRecording);
+}
+function beginIngredientClarification(baseItem,fallback){
+  const base=String(baseItem||'ingredient').trim()||'ingredient';
+  clarificationState={
+    active:true,
+    baseItem:base,
+    step:'type_and_quantity',
+    attempts:0,
+    fallback:typeof fallback==='function'?fallback:null
+  };
+  pauseAlwaysOn();
+  try{if(tapRec)tapRec.stop();}catch(e){}
+  showLogScreen('listening');
+  const el=document.getElementById('transcript-text');
+  if(el) el.textContent='What type and how much?';
+  speakThenListen('What type and how much?',handleClarification);
+}
+function clearIngredientClarification(){
+  clarificationState=null;
+}
+function cancelIngredientClarification({resume=true}={}){
+  if(!clarificationState?.active) return;
+  clearIngredientClarification();
+  try{if(clarificationRec)clarificationRec.stop();}catch(e){}
+  clarificationRec=null;
+  if(resume) maybeResumeVoiceSession(400);
+}
+function fallbackIngredientClarification(){
+  const fallback=clarificationState?.fallback;
+  clearIngredientClarification();
+  if(typeof fallback==='function') fallback();
+  else maybeResumeVoiceSession(400);
+}
+function shouldAskAgainForClarification(results,rawText){
+  if(!Array.isArray(results)||!results.length) return true;
+  const foods=results.filter(r=>!r.command);
+  if(!foods.length) return true;
+  if(foods.some(r=>r.ambiguous)) return true;
+  if(getPendingFoodChoiceReview(results,rawText)) return true;
+  return false;
+}
+function normaliseClarificationInput(text){
+  return String(text||'')
+    .replace(/\bgrams?\b/gi,'g')
+    .replace(/\bmillilit(?:re|er)s?\b/gi,'ml')
+    .replace(/\blit(?:re|er)s?\b/gi,'l')
+    .replace(/\bounces?\b/gi,'oz')
+    .replace(/\btablespoons?\b/gi,'tbsp')
+    .replace(/\bteaspoons?\b/gi,'tsp')
+    .replace(/\s+/g,' ')
+    .trim();
+}
+function quantityFirstClarificationInput(text){
+  const input=normaliseClarificationInput(text);
+  const m=input.match(/^(.*\S)\s+(\d+(?:[.,]\d+)?)\s*(g|kg|ml|l|oz|tbsp|tsp|cups?)\b$/i);
+  if(!m) return input;
+  return `${m[2]} ${m[3]} ${m[1]}`.replace(/\s+/g,' ').trim();
+}
+function parseClarificationInput(baseItem,answer){
+  const fullInput=normaliseClarificationInput(`${baseItem} ${answer}`);
+  const candidates=[
+    fullInput,
+    quantityFirstClarificationInput(fullInput),
+    normaliseClarificationInput(answer),
+    quantityFirstClarificationInput(answer)
+  ].filter((text,index,arr)=>text&&arr.indexOf(text)===index);
+  let fallback={text:fullInput,results:typeof parseText==='function'?parseText(fullInput):[]};
+  for(const text of candidates){
+    const results=typeof parseText==='function'?parseText(text):[];
+    if(shouldAskAgainForClarification(results,text)) continue;
+    const hasWeight=results.some(r=>!r.command&&r.weightSpecified);
+    if(hasWeight) return {text,results};
+    if(!shouldAskAgainForClarification(fallback.results,fallback.text)) fallback={text,results};
+    else fallback={text,results};
+  }
+  return fallback;
+}
+function maybeStartIngredientClarification(results,rawText){
+  if(clarificationState?.active||!isClarificationVoiceContext()) return false;
+  if(!Array.isArray(results)||!results.length) return false;
+  const foodResults=results.filter(r=>!r.command);
+  if(foodResults.length!==1) return false;
+  const item=foodResults[0];
+  if(item.ambiguous){
+    beginIngredientClarification(item.label||rawText||'ingredient',()=>showMultiConfirm(foodResults));
+    return true;
+  }
+  const reviewState=getPendingFoodChoiceReview(results,rawText);
+  if(reviewState){
+    beginIngredientClarification(reviewState.rawName||rawText||'ingredient',()=>showFoodChoiceReview(reviewState));
+    return true;
+  }
+  const heard=typeof normaliseLogText==='function'?normaliseLogText(rawText):String(rawText||'').toLowerCase().trim();
+  if(['cheese'].includes(heard)&&item.rawFood){
+    const rawName=_foodChoiceDisplayName(rawText)||heard;
+    beginIngredientClarification(rawName,()=>showFoodChoiceReview({
+      rawName,
+      originalText:rawText,
+      existingItem:item,
+      existingFood:item.rawFood,
+      relatedMatches:_relatedFoodMatches(rawName,item.rawFood),
+      before:[],
+      after:[]
+    }));
+    return true;
+  }
+  return false;
+}
+function handleClarification(transcript){
+  if(!clarificationState?.active) return;
+  const answer=String(transcript||'').trim();
+  if(!answer){
+    clarificationState.attempts++;
+    if(clarificationState.attempts>=2){fallbackIngredientClarification();return;}
+    speakThenListen("Didn't catch that, try again",handleClarification);
+    return;
+  }
+  const normalAnswer=typeof normaliseLogText==='function'?normaliseLogText(answer):answer.toLowerCase();
+  if(/^(cancel|stop|skip|never mind|nevermind|no thanks|forget it)$/.test(normalAnswer)){
+    cancelIngredientClarification();
+    return;
+  }
+  const normalBase=typeof normaliseLogText==='function'?normaliseLogText(clarificationState.baseItem):String(clarificationState.baseItem||'').toLowerCase().trim();
+  if(normalAnswer===normalBase){
+    clarificationState.attempts++;
+    if(clarificationState.attempts>=2){fallbackIngredientClarification();return;}
+    const el=document.getElementById('transcript-text');
+    if(el) el.textContent="Didn't catch that, try again";
+    speakThenListen("Didn't catch that, try again",handleClarification);
+    return;
+  }
+  const command=typeof parseText==='function'?parseText(answer).find(r=>r.command):null;
+  if(command){
+    clearIngredientClarification();
+    handleParsed([command],answer);
+    return;
+  }
+
+  const parsed=parseClarificationInput(clarificationState.baseItem,answer);
+  const results=parsed.results;
+  if(shouldAskAgainForClarification(results,parsed.text)){
+    clarificationState.attempts++;
+    if(clarificationState.attempts>=2){fallbackIngredientClarification();return;}
+    const el=document.getElementById('transcript-text');
+    if(el) el.textContent="Didn't catch that, try again";
+    speakThenListen("Didn't catch that, try again",handleClarification);
+    return;
+  }
+
+  clearIngredientClarification();
+  speak('Got it',()=>handleParsed(results,parsed.text));
+}
 function _ensureFoodChoiceScreen(){
   let screen=document.getElementById('ls-food-choice');
   if(screen) return screen;
@@ -686,6 +870,7 @@ function handleParsed(results,rawText=''){
     if(!meal.length){showToast('Add some ingredients first!');return;}
     stopAllRec(); showSummary(); return;
   }
+  if(maybeStartIngredientClarification(results,rawText)) return;
   if(maybeShowFoodChoiceReview(results,rawText)) return;
   showBatchHeard(results);
   const foodResults=results.filter(r=>!r.command);
@@ -1886,32 +2071,96 @@ function saveMealToLog(saveAsUsual=false){
 // ═══════════════════════════════════════════
 function buildTapRec(){
   if(!SR) return null;
-  const r=new SR(); r.lang='en-GB'; r.interimResults=true; r.continuous=false; r.maxAlternatives=3;
+  let pendingTranscript="";
+  let finalizeTimer=null;
+  let utteranceStartTime=null;
+  let pendingConfidence=null;
+
+  const BASE_DELAY=600;
+  const EXTENDED_DELAY=1200;
+  const MAX_UTTERANCE_MS=10000;
+
+  function getAdaptiveDelay(text){
+    const t=text.toLowerCase();
+
+    const incompleteKeywords=[
+      "swap",
+      "replace",
+      "change",
+      "with",
+      "for",
+      "instead",
+      "and"
+    ];
+
+    const isComplex=incompleteKeywords.some(k=>t.includes(k));
+
+    return isComplex?EXTENDED_DELAY:BASE_DELAY;
+  }
+
+  async function finalizeTranscript(){
+    if(!pendingTranscript) return;
+
+    const transcript=pendingTranscript.trim();
+    const finalConf=pendingConfidence;
+
+    pendingTranscript="";
+    pendingConfidence=null;
+    utteranceStartTime=null;
+    if(finalizeTimer) clearTimeout(finalizeTimer);
+    finalizeTimer=null;
+
+    try{r.stop();}catch(e){}
+
+    voiceNoSpeechRetries=0;
+    logVoiceState('speech result received',{transcript,confidence:finalConf});
+    stopTapRec();
+    const isLow=typeof finalConf==='number'&&finalConf>0&&finalConf<0.75;
+    _voiceMode=true;
+    setVoiceProcessing(true);
+    console.log('[Sous Voice] processing transcript');
+    logVoiceState('transcript processing started',{transcript,lowConfidence:isLow});
+    const done=()=>{
+      setVoiceProcessing(false);
+      logVoiceState('transcript processing finished');
+      if(document.querySelector('.log-screen.active')?.id==='ls-listening') scheduleVoiceSessionRestart(500);
+    };
+    if(clarificationState?.active){
+      Promise.resolve(handleClarification(transcript)).then(done).catch(e=>{console.warn('[Sous Voice] clarification error',e);done();});
+    } else if(isLow){showVoiceCorrection(transcript);done();}
+    else Promise.resolve(handleTranscript(transcript,transcript)).then(done).catch(e=>{console.warn('[Sous Voice] transcript error',e);done();});
+  }
+
+  const r=new SR(); r.lang='en-GB'; r.interimResults=true; r.continuous=true; r.maxAlternatives=3;
   r.onstart=()=>{isRecording=true;voiceCurrentlyListening=true;console.log('[Sous Voice] listening');logVoiceState('recognition actually started');setMicState('recording');};
   r.onresult=e=>{
     let interim='',final='',finalConf=null;
     for(let i=e.resultIndex;i<e.results.length;i++){const res=e.results[i];if(res.isFinal){final+=res[0].transcript;if(finalConf===null)finalConf=res[0].confidence;}else interim+=res[0].transcript;}
     const el=document.getElementById('transcript-text');
-    if(el) el.textContent='"'+(final||interim)+'"';
+    const heard=[pendingTranscript,final,interim].filter(Boolean).join(' ').replace(/\s+/g,' ').trim();
+    if(el) el.textContent=heard?'"'+heard+'"':'—';
     if(final){
-      voiceNoSpeechRetries=0;
-      logVoiceState('speech result received',{transcript:final.trim(),confidence:finalConf});
-      stopTapRec();
-      const isLow=typeof finalConf==='number'&&finalConf>0&&finalConf<0.75;
-      _voiceMode=true;
-      setVoiceProcessing(true);
-      console.log('[Sous Voice] processing transcript');
-      logVoiceState('transcript processing started',{transcript:final.trim(),lowConfidence:isLow});
-      const done=()=>{
-        setVoiceProcessing(false);
-        logVoiceState('transcript processing finished');
-        if(document.querySelector('.log-screen.active')?.id==='ls-listening') scheduleVoiceSessionRestart(350);
-      };
-      if(isLow){showVoiceCorrection(final.trim());done();}
-      else Promise.resolve(handleTranscript(final.trim(),final.trim())).then(done).catch(e=>{console.warn('[Sous Voice] transcript error',e);done();});
+      if(!pendingTranscript) utteranceStartTime=Date.now();
+      pendingTranscript=[pendingTranscript,final.trim()].filter(Boolean).join(' ').replace(/\s+/g,' ').trim();
+      if(finalConf!==null) pendingConfidence=finalConf;
+
+      if(finalizeTimer) clearTimeout(finalizeTimer);
+
+      const delay=getAdaptiveDelay(pendingTranscript);
+
+      finalizeTimer=setTimeout(finalizeTranscript,delay);
+
+      if(Date.now()-utteranceStartTime>MAX_UTTERANCE_MS){
+        finalizeTranscript();
+      }
     }
   };
   r.onerror=e=>{
+    if(finalizeTimer) clearTimeout(finalizeTimer);
+    finalizeTimer=null;
+    pendingTranscript="";
+    pendingConfidence=null;
+    utteranceStartTime=null;
     const err=e.error||'unknown';
     logVoiceState('recognition error',{error:err});
     stopTapRec();
@@ -1933,7 +2182,7 @@ function buildTapRec(){
       endVoiceSession();
     }
   };
-  r.onend=()=>{logVoiceState('recognition ended');stopTapRec();};
+  r.onend=()=>{logVoiceState('recognition ended');if(!finalizeTimer)stopTapRec();};
   return r;
 }
 function stopTapRec(){
@@ -2056,6 +2305,10 @@ function forceRealtimeReviewResults(results){
 function routeRealtimeTranscriptToReview(transcript){
   const text=String(transcript||'').trim();
   if(!text) return false;
+  if(clarificationState?.active){
+    handleClarification(text);
+    return true;
+  }
   const results=typeof parseText==='function'?parseText(text):[];
   const forced=forceRealtimeReviewResults(results);
   handleParsed(forced,text);
@@ -2291,8 +2544,14 @@ function startClarificationListen(onResult){
   const r=new SR(); r.lang='en-GB'; r.interimResults=false; r.continuous=false; r.maxAlternatives=3;
   clarificationRec=r;
   r.onstart=()=>setMicState('recording');
-  r.onresult=e=>{const t=e.results[0][0].transcript;const el=document.getElementById('transcript-text');if(el)el.textContent='"'+t+'"';clarificationRec=null;setMicState('idle');onResult(t);maybeResumeVoiceSession(400);};
-  r.onerror=()=>{clarificationRec=null;setMicState('idle');maybeResumeVoiceSession(400);};
+  r.onresult=e=>{const t=e.results[0][0].transcript;const el=document.getElementById('transcript-text');if(el)el.textContent='"'+t+'"';clarificationRec=null;setMicState('idle');onResult(t);if(onResult!==handleClarification&&!clarificationState?.active)maybeResumeVoiceSession(400);};
+  r.onerror=e=>{
+    clarificationRec=null;
+    setMicState('idle');
+    if(clarificationState?.active&&(e?.error==='no-speech'||onResult===handleClarification)){
+      onResult('');
+    } else maybeResumeVoiceSession(400);
+  };
   r.onend=()=>{clarificationRec=null;setMicState('idle');};
   try{r.start();}catch(e){}
 }
@@ -2304,6 +2563,7 @@ function buildAlwaysOn(){
     if(isRecording||isSpeaking) return;
     const t=e.results[e.results.length-1][0].transcript.toLowerCase().trim();
     const el=document.getElementById('transcript-text'); if(el) el.textContent='"'+t+'"';
+    if(clarificationState?.active){handleClarification(t);return;}
     if(/hey\s+s[uo][eu]/.test(t)){
       setMicState('wake');
       setTimeout(()=>{try{r.stop();}catch(e){}alwaysOnActive=false;if(!tapRec)tapRec=buildTapRec();try{tapRec.start();}catch(e){}},500);
@@ -2394,6 +2654,11 @@ function resumeLog(){
 // LOG BUTTON WIRING (done after DOM ready)
 // ═══════════════════════════════════════════
 function wireLogButtons(){
+  document.addEventListener('pointerdown',e=>{
+    if(!clarificationState?.active) return;
+    if(e.target?.closest?.('#mic-btn,#transcript-text')) return;
+    cancelIngredientClarification({resume:false});
+  },true);
   document.getElementById('log-cancel-btn').addEventListener('click',()=>{currentEditMealId=null;currentEditMealDate=null;currentQuickMode=false;if(typeof clearDraft==='function')clearDraft();stopAllRec();setMicState('idle');switchTab('home');});
   document.getElementById('finished-meal-btn').addEventListener('click',()=>{if(!meal.length){showToast('Add some ingredients first!');return;}stopAllRec();showSummary();});
   document.getElementById('mic-btn').addEventListener('click',()=>{
