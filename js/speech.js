@@ -6,7 +6,7 @@ let tapRec=null, alwaysOnRec=null, clarificationRec=null, isRecording=false, alw
 let voiceSessionActive=false, voiceCurrentlyListening=false, processingTranscript=false, voiceSessionStoppedManually=false, voiceSessionUseRealtime=false;
 let voiceRestartTimer=null, voiceProcessingTimer=null, voiceSpeakingTimer=null, voiceNoSpeechRetries=0;
 let voiceSessionState='idle', tapRecStarting=false, tapRecStopping=false, sousRealtimeStarting=false, voicePausedForVisibility=false;
-let voiceRestartCount=0, voiceDebugOverlayEl=null, voiceDebugOverlayTimer=null, voiceDebugOverlayDismissed=false, voiceDebugOverlayUpdateQueued=false;
+let voiceRestartCount=0, voiceFlowCueCooldownUntil=0, voiceDebugOverlayEl=null, voiceDebugOverlayTimer=null, voiceDebugOverlayDismissed=false, voiceDebugOverlayUpdateQueued=false;
 let _voiceMode=false;
 let nextIngId=1;
 let modalSelectedFood=null, modalActiveTab='search';
@@ -387,7 +387,7 @@ function maybeRecoverVoiceTranscript(issue,transcript){
   const el=document.getElementById('transcript-text');
   if(el) el.textContent=prompt;
   showToast(prompt);
-  speak(prompt,()=>scheduleVoiceSessionRestart(300));
+  speakRecoveryCue(()=>scheduleVoiceSessionRestart(300));
   return true;
 }
 function logRestartBlocked(reason){
@@ -792,7 +792,7 @@ function announceAutoAdded(items,after){
   const transcript=document.getElementById('transcript-text');
   if(transcript) transcript.textContent=msg;
   showToast(msg,2600);
-  speakCachedResponse('added',{},after);
+  speakSuccessCue(after);
 }
 function hideVoiceCorrectBar(){
   const b=document.getElementById('voice-correct-bar');if(b)b.style.display='none';
@@ -1144,7 +1144,7 @@ function handleClarification(transcript){
   if(!answer){
     clarificationState.attempts++;
     if(clarificationState.attempts>=2){fallbackIngredientClarification();return;}
-    speakThenListen("Didn't catch that, try again",handleClarification);
+    speakRecoveryThenListen(handleClarification);
     return;
   }
   const normalAnswer=typeof normaliseLogText==='function'?normaliseLogText(answer):answer.toLowerCase();
@@ -1158,7 +1158,7 @@ function handleClarification(transcript){
     if(clarificationState.attempts>=2){fallbackIngredientClarification();return;}
     const el=document.getElementById('transcript-text');
     if(el) el.textContent="Didn't catch that, try again";
-    speakThenListen("Didn't catch that, try again",handleClarification);
+    speakRecoveryThenListen(handleClarification);
     return;
   }
   const command=typeof parseText==='function'?parseText(answer).find(r=>r.command):null;
@@ -1176,13 +1176,13 @@ function handleClarification(transcript){
     if(clarificationState.attempts>=2){fallbackIngredientClarification();return;}
     const el=document.getElementById('transcript-text');
     if(el) el.textContent="Didn't catch that, try again";
-    speakThenListen("Didn't catch that, try again",handleClarification);
+    speakRecoveryThenListen(handleClarification);
     return;
   }
 
   clearIngredientClarification();
   voiceDebugTrace('clarification_resolved',{input:parsed.text,results:voiceDebugResultSummary(results)});
-  speak('Got it',()=>handleParsed(results,parsed.text));
+  speakCachedResponse('got_it',{},()=>handleParsed(results,parsed.text));
 }
 function _ensureFoodChoiceScreen(){
   let screen=document.getElementById('ls-food-choice');
@@ -1349,8 +1349,10 @@ function handleParsed(results,rawText=''){
         });
       }
     } else {
-      if(_voiceMode) showVoiceRetry("Didn't catch that — try again");
-      else showToast("Didn't catch that — try again!");
+      if(_voiceMode){
+        showVoiceRetry("Didn't catch that — try again");
+        speakRecoveryCue();
+      } else showToast("Didn't catch that — try again!");
     }
     _voiceMode=false; return;
   }
@@ -1665,6 +1667,10 @@ function speakThenListen(text,onResult){
   pauseAlwaysOn();
   speak(text,()=>setTimeout(()=>startClarificationListen(onResult),200));
 }
+function speakRecoveryThenListen(onResult){
+  pauseAlwaysOn();
+  speakRecoveryCue(()=>setTimeout(()=>startClarificationListen(onResult),200));
+}
 
 function speakCachedResponse(key,data={},onEnd){
   if(isVoiceSilentMode()){
@@ -1720,6 +1726,23 @@ function speakCachedResponse(key,data={},onEnd){
     const audioUrl=typeof getCachedAudioUrl==='function'?getCachedAudioUrl(key):null;
     resolve(text,audioUrl);
   }
+}
+function maybeSpeakFlowCue(reason,onEnd){
+  if(!voiceSessionActive||isVoiceSilentMode()){if(onEnd)onEnd();return false;}
+  if(document.querySelector('.log-screen.active')?.id!=='ls-listening'){if(onEnd)onEnd();return false;}
+  const now=Date.now();
+  if(now<voiceFlowCueCooldownUntil||now-_lastSpeakAt<900){if(onEnd)onEnd();return false;}
+  if(Math.random()>0.12){if(onEnd)onEnd();return false;}
+  voiceFlowCueCooldownUntil=now+45000;
+  voiceDebugTrace('voice_flow_cue',{reason});
+  speakCachedResponse('flow',{},onEnd);
+  return true;
+}
+function speakSuccessCue(onEnd){
+  speakCachedResponse('added',{},()=>maybeSpeakFlowCue('after_success',onEnd));
+}
+function speakRecoveryCue(onEnd){
+  speakCachedResponse('recovery',{},onEnd);
 }
 
 // ═══════════════════════════════════════════
@@ -1868,7 +1891,7 @@ function doConfirm(){
   addIngredientToMeal(pendingFood, {source:'voice'});
   _confirmManualMacros=false;
   const name=pendingFood.name;
-  speakCachedResponse('added',{},()=>{
+  speakSuccessCue(()=>{
     pendingFood=null;
     processQueue();
     if(document.querySelector('.log-screen.active')?.id==='ls-listening') maybeResumeVoiceSession(300);
@@ -1901,7 +1924,7 @@ function commitQuantity(grams){
   const item={name:food.name,weight:Math.round(grams),kcal:Math.round(food.kcal*r),protein:Math.round(food.p*r*10)/10,carbs:Math.round(food.c*r*10)/10,fat:Math.round(food.f*r*10)/10,fibre:Math.round((food.fi||0)*r*10)/10,icon:food.icon,type:food.type||'solid',rawFood:food};
   addIngredientToMeal(item, {source:'voice'});
   showToast('Added '+item.name+' '+Math.round(grams)+'g ✓');
-  speakCachedResponse('added');
+  speakSuccessCue();
   pendingFood=null;
   showLogScreen('listening');
   renderCurrentMeal();
@@ -1940,7 +1963,7 @@ function commitUsualFromQuantityPrompt(){
     _persistDraft();
   }
   showToast('Added '+usual.name+' ✓');
-  speakCachedResponse('added');
+  speakSuccessCue();
   pendingFood=null;
   showLogScreen('listening');
   renderCurrentMeal();
@@ -2151,7 +2174,7 @@ function commitMultiConfirm(){
   showLogScreen('listening');
   updateHome();
   showToast('Added '+count+' ingredient'+(count!==1?'s':'')+' ✓');
-  speakCachedResponse('added');
+  speakSuccessCue();
   maybeResumeVoiceSession(250);
 }
 
@@ -2735,7 +2758,7 @@ function buildTapRec(){
       resetVoiceRecovery();
       voiceDebugTrace('voice_recovery',{issue:'no_speech',attempt:voiceNoSpeechRetries});
       showToast("Didn't catch that");
-      speak("Didn't catch that",()=>scheduleVoiceSessionRestart(300));
+      speakRecoveryCue(()=>scheduleVoiceSessionRestart(300));
     } else if(err==='no-speech') showVoiceRetry("Didn't catch that — try again");
     else if(err==='network'||err==='service-not-allowed'){
       showVoiceRetry("Voice service is unavailable — try again");
@@ -3311,7 +3334,7 @@ function wireLogButtons(){
     }
     if(voicePausedForVisibility){
       voicePausedForVisibility=false;
-      scheduleVoiceSessionRestart(VOICE_RESTART_DEFAULT_MS);
+      speakCachedResponse('session_resumed',{},()=>scheduleVoiceSessionRestart(VOICE_RESTART_DEFAULT_MS));
     }
   });
   window.addEventListener('pagehide',()=>{
@@ -3383,7 +3406,7 @@ function wireLogButtons(){
     if(!pendingFood) return;
     addIngredientToMeal({...pendingFood}, {source:'voice'});
     showToast('Added '+pendingFood.name+' ✓');
-    speakCachedResponse('added');
+    speakSuccessCue();
     pendingFood=null;
     showLogScreen('listening');
     renderCurrentMeal();

@@ -23,6 +23,13 @@ const AI_RESPONSE_MAP={
   deleted:'Deleted.',
   undone:'Undone.',
   done:'Done.',
+  updated:'Updated.',
+  removed:'Removed.',
+  cleared:'Cleared.',
+  recovery:"Didn't catch that.",
+  flow:'Anything else?',
+  session_continuing:'Continuing.',
+  session_resumed:'Session resumed.',
   got_it:'Got it.',
   realtime_ready:'Realtime ready.',
   realtime_stopped:'Realtime stopped.',
@@ -32,8 +39,21 @@ const AI_RESPONSE_MAP={
 
 const AI_RESPONSE_STATIC_BASE='assets/voice-cache/';
 const AI_RESPONSE_RUNTIME_CACHE={};
+const AI_RESPONSE_AUDIO_SEMANTICS={
+  added:{variants:['added_01','added_02','added_03','added_04','added_05'],fallback:'added'},
+  updated:{variants:['updated_01','updated_02','updated_03'],fallback:null},
+  deleted:{variants:['removed_01','removed_02'],fallback:'deleted'},
+  removed:{variants:['removed_01','removed_02'],fallback:'deleted'},
+  undone:{variants:['undone_01','undone_02'],fallback:'undone'},
+  cleared:{variants:['cleared_01','cleared_02'],fallback:null},
+  recovery:{variants:['recovery_try_again','recovery_didnt_catch','recovery_say_again'],fallback:null},
+  flow:{variants:['flow_go_ahead','flow_keep_going','flow_anything_else','flow_continue'],fallback:null},
+  session_continuing:{variants:['session_continuing'],fallback:null},
+  session_resumed:{variants:['session_resumed'],fallback:null}
+};
 let AI_RESPONSE_STATIC_CACHE={};
 let AI_RESPONSE_STATIC_AUDIO={};  // key → resolved audio URL (if file exists)
+let AI_RESPONSE_AUDIO_EXISTS={};  // audio URL → boolean after a HEAD probe
 let AI_RESPONSE_STATIC_PROMISE=null;
 
 function cachedResponseValue(data,key){
@@ -109,23 +129,57 @@ async function getCachedResponseAsync(eventKey,data={}){
 }
 
 function getCachedAudioUrl(eventKey){
+  const semantic=AI_RESPONSE_AUDIO_SEMANTICS[eventKey];
+  if(semantic){
+    const available=semantic.variants
+      .map(key=>AI_RESPONSE_STATIC_BASE+'audio/'+key+'.mp3')
+      .filter(url=>AI_RESPONSE_AUDIO_EXISTS[url]);
+    if(available.length) return available[Math.floor(Math.random()*available.length)];
+    if(semantic.fallback&&AI_RESPONSE_STATIC_AUDIO[semantic.fallback]) return AI_RESPONSE_STATIC_AUDIO[semantic.fallback];
+  }
   return AI_RESPONSE_STATIC_AUDIO[eventKey]||null;
 }
 
 async function getCachedAudioUrlAsync(eventKey){
   if(!AI_RESPONSE_STATIC_PROMISE) await loadStaticResponseCache();
+  const semantic=AI_RESPONSE_AUDIO_SEMANTICS[eventKey];
+  if(semantic){
+    const urls=semantic.variants.map(key=>AI_RESPONSE_STATIC_BASE+'audio/'+key+'.mp3');
+    const checks=await Promise.all(urls.map(async url=>{
+      if(AI_RESPONSE_AUDIO_EXISTS[url]!=null) return AI_RESPONSE_AUDIO_EXISTS[url];
+      try{
+        const res=await fetch(url,{method:'HEAD',cache:'force-cache'});
+        AI_RESPONSE_AUDIO_EXISTS[url]=!!res.ok;
+      }catch(e){AI_RESPONSE_AUDIO_EXISTS[url]=false;}
+      return AI_RESPONSE_AUDIO_EXISTS[url];
+    }));
+    const available=urls.filter((url,index)=>checks[index]);
+    if(available.length) return available[Math.floor(Math.random()*available.length)];
+    if(semantic.fallback&&AI_RESPONSE_STATIC_AUDIO[semantic.fallback]) return AI_RESPONSE_STATIC_AUDIO[semantic.fallback];
+  }
   return getCachedAudioUrl(eventKey);
+}
+
+function getCachedAudioSemanticOptions(eventKey){
+  const semantic=AI_RESPONSE_AUDIO_SEMANTICS[eventKey];
+  if(!semantic) return {variants:[],fallback:eventKey};
+  return {
+    variants:semantic.variants.slice(),
+    fallback:semantic.fallback
+  };
 }
 
 if(typeof window!=='undefined'){
   window.AI_RESPONSE_MAP=AI_RESPONSE_MAP;
+  window.AI_RESPONSE_AUDIO_SEMANTICS=AI_RESPONSE_AUDIO_SEMANTICS;
   window.AI_RESPONSE_RUNTIME_CACHE=AI_RESPONSE_RUNTIME_CACHE;
   window.getCachedResponse=getCachedResponse;
   window.getCachedResponseAsync=getCachedResponseAsync;
   window.getCachedAudioUrl=getCachedAudioUrl;
   window.getCachedAudioUrlAsync=getCachedAudioUrlAsync;
+  window.getCachedAudioSemanticOptions=getCachedAudioSemanticOptions;
   window.setRuntimeCachedResponse=setRuntimeCachedResponse;
   window.loadStaticResponseCache=loadStaticResponseCache;
   loadStaticResponseCache();
 }
-if(typeof module!=='undefined') module.exports={AI_RESPONSE_MAP,getCachedResponse,getCachedResponseAsync,getCachedAudioUrl,getCachedAudioUrlAsync,setRuntimeCachedResponse,loadStaticResponseCache};
+if(typeof module!=='undefined') module.exports={AI_RESPONSE_MAP,AI_RESPONSE_AUDIO_SEMANTICS,getCachedResponse,getCachedResponseAsync,getCachedAudioUrl,getCachedAudioUrlAsync,getCachedAudioSemanticOptions,setRuntimeCachedResponse,loadStaticResponseCache};
