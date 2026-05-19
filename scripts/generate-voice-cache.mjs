@@ -102,6 +102,9 @@ const extraResponses = [
   ["added_04", "Done."],
   ["added_05", "Sorted."],
 
+  ["done_01", "Done."],
+  ["done_02", "Finished."],
+
   ["updated_01", "Updated."],
   ["updated_02", "Changed."],
   ["updated_03", "Fixed."],
@@ -137,6 +140,7 @@ const extraResponses = [
   ["session_resumed", "Session resumed."],
   ["session_back_again", "Back again."],
   ["session_continuing", "Continuing where we left off."],
+  ["session_picked_up", "Picked up where you left off."],
 
   // Meal-aware
   ["meal_updated", "Meal updated."],

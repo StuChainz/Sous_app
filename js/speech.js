@@ -591,6 +591,9 @@ function batchPhrase(items){
 function shouldAutoAdd(item){
   return item && !item.ambiguous && (item.confidence==='high' || item.needsConfirm===false || item.customMacro);
 }
+function shouldAskQuantityBeforeReview(item){
+  return shouldAutoAdd(item)&&!!item.rawFood&&!item.weightSpecified&&!item.customMacro;
+}
 function isClearIngredient(item){
   return item && !item.command && !item.ambiguous && (item.customMacro || (item.rawFood && item.weightSpecified));
 }
@@ -1605,6 +1608,12 @@ function handleParsed(results,rawText=''){
   }
   showBatchHeard(results);
   const foodResults=results.filter(r=>!r.command);
+  if(foodResults.length===1&&shouldAskQuantityBeforeReview(foodResults[0])){
+    itemQueue.push(foodResults[0]);
+    voiceDebugTrace('final_action',{action:'queue_quantity_prompt',queued:voiceDebugResultSummary(foodResults)});
+    processQueue([]);
+    return;
+  }
   const reviewItems=foodResults.filter(r=>!isClearIngredient(r));
   if(reviewItems.length){
     const clearItems=foodResults.filter(isClearIngredient);
@@ -3533,9 +3542,9 @@ function startFreshLog(presetSection=null){
   const pw=document.getElementById('perm-warn'); if(pw) pw.style.display='none';
   if(hasDraft){
     showToast('Restored your in-progress meal',2800);
-    speak('Picked up where you left off.',()=>{if(cookingModeEnabled())setTimeout(startAlwaysOn,200);else console.log('[Sous Voice] cooking mode disabled');});
+    speakCachedResponse('session_picked_up',{},()=>{if(cookingModeEnabled())setTimeout(startAlwaysOn,200);else console.log('[Sous Voice] cooking mode disabled');});
   } else {
-    speak('Ready.',()=>{if(cookingModeEnabled())setTimeout(startAlwaysOn,200);else console.log('[Sous Voice] cooking mode disabled');});
+    speakCachedResponse('session_ready',{},()=>{if(cookingModeEnabled())setTimeout(startAlwaysOn,200);else console.log('[Sous Voice] cooking mode disabled');});
   }
 }
 function startSilentLog(presetSection=null,quick=false){
