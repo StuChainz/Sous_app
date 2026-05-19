@@ -1952,6 +1952,10 @@ function speakCachedResponse(key,data={},onEnd){
     if(onEnd) setTimeout(onEnd,0);
     return;
   }
+  if(voiceSelfTestEnabled()&&['added','logged','ingredient_added'].includes(key)){
+    speak('Added. Self test marker banana.',onEnd,{skipCache:true});
+    return;
+  }
   const now=Date.now();
   if(now-_lastSpeakAt<500){
     console.log('[Sous Voice] skipped (debounce)');
