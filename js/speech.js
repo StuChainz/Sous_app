@@ -1175,6 +1175,23 @@ function mergeClarificationQuantity(results,state,answer){
   if(grams==null) return results;
   return (results||[]).map(item=>scaleClarifiedFoodItem(item,grams));
 }
+function repairClarificationAnswer(answer,state){
+  const text=String(answer||'').trim();
+  if(!text||!state) return text;
+  const family=normalisedClarificationFamilyName(state.family||state.baseItem||'');
+  const missing=state.missingFields||[];
+  if(!missing.includes('type')||!family.includes('yog')) return text;
+  const normal=normaliseClarificationInput(text).toLowerCase();
+  if(/\b(full|free|zero|0|nonfat|non fat)\s+fat\b|\bfat\s+free\b/.test(normal)) return text;
+  const withoutQuantity=normal
+    .replace(/\b(?:\d+(?:[.,]\d+)?|a|an|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|couple)\s*(?:g|kg|ml|l|oz|tbsp|tsp|cups?|grams?|slices?|pieces?|servings?|portions?|pots?)\b/gi,' ')
+    .replace(/\s+/g,' ')
+    .trim();
+  if(withoutQuantity==='fat'){
+    return normal.replace(/\bfat\b/,'fat free');
+  }
+  return text;
+}
 function parseClarificationInput(baseItem,answer,state=clarificationState){
   const answerQty=clarificationAnswerQuantityInfo(answer,state);
   const carryQty=!answerQty.known&&state?.knownQuantity!=null
@@ -1185,9 +1202,9 @@ function parseClarificationInput(baseItem,answer,state=clarificationState){
   const candidates=[
     fullInput,
     quantityFirstClarificationInput(fullInput),
-    normaliseClarificationInput(`${carryQty||answerQtyText} ${answer} ${baseItem}`),
-    quantityFirstClarificationInput(`${carryQty||answerQtyText} ${answer} ${baseItem}`),
-    normaliseClarificationInput(`${carryQty||answerQtyText} ${baseItem} ${answer}`),
+    normaliseClarificationInput(`${carryQty} ${answer} ${baseItem}`),
+    quantityFirstClarificationInput(`${carryQty} ${answer} ${baseItem}`),
+    normaliseClarificationInput(`${carryQty} ${baseItem} ${answer}`),
     normaliseClarificationInput(answer),
     quantityFirstClarificationInput(answer)
   ].filter((text,index,arr)=>text&&arr.indexOf(text)===index);
@@ -1346,15 +1363,17 @@ function handleClarification(transcript){
     return;
   }
 
-  const answerQty=clarificationAnswerQuantityInfo(answer,clarificationState);
+  const repairedAnswer=repairClarificationAnswer(answer,clarificationState);
+  if(repairedAnswer!==answer) voiceDebugTrace('clarification_answer_repaired',{from:answer,to:repairedAnswer});
+  const answerQty=clarificationAnswerQuantityInfo(repairedAnswer,clarificationState);
   if(answerQty.known){
     clarificationState.knownQuantity=answerQty.grams;
     clarificationState.knownUnit=answerQty.unit;
     clarificationState.missingFields=missing.filter(field=>field!=='quantity'&&field!=='confirm_intent');
   }
 
-  const parsed=parseClarificationInput(clarificationState.baseItem,answer,clarificationState);
-  let results=mergeClarificationQuantity(parsed.results,clarificationState,answer);
+  const parsed=parseClarificationInput(clarificationState.baseItem,repairedAnswer,clarificationState);
+  let results=mergeClarificationQuantity(parsed.results,clarificationState,repairedAnswer);
   voiceDebugTrace('clarification_parsed',{input:parsed.text,results:voiceDebugResultSummary(results)});
   if(shouldAskAgainForClarification(results,parsed.text)){
     clarificationState.attempts++;

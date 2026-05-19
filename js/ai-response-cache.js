@@ -56,8 +56,8 @@ const AI_RESPONSE_AUDIO_SEMANTICS={
   session_resumed:{variants:['session_resumed'],fallback:null},
   clarify_type:{variants:['clarify_type'],fallback:'clarification_needed'},
   clarify_quantity:{variants:['clarify_amount'],fallback:'clarification_needed'},
-  clarify_type_quantity:{variants:[],fallback:null},
-  clarify_confirm_food:{variants:[],fallback:null}
+  clarify_type_quantity:{variants:['clarify_type_quantity'],fallback:'clarification_needed'},
+  clarify_confirm_food:{variants:['clarify_confirm_food'],fallback:'clarification_needed'}
 };
 let AI_RESPONSE_STATIC_CACHE={};
 let AI_RESPONSE_STATIC_AUDIO={};  // key → resolved audio URL (if file exists)
@@ -149,7 +149,7 @@ function getCachedAudioUrl(eventKey){
 }
 
 async function getCachedAudioUrlAsync(eventKey){
-  if(!AI_RESPONSE_STATIC_PROMISE) await loadStaticResponseCache();
+  await loadStaticResponseCache();
   const semantic=AI_RESPONSE_AUDIO_SEMANTICS[eventKey];
   if(semantic){
     const urls=semantic.variants.map(key=>AI_RESPONSE_STATIC_BASE+'audio/'+key+'.mp3');

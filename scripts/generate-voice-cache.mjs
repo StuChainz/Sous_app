@@ -154,6 +154,8 @@ const extraResponses = [
   ["clarify_which_one", "Which one?"],
   ["clarify_amount", "How much?"],
   ["clarify_type", "What type?"],
+  ["clarify_type_quantity", "What type and how much?"],
+  ["clarify_confirm_food", "Did you mean that?"],
   ["clarify_milk", "What type of milk?"],
   ["clarify_cheese", "What type of cheese?"],
   ["clarify_rice", "Cooked or dry?"],
