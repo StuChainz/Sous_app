@@ -17,6 +17,74 @@ app.use(express.static(__dirname));
 const REALTIME_MODEL = 'gpt-realtime-mini';
 const REALTIME_VOICE = 'marin';
 
+function clampConfidence(value) {
+  const confidence = String(value || '').toLowerCase().trim();
+  return ['low', 'medium', 'high'].includes(confidence) ? confidence : 'low';
+}
+
+function cleanNumber(value) {
+  const number = Number(value);
+  return Number.isFinite(number) && number > 0 ? number : 0;
+}
+
+function cleanNullableGrams(value) {
+  if (value === null || value === undefined || value === '') return null;
+  const number = Number(value);
+  return Number.isFinite(number) && number >= 0 ? number : null;
+}
+
+function normalisePhotoEstimate(parsed) {
+  const fallbackTotals = parsed && typeof parsed === 'object'
+    ? (parsed.totals || {})
+    : {};
+  const rawItems = Array.isArray(parsed && parsed.items) ? parsed.items : [];
+  const items = rawItems
+    .filter(item => item && typeof item === 'object')
+    .map(item => ({
+      name: String(item.name || 'Photo item').trim() || 'Photo item',
+      estimatedGrams: cleanNullableGrams(item.estimatedGrams),
+      calories: cleanNumber(item.calories),
+      protein: cleanNumber(item.protein),
+      carbs: cleanNumber(item.carbs),
+      fat: cleanNumber(item.fat),
+      confidence: clampConfidence(item.confidence || parsed.confidence),
+      notes: String(item.notes || '')
+    }));
+
+  if (!items.length) {
+    items.push({
+      name: String(parsed && parsed.mealName || 'Photo meal').trim() || 'Photo meal',
+      estimatedGrams: null,
+      calories: cleanNumber(fallbackTotals.calories || parsed && parsed.estimatedCalories),
+      protein: cleanNumber(fallbackTotals.protein || parsed && parsed.protein),
+      carbs: cleanNumber(fallbackTotals.carbs || parsed && parsed.carbs),
+      fat: cleanNumber(fallbackTotals.fat || parsed && parsed.fat),
+      confidence: clampConfidence(parsed && parsed.confidence),
+      notes: String(parsed && parsed.notes || '')
+    });
+  }
+
+  const rowTotals = items.reduce((totals, item) => ({
+    calories: totals.calories + item.calories,
+    protein: totals.protein + item.protein,
+    carbs: totals.carbs + item.carbs,
+    fat: totals.fat + item.fat
+  }), { calories: 0, protein: 0, carbs: 0, fat: 0 });
+
+  return {
+    mealName: String(parsed && parsed.mealName || 'Photo meal').trim() || 'Photo meal',
+    confidence: clampConfidence(parsed && parsed.confidence),
+    items,
+    totals: {
+      calories: Math.round(rowTotals.calories),
+      protein: Math.round(rowTotals.protein * 10) / 10,
+      carbs: Math.round(rowTotals.carbs * 10) / 10,
+      fat: Math.round(rowTotals.fat * 10) / 10
+    },
+    notes: String(parsed && parsed.notes || '')
+  };
+}
+
 function compactRealtimeFoods(foods) {
   if (!Array.isArray(foods)) return '';
   return foods
@@ -233,8 +301,9 @@ app.post('/api/photo-estimate', async (req, res) => {
       return res.status(502).json({ error: 'Invalid JSON returned by OpenAI.', raw: rawText });
     }
 
-    res.json(parsed);
+    res.json(normalisePhotoEstimate(parsed));
   } catch (err) {
+    console.error('[Sous Photo Estimate] error', err.message);
     res.status(500).json({ error: 'Photo estimate request failed.', detail: err.message });
   }
 });

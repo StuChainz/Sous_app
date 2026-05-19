@@ -963,10 +963,18 @@ async function handlePhotoEstimateFile(file){
       body:JSON.stringify({image})
     });
     const data=await res.json().catch(()=>({}));
-    if(!res.ok) throw new Error(data.error||'Photo estimate failed.');
+    if(!res.ok){
+      const detail=data.detail||data.error||'Photo estimate failed.';
+      throw new Error(detail);
+    }
     renderPhotoEstimateReview(data);
   }catch(e){
-    showPhotoEstimateModal({status:'Could not estimate this photo. Please try another photo or log the meal manually.',showForm:false});
+    console.warn('[Sous Photo Estimate]',e);
+    const detail=String(e&&e.message||'').trim();
+    const message=detail
+      ? `Could not estimate this photo: ${detail}`
+      : 'Could not estimate this photo. Please try another photo or log the meal manually.';
+    showPhotoEstimateModal({status:message,showForm:false});
   }
 }
 function saveReviewedPhotoEstimate(){
