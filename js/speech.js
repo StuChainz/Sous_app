@@ -1789,31 +1789,105 @@ function extractRealtimeActionText(event){
 function normalizeRealtimeSection(section){
   return ['breakfast','lunch','dinner','snacks','supplements'].includes(section)?section:null;
 }
+function extractRealtimeJsonObject(raw){
+  const text=String(raw||'').replace(/```(?:json)?/gi,'```').replace(/```/g,'').trim();
+  const start=text.indexOf('{');
+  if(start<0) return text;
+  let depth=0,inString=false,escape=false;
+  for(let i=start;i<text.length;i++){
+    const ch=text[i];
+    if(escape){escape=false;continue;}
+    if(ch==='\\'){escape=true;continue;}
+    if(ch==='"'){inString=!inString;continue;}
+    if(inString) continue;
+    if(ch==='{') depth++;
+    else if(ch==='}'){
+      depth--;
+      if(depth===0) return text.slice(start,i+1);
+    }
+  }
+  return text.slice(start);
+}
+function parseRealtimeAction(raw){
+  const json=extractRealtimeJsonObject(raw);
+  try{return JSON.parse(json);}
+  catch(e){return null;}
+}
+function sanitizeRealtimeIngredient(ingredient){
+  if(!ingredient||typeof ingredient!=='object') return null;
+  const name=String(ingredient.name||'').trim();
+  if(!name) return null;
+  const quantity=ingredient.quantity==null||ingredient.quantity===''?null:Number(ingredient.quantity);
+  return{
+    name,
+    quantity:Number.isFinite(quantity)?quantity:null,
+    unit:ingredient.unit==null||ingredient.unit===''?null:String(ingredient.unit).trim()
+  };
+}
+function normalizeRealtimeAction(action){
+  if(!action||typeof action!=='object') return null;
+  const type=String(action.type||'').trim();
+  if(type==='cancel') return {type:'cancel'};
+  if(type==='clarify'){
+    return {type:'clarify',message:String(action.message||'').trim()};
+  }
+  if(type!=='log_ingredients') return null;
+  const ingredients=Array.isArray(action.ingredients)
+    ? action.ingredients.map(sanitizeRealtimeIngredient).filter(Boolean)
+    : [];
+  return{
+    type:'log_ingredients',
+    section:normalizeRealtimeSection(action.section),
+    transcript:String(action.transcript||'').trim(),
+    ingredients,
+    needsConfirmation:true
+  };
+}
+function realtimeIngredientPhrase(ingredient){
+  const name=String(ingredient?.name||'').trim();
+  if(!name) return '';
+  const qty=ingredient.quantity==null?'':String(ingredient.quantity).trim();
+  let unit=String(ingredient.unit||'').trim();
+  const normName=typeof normaliseLogText==='function'?normaliseLogText(name):name.toLowerCase();
+  const normUnit=typeof normaliseLogText==='function'?normaliseLogText(unit):unit.toLowerCase();
+  if(normUnit&&normName&&(normName===normUnit||normName===normUnit.replace(/s$/,'')||normUnit===normName.replace(/s$/,''))){
+    unit='';
+  }
+  return [qty,unit,name].filter(Boolean).join(' ');
+}
 function transcriptFromRealtimeAction(action){
-  const cleaned=String(action.transcript||'').trim();
-  if(cleaned) return cleaned;
-  if(!Array.isArray(action.ingredients)) return '';
-  return action.ingredients.map(ing=>{
-    const name=String(ing.name||'').trim();
-    if(!name) return '';
-    const qty=ing.quantity==null?'':String(ing.quantity).trim();
-    const unit=String(ing.unit||'').trim();
-    return [qty,unit,name].filter(Boolean).join(' ');
-  }).filter(Boolean).join(' and ');
+  const ingredientText=Array.isArray(action.ingredients)
+    ? action.ingredients.map(realtimeIngredientPhrase).filter(Boolean).join(' and ')
+    : '';
+  return ingredientText||String(action.transcript||'').trim();
+}
+function forceRealtimeReviewResults(results){
+  return (results||[]).map(result=>{
+    if(!result||result.command) return result;
+    return {...result,needsConfirm:true,weightSpecified:false};
+  });
+}
+function routeRealtimeTranscriptToReview(transcript){
+  const text=String(transcript||'').trim();
+  if(!text) return false;
+  const results=typeof parseText==='function'?parseText(text):[];
+  const forced=forceRealtimeReviewResults(results);
+  handleParsed(forced,text);
+  return Array.isArray(forced)&&forced.some(item=>item&&!item.command);
 }
 function handleRealtimeActionText(text){
   const raw=String(text||'').trim();
   if(!raw) return;
-  let action=null;
-  try{
-    const json=raw.match(/\{[\s\S]*\}/)?.[0]||raw;
-    action=JSON.parse(json);
-  }catch(e){
-    console.log('[Sous Realtime] error', 'Invalid action JSON');
-    showVoiceCorrection(raw);
+  let action=normalizeRealtimeAction(parseRealtimeAction(raw));
+  if(!action){
+    console.log('[Sous Realtime] error', 'Invalid action JSON; using transcript parser');
+    const fallback=raw.replace(/```(?:json)?|```/gi,'').trim();
+    const el=document.getElementById('transcript-text');
+    if(el&&fallback) el.textContent='"'+fallback+'"';
+    routeRealtimeTranscriptToReview(fallback);
+    stopSousRealtimeVoice(false);
     return;
   }
-  if(!action||!action.type) return;
   console.log('[Sous Realtime] action received');
   if(action.type==='cancel'){
     stopSousRealtimeVoice(true);
@@ -1822,9 +1896,13 @@ function handleRealtimeActionText(text){
   if(action.type==='clarify'){
     const msg=String(action.message||'').trim();
     const uiMsg=msg||(typeof getCachedResponse==='function'?getCachedResponse('clarification_needed'):'I need one more detail.');
+    const el=document.getElementById('transcript-text');
+    if(el) el.textContent=uiMsg;
     showToast(uiMsg,2600);
+    stopSousRealtimeVoice(false);
     speakCachedResponse('clarification_needed',{},()=>{
-      if(msg&&msg.length<80) speak(msg);
+      const isSingleSentence=!/[.!?]\s+\S/.test(msg);
+      if(msg&&msg.length<80&&isSingleSentence) speak(msg);
     });
     return;
   }
@@ -1833,6 +1911,7 @@ function handleRealtimeActionText(text){
     if(section) currentMealSection=section;
     const transcript=transcriptFromRealtimeAction(action);
     if(!transcript){
+      stopSousRealtimeVoice(false);
       speakCachedResponse('clarification_needed');
       return;
     }
@@ -1840,7 +1919,8 @@ function handleRealtimeActionText(text){
     if(el) el.textContent='"'+transcript+'"';
     speakCachedResponse(action.ingredients&&action.ingredients.length?'added':'logged');
     _suppressNextConfirmSpeechUntil=Date.now()+3000;
-    handleTranscript(transcript,transcript);
+    routeRealtimeTranscriptToReview(transcript);
+    stopSousRealtimeVoice(false);
   }
 }
 function handleRealtimeServerEvent(event){
