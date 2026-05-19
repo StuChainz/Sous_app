@@ -9,7 +9,19 @@ const app = express();
 const PORT = process.env.PORT || 3001;
 
 app.use(express.json({ limit: '6mb' }));
-app.use(cors({ origin: /^http:\/\/localhost(:\d+)?$/ }));
+const allowedOrigins = [
+  /^http:\/\/localhost(:\d+)?$/,
+  'https://stuchainz.github.io'
+];
+app.use(cors({
+  origin(origin, cb) {
+    if (!origin) return cb(null, true);
+    const ok = allowedOrigins.some(allowed => (
+      allowed instanceof RegExp ? allowed.test(origin) : allowed === origin
+    ));
+    return ok ? cb(null, true) : cb(new Error('Not allowed by CORS'));
+  }
+}));
 
 // Serve the frontend from the project root.
 app.use(express.static(__dirname));

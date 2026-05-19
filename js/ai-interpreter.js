@@ -7,7 +7,9 @@
 // app.js remains responsible for confirmation, conversion, and saving.
 
 // Default to the local proxy. Set window.SOUS_AI_CONFIG.endpoint to call OpenAI directly (requires CORS support).
-const DEFAULT_AI_ENDPOINT='/api/interpret';
+const DEFAULT_AI_ENDPOINT=typeof window!=='undefined'&&typeof window.sousApiUrl==='function'
+  ? window.sousApiUrl('/api/interpret')
+  : '/api/interpret';
 const DEFAULT_AI_MODEL='gpt-4.1-mini';
 
 function fallbackCreateIngredientDraft(input={}){
@@ -105,7 +107,7 @@ async function interpretMealWithAI({transcript='',section=null,countryCode=null,
 
   // Only require an API key when calling OpenAI directly (absolute URL).
   // The local proxy (/api/interpret) holds the key server-side.
-  const isProxy=config.endpoint.startsWith('/');
+  const isProxy=config.endpoint.startsWith('/')||config.endpoint.includes('/api/interpret');
   if(!isProxy&&!config.apiKey) return emptyAIDraft(section,makeMealDraft);
 
   try{

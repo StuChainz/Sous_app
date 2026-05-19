@@ -2434,7 +2434,8 @@ async function startSousRealtimeVoice(){
   const inp=document.getElementById('text-input'); if(inp) inp.value='';
   setMicState('recording');
   try{
-    const tokenRes=await fetch('/api/realtime/session',{
+    const realtimeSessionUrl=typeof window.sousApiUrl==='function'?window.sousApiUrl('/api/realtime/session'):'/api/realtime/session';
+    const tokenRes=await fetch(realtimeSessionUrl,{
       method:'POST',
       headers:{'Content-Type':'application/json'},
       body:JSON.stringify({

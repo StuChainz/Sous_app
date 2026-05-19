@@ -1451,6 +1451,10 @@ html,body{height:100%;height:var(--app-height);min-height:-webkit-fill-available
 
 <!-- Chart.js CDN -->
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4/dist/chart.umd.min.js"></script>
+<script>
+window.SOUS_API_BASE=location.hostname.endsWith('github.io')?'https://sous-app.onrender.com':'';
+window.sousApiUrl=path=>`${window.SOUS_API_BASE}${path}`;
+</script>
 
 <!-- App scripts — load order matters -->
 <script src="js/theme.js?v=8"></script>
@@ -1459,12 +1463,12 @@ html,body{height:100%;height:var(--app-height);min-height:-webkit-fill-available
 <script src="js/food-data.js?v=11"></script>
 <script src="js/parser.js?v=11"></script>
 <script src="js/ai-response-cache.js?v=2"></script>
-<script src="js/speech.js?v=11"></script>
+<script src="js/speech.js?v=12"></script>
 <script src="js/history.js?v=10"></script>
 <script src="js/profile.js?v=8"></script>
 <script src="js/recipes.js?v=8"></script>
-<script src="js/app.js?v=12"></script>
-<script src="js/ai-interpreter.js?v=1"></script>
+<script src="js/app.js?v=13"></script>
+<script src="js/ai-interpreter.js?v=2"></script>
 
 </body>
 </html>

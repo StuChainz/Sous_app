@@ -957,7 +957,8 @@ async function handlePhotoEstimateFile(file){
   showPhotoEstimateModal({status:'Estimating from photo...',showForm:false});
   try{
     const image=await resizePhotoForEstimate(file);
-    const res=await fetch('/api/photo-estimate',{
+    const photoEstimateUrl=typeof window.sousApiUrl==='function'?window.sousApiUrl('/api/photo-estimate'):'/api/photo-estimate';
+    const res=await fetch(photoEstimateUrl,{
       method:'POST',
       headers:{'Content-Type':'application/json'},
       body:JSON.stringify({image})
