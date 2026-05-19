@@ -410,7 +410,6 @@ function voiceRestartBlockReason(){
   if(voiceCurrentlyListening||isRecording) return 'already listening';
   if(processingTranscript||voiceSessionState==='processing') return 'processing transcript';
   if(isSpeaking||voiceSessionState==='speaking') return 'speaking';
-  if(clarificationState?.active) return 'clarification active';
   if(clarificationRec) return 'clarification active';
   const correction=document.getElementById('voice-correct-bar');
   if(correction&&correction.style.display!=='none') return 'clarification active';
@@ -1918,13 +1917,21 @@ function speak(text,onEnd,opts={}){
 }
 function speakThenListen(text,onResult,cacheKey=null,data={}){
   pauseAlwaysOn();
-  const done=()=>setTimeout(()=>startClarificationListen(onResult),200);
+  const done=()=>resumeListeningAfterPrompt(onResult);
   if(cacheKey) speakCachedResponse(cacheKey,data,done);
   else speak(text,done);
 }
+function resumeListeningAfterPrompt(onResult,delay=260){
+  if(onResult===handleClarification&&voiceSessionActive){
+    voiceDebugTrace('clarification_listen_scheduled',{route:voiceSessionUseRealtime?'realtime_session':'tap_session',delay});
+    scheduleVoiceSessionRestart(delay);
+    return;
+  }
+  setTimeout(()=>startClarificationListen(onResult),delay);
+}
 function speakRecoveryThenListen(onResult){
   pauseAlwaysOn();
-  speakRecoveryCue(()=>setTimeout(()=>startClarificationListen(onResult),200));
+  speakRecoveryCue(()=>resumeListeningAfterPrompt(onResult));
 }
 
 function speakCachedResponse(key,data={},onEnd){
@@ -2954,7 +2961,7 @@ function buildTapRec(){
     };
     if(clarificationState?.active){
       voiceDebugTrace('transcript_routed',{route:'clarification',transcript});
-      Promise.resolve(handleClarification(transcript)).then(done).catch(e=>{console.warn('[Sous Voice] clarification error',e);done();});
+      Promise.resolve(handleClarification(transcript)).then(()=>done({restart:false})).catch(e=>{console.warn('[Sous Voice] clarification error',e);done({restart:false});});
     } else {
       const recoveryIssue=transcriptRecoveryIssue(transcript,isLow);
       if(maybeRecoverVoiceTranscript(recoveryIssue,transcript)){
@@ -3445,7 +3452,11 @@ function startTapRec(opts={}){
   }
 }
 function startClarificationListen(onResult){
-  if(!SR) return;
+  voiceDebugTrace('clarification_listen_start_requested',{route:'short_recognizer',active:!!clarificationState?.active});
+  if(!SR){
+    voiceDebugTrace('voice_error',{source:'clarification_start',error:'speech_recognition_unavailable'});
+    return;
+  }
   if(clarificationRec){
     console.log('[Sous Voice] duplicate recognizer blocked');
     logVoiceState('duplicate recognizer blocked',{source:'clarification'});
@@ -3456,9 +3467,10 @@ function startClarificationListen(onResult){
   stopSousRealtimeVoice(false);
   const r=new SR(); r.lang='en-GB'; r.interimResults=false; r.continuous=false; r.maxAlternatives=3;
   clarificationRec=r;
-  r.onstart=()=>{voiceCurrentlyListening=true;isRecording=true;setVoiceSessionState('listening','clarification recognition started');setMicState('recording');};
-  r.onresult=e=>{const t=e.results[0][0].transcript;const el=document.getElementById('transcript-text');if(el)el.textContent='"'+t+'"';voiceCurrentlyListening=false;isRecording=false;clarificationRec=null;setMicState('idle');if(voiceSessionState==='listening')setVoiceSessionState(voiceSessionActive?'restarting':'idle','clarification result');onResult(t);if(onResult!==handleClarification&&!clarificationState?.active)maybeResumeVoiceSession(400);};
+  r.onstart=()=>{voiceDebugTrace('clarification_listen_started',{route:'short_recognizer'});voiceCurrentlyListening=true;isRecording=true;setVoiceSessionState('listening','clarification recognition started');setMicState('recording');};
+  r.onresult=e=>{const t=e.results[0][0].transcript;voiceDebugTrace('clarification_listen_result',{route:'short_recognizer',transcript:t});const el=document.getElementById('transcript-text');if(el)el.textContent='"'+t+'"';voiceCurrentlyListening=false;isRecording=false;clarificationRec=null;setMicState('idle');if(voiceSessionState==='listening')setVoiceSessionState(voiceSessionActive?'restarting':'idle','clarification result');onResult(t);if(onResult!==handleClarification&&!clarificationState?.active)maybeResumeVoiceSession(400);};
   r.onerror=e=>{
+    voiceDebugTrace('voice_error',{source:'clarification_recognition',error:e?.error||'recognition_error'});
     voiceCurrentlyListening=false;
     isRecording=false;
     clarificationRec=null;
@@ -3470,7 +3482,7 @@ function startClarificationListen(onResult){
   };
   r.onend=()=>{voiceCurrentlyListening=false;isRecording=false;clarificationRec=null;setMicState('idle');if(voiceSessionState==='listening')setVoiceSessionState(voiceSessionActive?'restarting':'idle','clarification ended');};
   try{r.start();}
-  catch(e){voiceCurrentlyListening=false;isRecording=false;clarificationRec=null;setVoiceSessionState('error','clarification recognition start failed',{error:e.name||e.message||'start failed'});maybeResumeVoiceSession(400);}
+  catch(e){voiceDebugTrace('voice_error',{source:'clarification_start',error:e.name||e.message||'start failed'});voiceCurrentlyListening=false;isRecording=false;clarificationRec=null;setVoiceSessionState('error','clarification recognition start failed',{error:e.name||e.message||'start failed'});maybeResumeVoiceSession(400);}
 }
 function buildAlwaysOn(){
   if(!SR) return null;
