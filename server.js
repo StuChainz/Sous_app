@@ -2,16 +2,47 @@
 // Keeps the OpenAI API key server-side and avoids CORS issues from the browser.
 // The frontend calls /api/interpret instead of OpenAI directly.
 
+const fs = require('fs');
+const path = require('path');
 const express = require('express');
 const cors = require('cors');
 
+function loadLocalEnv() {
+  const envPath = path.join(__dirname, '.env');
+  if (!fs.existsSync(envPath)) return;
+
+  const lines = fs.readFileSync(envPath, 'utf8').split(/\r?\n/);
+  lines.forEach(line => {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#')) return;
+
+    const eqIndex = trimmed.indexOf('=');
+    if (eqIndex < 1) return;
+
+    const key = trimmed.slice(0, eqIndex).trim();
+    let value = trimmed.slice(eqIndex + 1).trim();
+    if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+      value = value.slice(1, -1);
+    }
+
+    if (!process.env[key]) process.env[key] = value;
+  });
+}
+
+loadLocalEnv();
+
 const app = express();
 const PORT = process.env.PORT || 3001;
+const HOST = process.env.HOST || '';
 
 app.use(express.json({ limit: '6mb' }));
 const allowedOrigins = [
   /^http:\/\/localhost(:\d+)?$/,
-  'https://stuchainz.github.io'
+  'https://stuchainz.github.io',
+  ...(process.env.ALLOWED_ORIGINS || '')
+    .split(',')
+    .map(origin => origin.trim())
+    .filter(Boolean)
 ];
 app.use(cors({
   origin(origin, cb) {
@@ -22,6 +53,15 @@ app.use(cors({
     return ok ? cb(null, true) : cb(new Error('Not allowed by CORS'));
   }
 }));
+
+app.get('/api/health', (req, res) => {
+  res.json({
+    ok: true,
+    service: 'sous-api',
+    openaiKeyConfigured: Boolean(process.env.OPENAI_API_KEY),
+    timestamp: new Date().toISOString()
+  });
+});
 
 // Serve the frontend from the project root.
 app.use(express.static(__dirname));
@@ -421,6 +461,7 @@ app.post('/api/interpret', async (req, res) => {
   }
 });
 
-app.listen(PORT, () => {
-  console.log(`Sous proxy server running at http://localhost:${PORT}`);
+app.listen(PORT, HOST || undefined, () => {
+  const displayHost = HOST || 'localhost';
+  console.log(`Sous proxy server running at http://${displayHost}:${PORT}`);
 });

@@ -65,5 +65,24 @@ unless explicitly requested.
 # Running the app
 
 ```bash
-cd "/Users/stu/Downloads/Sous App/Sous"
-python3 -m http.server 8732
+cd "/Users/stu/Documents/Sous App"
+npm start
+```
+
+The Node server serves both the frontend and the API proxy at `http://localhost:3001`.
+For local API-backed testing, create an uncommitted `.env` file based on `.env.example`:
+
+```bash
+OPENAI_API_KEY=...
+```
+
+Useful checks:
+
+```bash
+npm run check:api
+npm run check:api:openai
+```
+
+Phone-first testing workflow:
+- While the laptop is awake, run `npm start` and expose `http://localhost:3001` through a temporary HTTPS tunnel such as Cloudflare Tunnel, then open that tunnel URL on the phone.
+- For laptop-asleep testing, use Codex Cloud against GitHub, deploy to the staging branch/site, and test the GitHub Pages URL on the phone against the Render API.

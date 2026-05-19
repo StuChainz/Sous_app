@@ -3,7 +3,9 @@
   "version": "1.0.0",
   "type": "commonjs",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "check:api": "node scripts/smoke-api.mjs",
+    "check:api:openai": "node scripts/smoke-api.mjs --openai"
   },
   "dependencies": {
     "cors": "^2.8.5",
