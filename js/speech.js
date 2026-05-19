@@ -317,18 +317,50 @@ function populateCustomUnitFields(prefix,unit){
   f.carbs.value=unit?.nutritionPerUnit?.carbs??'';
   f.fat.value=unit?.nutritionPerUnit?.fat??'';
 }
+// ─────────────────────────────────────────────
+// SHARED INGREDIENT ADDITION — single pathway
+// All flows that push an ingredient into the live
+// meal array MUST go through this function.
+// ─────────────────────────────────────────────
+function addIngredientToMeal(item, options = {}) {
+  if (!item) return null;
+  const source = options.source || 'unknown';
+  const skipSnapshot = !!options.skipSnapshot;
+  const skipPersist = !!options.skipPersist;
+  const applyOverride = !!options.applyOverride;
+
+  // Assign a stable ID if the item doesn't already have one
+  if (!item.id) item.id = nextIngId++;
+
+  // Normalise serving fields (idempotent, safe to run every time)
+  if (typeof syncServingFromWeight === 'function') syncServingFromWeight(item);
+
+  // Apply per-food macro overrides only when the caller opts in
+  if (applyOverride && typeof applyFoodOverride === 'function') applyFoodOverride(item);
+
+  // Snapshot before mutating meal (skip for batch callers that snapshot once)
+  if (!skipSnapshot) snapshotMeal();
+
+  // ── THE SINGLE meal.push ──
+  meal.push(item);
+
+  console.log('[Sous Meal] ingredient added via shared pathway');
+  console.log('[Sous Meal] source:', source);
+
+  // Persist draft (skip for batch callers that persist once after the loop)
+  if (!skipPersist) _persistDraft();
+
+  return item;
+}
+
 function autoAddItem(item){
-  syncServingFromWeight(item);
-  applyFoodOverride(item);
-  snapshotMeal(); meal.push(item); _persistDraft();
+  addIngredientToMeal(item, {source:'voice', applyOverride:true});
 }
 function autoAddClearItems(items){
   if(!items.length) return;
   snapshotMeal();
   items.forEach(item=>{
-    syncServingFromWeight(item);
-    applyFoodOverride(item);
-    meal.push(item);
+    addIngredientToMeal(item, {source:'voice', applyOverride:true, skipSnapshot:true, skipPersist:true});
   });
   _persistDraft();
   renderCurrentMeal();
@@ -1074,9 +1106,7 @@ function renderRecentIngredients(){
 }
 function addIngredientFromRecent(r){
   if(!r||!r.name) return;
-  snapshotMeal();
-  meal.push({
-    id:nextIngId++,
+  addIngredientToMeal({
     name:r.name,
     weight:r.weight,
     serving:r.serving?{...r.serving}:undefined,
@@ -1087,8 +1117,7 @@ function addIngredientFromRecent(r){
     fibre:Math.round(Number(r.fibre||0)*10)/10,
     icon:r.icon||'ti-clipboard',
     type:r.type||'solid',
-  });
-  _persistDraft();
+  }, {source:'recent'});
   showToast('Added '+r.name+' ✓');
   renderCurrentMeal();
   updateHome();
@@ -1331,8 +1360,7 @@ function doConfirm(){
       }
     }
   }
-  syncServingFromWeight(pendingFood);
-  snapshotMeal(); meal.push(pendingFood); _persistDraft();
+  addIngredientToMeal(pendingFood, {source:'voice'});
   _confirmManualMacros=false;
   const name=pendingFood.name;
   speakCachedResponse('added',{},()=>{
@@ -1357,8 +1385,8 @@ function commitQuantity(grams){
   if(!pendingFood||!pendingFood.rawFood) return;
   const food=pendingFood.rawFood;
   const r=grams/food.w;
-  const item=syncServingFromWeight({id:nextIngId++,name:food.name,weight:Math.round(grams),kcal:Math.round(food.kcal*r),protein:Math.round(food.p*r*10)/10,carbs:Math.round(food.c*r*10)/10,fat:Math.round(food.f*r*10)/10,fibre:Math.round((food.fi||0)*r*10)/10,icon:food.icon,type:food.type||'solid',rawFood:food});
-  snapshotMeal(); meal.push(item); _persistDraft();
+  const item={name:food.name,weight:Math.round(grams),kcal:Math.round(food.kcal*r),protein:Math.round(food.p*r*10)/10,carbs:Math.round(food.c*r*10)/10,fat:Math.round(food.f*r*10)/10,fibre:Math.round((food.fi||0)*r*10)/10,icon:food.icon,type:food.type||'solid',rawFood:food};
+  addIngredientToMeal(item, {source:'voice'});
   showToast('Added '+item.name+' '+Math.round(grams)+'g ✓');
   speakCachedResponse('added');
   pendingFood=null;
@@ -1394,7 +1422,10 @@ function commitUsualFromQuantityPrompt(){
   if(!usual){showToast('No usual meal found for this');return;}
   snapshotMeal();
   if(typeof addMealToCurrent==='function') addMealToCurrent(usual);
-  else (usual.ingredients||[]).forEach(ing=>meal.push({...ing,id:nextIngId++}));
+  else {
+    (usual.ingredients||[]).forEach(ing=>addIngredientToMeal({...ing}, {source:'repeat', skipSnapshot:true, skipPersist:true}));
+    _persistDraft();
+  }
   showToast('Added '+usual.name+' ✓');
   speakCachedResponse('added');
   pendingFood=null;
@@ -1599,8 +1630,7 @@ function commitMultiConfirm(){
       const r=origW>0?w/origW:1;
       item={...ri,weight:w,kcal:Math.round((ri.kcal||0)*r),protein:Math.round((ri.protein||0)*r*10)/10,carbs:Math.round((ri.carbs||0)*r*10)/10,fat:Math.round((ri.fat||0)*r*10)/10,fibre:Math.round((ri.fibre||0)*r*10)/10};
     }
-    syncServingFromWeight(item);
-    item.id=nextIngId++; meal.push(item);
+    addIngredientToMeal(item, {source:'voice', skipSnapshot:true, skipPersist:true});
   });
   _persistDraft();
   if(overrideCandidate){_pendingOverride=overrideCandidate;setTimeout(()=>_showOverridePrompt(overrideCandidate.name),600);}
@@ -1798,10 +1828,7 @@ function addManualIngredient(){
       const r=grams/(modalSelectedFood.w||100);
       newItem={id:nextIngId++,name:modalSelectedFood.name,weight:Math.round(grams),kcal:Math.round(modalSelectedFood.kcal*r),protein:Math.round(modalSelectedFood.p*r*10)/10,carbs:Math.round(modalSelectedFood.c*r*10)/10,fat:Math.round(modalSelectedFood.f*r*10)/10,fibre:Math.round((modalSelectedFood.fi||0)*r*10)/10,icon:modalSelectedFood.icon,type:modalSelectedFood.type||'solid',rawFood:modalSelectedFood};
     }
-    applyFoodOverride(newItem);
-    syncServingFromWeight(newItem);
-    snapshotMeal(); meal.push(newItem);
-    _persistDraft();
+    addIngredientToMeal(newItem, {source:'manual', applyOverride:true});
     const foodName=modalSelectedFood.name;
     showToast('Added '+foodName+' ✓');
     if(newItem.weight){
@@ -1830,9 +1857,12 @@ function addManualIngredient(){
     const unit=unitResult.unit||getServingUnitForFood(name);
     const unitItem=unit?buildItemFromFoodServing(customFood||{name,w:100,kcal:kcalPer100,p:proteinPer100,c:carbsPer100,f:fatPer100,fi:fibrePer100,icon:'ti-clipboard',type:foodType},1,unit):null;
     const r=serving/100;
-    snapshotMeal();
-    meal.push(unitItem?{...unitItem,id:nextIngId++}:{id:nextIngId++,name,weight:serving,kcal:Math.round(kcalPer100*r),protein:Math.round(proteinPer100*r*10)/10,carbs:Math.round(carbsPer100*r*10)/10,fat:Math.round(fatPer100*r*10)/10,fibre:Math.round(fibrePer100*r*10)/10,icon:'ti-clipboard',type:foodType,rawFood:customFood||undefined});
-    _persistDraft();
+    addIngredientToMeal(
+      unitItem
+        ? {...unitItem}
+        : {name,weight:serving,kcal:Math.round(kcalPer100*r),protein:Math.round(proteinPer100*r*10)/10,carbs:Math.round(carbsPer100*r*10)/10,fat:Math.round(fatPer100*r*10)/10,fibre:Math.round(fibrePer100*r*10)/10,icon:'ti-clipboard',type:foodType,rawFood:customFood||undefined},
+      {source:'manual'}
+    );
     showToast('Saved & added '+name+' ✓');
   }
   closeAddModal();
@@ -2715,7 +2745,7 @@ function wireLogButtons(){
   document.getElementById('qty-input').addEventListener('keydown',e=>{if(e.key==='Enter'){const g=parseFloat(e.target.value);if(g&&g>0)commitQuantity(g);}});
   document.getElementById('qty-default-btn').addEventListener('click',()=>{
     if(!pendingFood) return;
-    snapshotMeal(); meal.push(syncServingFromWeight({...pendingFood,id:nextIngId++})); _persistDraft();
+    addIngredientToMeal({...pendingFood}, {source:'voice'});
     showToast('Added '+pendingFood.name+' ✓');
     speakCachedResponse('added');
     pendingFood=null;

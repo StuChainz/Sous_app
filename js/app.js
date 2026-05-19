@@ -1224,7 +1224,7 @@ function addMealToCurrent(sourceMeal){
   if(!sourceMeal||!sourceMeal.ingredients||!sourceMeal.ingredients.length) return;
   snapshotMeal();
   sourceMeal.ingredients.forEach(ing=>{
-    meal.push({...ing,id:nextIngId++});
+    addIngredientToMeal({...ing}, {source:'repeat', skipSnapshot:true, skipPersist:true});
   });
   currentMealSection=sourceMeal.section||currentMealSection;
   if(typeof _persistDraft==='function') _persistDraft();
