@@ -729,6 +729,7 @@ function logUsualMealByIndex(section,idx){
 }
 
 let _photoEstimateDraft=null;
+let _photoEstimatePortion=1;
 
 function photoEstimateSectionDefault(){
   return typeof getDefaultQuickAddSection==='function'
@@ -788,26 +789,162 @@ function roundMacro(n){
   if(!Number.isFinite(val)||val<0) return 0;
   return Math.round(val*10)/10;
 }
-function renderPhotoEstimateReview(estimate){
-  _photoEstimateDraft=estimate;
-  document.getElementById('photo-meal-name').value=estimate.mealName||'Restaurant meal';
-  document.getElementById('photo-meal-section').value=photoEstimateSectionDefault();
-  document.getElementById('photo-kcal').value=Math.round(Number(estimate.estimatedCalories)||0);
-  document.getElementById('photo-protein').value=roundMacro(estimate.protein);
-  document.getElementById('photo-carbs').value=roundMacro(estimate.carbs);
-  document.getElementById('photo-fat').value=roundMacro(estimate.fat);
-  const items=document.getElementById('photo-items-list');
-  if(items){
-    const list=Array.isArray(estimate.items)?estimate.items:[];
-    const bits=list.slice(0,6).map(item=>{
-      const grams=item.estimatedGrams!=null?` · ${Math.round(Number(item.estimatedGrams)||0)}g`:'';
-      const kcal=item.calories!=null?` · ${Math.round(Number(item.calories)||0)} kcal`:'';
-      return `${item.name||'Item'}${grams}${kcal}`;
-    });
-    const confidence=estimate.confidence?`Confidence: ${estimate.confidence}`:'';
-    const notes=estimate.notes?estimate.notes:'';
-    items.textContent=[confidence,...bits,notes].filter(Boolean).join('\n');
+function photoEstimateEsc(value){
+  return String(value??'')
+    .replace(/&/g,'&amp;')
+    .replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;');
+}
+function photoEstimateTotalsFallback(estimate){
+  const totals=estimate?.totals||{};
+  return {
+    calories:Number(totals.calories??estimate?.estimatedCalories??0)||0,
+    protein:Number(totals.protein??estimate?.protein??0)||0,
+    carbs:Number(totals.carbs??estimate?.carbs??0)||0,
+    fat:Number(totals.fat??estimate?.fat??0)||0
+  };
+}
+function normalisePhotoEstimateItems(estimate){
+  const fallback=photoEstimateTotalsFallback(estimate);
+  const rawItems=Array.isArray(estimate?.items)?estimate.items:[];
+  const usable=rawItems.length?rawItems:[{
+    name:estimate?.mealName||'Photo meal',
+    estimatedGrams:null,
+    calories:fallback.calories,
+    protein:fallback.protein,
+    carbs:fallback.carbs,
+    fat:fallback.fat,
+    confidence:estimate?.confidence||'low',
+    notes:estimate?.notes||''
+  }];
+  return usable.map((item,idx)=>({
+    id:'photo_'+Date.now()+'_'+idx,
+    name:(item.name||'Photo item').trim()||'Photo item',
+    estimatedGrams:item.estimatedGrams!=null?Math.round(Number(item.estimatedGrams)||0):null,
+    calories:Math.round(Number(item.calories)||0),
+    protein:roundMacro(item.protein),
+    carbs:roundMacro(item.carbs),
+    fat:roundMacro(item.fat),
+    confidence:item.confidence||estimate?.confidence||'low',
+    notes:item.notes||''
+  }));
+}
+function photoEstimateTotalsFromItems(items){
+  return (items||[]).reduce((tot,item)=>({
+    calories:tot.calories+(Number(item.calories)||0),
+    protein:tot.protein+(Number(item.protein)||0),
+    carbs:tot.carbs+(Number(item.carbs)||0),
+    fat:tot.fat+(Number(item.fat)||0)
+  }),{calories:0,protein:0,carbs:0,fat:0});
+}
+function updatePhotoEstimateTotals(){
+  if(!_photoEstimateDraft) return;
+  const totals=photoEstimateTotalsFromItems(_photoEstimateDraft.items||[]);
+  const kcal=document.getElementById('photo-kcal');
+  const protein=document.getElementById('photo-protein');
+  const carbs=document.getElementById('photo-carbs');
+  const fat=document.getElementById('photo-fat');
+  if(kcal) kcal.value=Math.round(totals.calories);
+  if(protein) protein.value=roundMacro(totals.protein);
+  if(carbs) carbs.value=roundMacro(totals.carbs);
+  if(fat) fat.value=roundMacro(totals.fat);
+}
+function photoEstimateSyncRows(){
+  if(!_photoEstimateDraft||!Array.isArray(_photoEstimateDraft.items)) return;
+  _photoEstimateDraft.items.forEach(item=>{
+    const suffix=item.id;
+    const name=document.getElementById('photo-item-name-'+suffix);
+    const grams=document.getElementById('photo-item-grams-'+suffix);
+    const kcal=document.getElementById('photo-item-kcal-'+suffix);
+    const protein=document.getElementById('photo-item-protein-'+suffix);
+    const carbs=document.getElementById('photo-item-carbs-'+suffix);
+    const fat=document.getElementById('photo-item-fat-'+suffix);
+    if(name) item.name=name.value.trim();
+    if(grams) item.estimatedGrams=grams.value===''?null:Math.max(0,Math.round(Number(grams.value)||0));
+    if(kcal) item.calories=Math.max(0,Math.round(Number(kcal.value)||0));
+    if(protein) item.protein=roundMacro(protein.value);
+    if(carbs) item.carbs=roundMacro(carbs.value);
+    if(fat) item.fat=roundMacro(fat.value);
+  });
+  updatePhotoEstimateTotals();
+}
+function renderPhotoEstimateItemRows(){
+  const itemsEl=document.getElementById('photo-items-list');
+  if(!itemsEl||!_photoEstimateDraft) return;
+  const items=_photoEstimateDraft.items||[];
+  const confidence=_photoEstimateDraft.confidence?`Confidence: ${photoEstimateEsc(_photoEstimateDraft.confidence)}`:'';
+  const notes=_photoEstimateDraft.notes?photoEstimateEsc(_photoEstimateDraft.notes):'';
+  let html='';
+  if(confidence||notes){
+    html+=`<div style="margin-bottom:8px;color:var(--text-muted);white-space:pre-wrap;">${[confidence,notes].filter(Boolean).join('\n')}</div>`;
   }
+  if(!items.length){
+    html+=`<div style="background:var(--card);border:.5px solid var(--border);border-radius:8px;padding:10px;color:var(--text-muted);">No items found. Try another photo or log manually.</div>`;
+  }
+  items.forEach(item=>{
+    const id=item.id;
+    const grams=item.estimatedGrams==null?'':item.estimatedGrams;
+    const confidence=item.confidence?` · ${photoEstimateEsc(item.confidence)} confidence`:'';
+    const rowNote=item.notes?`<div style="font-size:11px;color:var(--text-muted);margin-top:5px;">${photoEstimateEsc(item.notes)}</div>`:'';
+    html+=`<div style="background:var(--card);border:.5px solid var(--border);border-radius:8px;padding:8px 10px;margin-bottom:8px;">`;
+    html+=`<div style="display:flex;gap:6px;align-items:center;margin-bottom:6px;">`;
+    html+=`<input type="text" class="custom-input" id="photo-item-name-${id}" value="${photoEstimateEsc(item.name)}" oninput="photoEstimateSyncRows()" aria-label="Food name" style="flex:1;min-width:0;padding:7px 8px;font-size:13px;">`;
+    html+=`<button type="button" onclick="deletePhotoEstimateItem('${id}')" title="Remove item" aria-label="Remove item" style="background:none;border:none;padding:4px 7px;cursor:pointer;color:var(--text-muted);font-size:16px;">✕</button>`;
+    html+=`</div>`;
+    html+=`<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:5px;margin-bottom:5px;">`;
+    html+=`<input type="number" class="custom-input" id="photo-item-grams-${id}" value="${grams}" min="0" placeholder="g" oninput="photoEstimateSyncRows()" aria-label="Estimated grams" style="padding:6px 7px;font-size:12px;">`;
+    html+=`<input type="number" class="custom-input" id="photo-item-kcal-${id}" value="${Math.round(Number(item.calories)||0)}" min="0" placeholder="kcal" oninput="photoEstimateSyncRows()" aria-label="Calories" style="padding:6px 7px;font-size:12px;">`;
+    html+=`<input type="number" class="custom-input" id="photo-item-protein-${id}" value="${roundMacro(item.protein)}" min="0" step="0.1" placeholder="protein" oninput="photoEstimateSyncRows()" aria-label="Protein" style="padding:6px 7px;font-size:12px;">`;
+    html+=`</div>`;
+    html+=`<div style="display:grid;grid-template-columns:1fr 1fr;gap:5px;">`;
+    html+=`<input type="number" class="custom-input" id="photo-item-carbs-${id}" value="${roundMacro(item.carbs)}" min="0" step="0.1" placeholder="carbs" oninput="photoEstimateSyncRows()" aria-label="Carbs" style="padding:6px 7px;font-size:12px;">`;
+    html+=`<input type="number" class="custom-input" id="photo-item-fat-${id}" value="${roundMacro(item.fat)}" min="0" step="0.1" placeholder="fat" oninput="photoEstimateSyncRows()" aria-label="Fat" style="padding:6px 7px;font-size:12px;">`;
+    html+=`</div>`;
+    html+=`<div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.04em;margin-top:5px;">grams · kcal · protein${confidence}</div>`;
+    html+=rowNote;
+    html+=`</div>`;
+  });
+  itemsEl.innerHTML=html;
+  updatePhotoEstimateTotals();
+}
+function setPhotoEstimatePortion(value){
+  if(!_photoEstimateDraft) return;
+  photoEstimateSyncRows();
+  const next=Number(value)||1;
+  const prev=Number(_photoEstimatePortion)||1;
+  const ratio=prev>0?next/prev:next;
+  _photoEstimatePortion=next;
+  _photoEstimateDraft.items=(_photoEstimateDraft.items||[]).map(item=>({
+    ...item,
+    estimatedGrams:item.estimatedGrams==null?null:Math.max(0,Math.round((Number(item.estimatedGrams)||0)*ratio)),
+    calories:Math.max(0,Math.round((Number(item.calories)||0)*ratio)),
+    protein:roundMacro((Number(item.protein)||0)*ratio),
+    carbs:roundMacro((Number(item.carbs)||0)*ratio),
+    fat:roundMacro((Number(item.fat)||0)*ratio)
+  }));
+  renderPhotoEstimateItemRows();
+}
+function deletePhotoEstimateItem(id){
+  if(!_photoEstimateDraft) return;
+  photoEstimateSyncRows();
+  _photoEstimateDraft.items=(_photoEstimateDraft.items||[]).filter(item=>item.id!==id);
+  renderPhotoEstimateItemRows();
+}
+function renderPhotoEstimateReview(estimate){
+  _photoEstimatePortion=1;
+  _photoEstimateDraft={
+    mealName:estimate?.mealName||'Restaurant meal',
+    confidence:estimate?.confidence||'low',
+    items:normalisePhotoEstimateItems(estimate),
+    totals:photoEstimateTotalsFallback(estimate),
+    notes:estimate?.notes||''
+  };
+  document.getElementById('photo-meal-name').value=estimate?.mealName||'Restaurant meal';
+  document.getElementById('photo-meal-section').value=photoEstimateSectionDefault();
+  const portion=document.getElementById('photo-portion-select');
+  if(portion) portion.value='1';
+  renderPhotoEstimateItemRows();
   showPhotoEstimateModal({showForm:true});
 }
 async function handlePhotoEstimateFile(file){
@@ -829,27 +966,39 @@ async function handlePhotoEstimateFile(file){
 }
 function saveReviewedPhotoEstimate(){
   if(!_photoEstimateDraft) return;
+  photoEstimateSyncRows();
   const section=document.getElementById('photo-meal-section')?.value||photoEstimateSectionDefault();
   const name=(document.getElementById('photo-meal-name')?.value||'Restaurant meal').trim()||'Restaurant meal';
+  const sourceItems=Array.isArray(_photoEstimateDraft.items)?_photoEstimateDraft.items:[];
+  const ingredients=sourceItems
+    .map((item,idx)=>({
+      id:Date.now()+idx,
+      name:(item.name||'Photo item').trim(),
+      weight:item.estimatedGrams!=null?Math.round(Number(item.estimatedGrams)||0):null,
+      kcal:Math.round(Number(item.calories)||0),
+      protein:roundMacro(item.protein),
+      carbs:roundMacro(item.carbs),
+      fat:roundMacro(item.fat),
+      fibre:0,
+      icon:'ti-camera',
+      type:'solid',
+      confidence:item.confidence||'low',
+      notes:item.notes||'',
+      source:'photo_estimate'
+    }))
+    .filter(item=>item.name);
+  if(!ingredients.length){
+    showToast('Keep at least one item before saving');
+    return;
+  }
+  const mt=sumMacros(ingredients);
   const totals={
-    kcal:Math.round(Number(document.getElementById('photo-kcal')?.value)||0),
-    protein:roundMacro(document.getElementById('photo-protein')?.value),
-    carbs:roundMacro(document.getElementById('photo-carbs')?.value),
-    fat:roundMacro(document.getElementById('photo-fat')?.value),
+    kcal:Math.round(mt.kcal),
+    protein:roundMacro(mt.protein),
+    carbs:roundMacro(mt.carbs),
+    fat:roundMacro(mt.fat),
     fibre:0
   };
-  const sourceItems=Array.isArray(_photoEstimateDraft.items)?_photoEstimateDraft.items:[];
-  const ingredients=sourceItems.length?sourceItems.map((item,idx)=>({
-    id:Date.now()+idx,
-    name:item.name||'Photo item',
-    weight:item.estimatedGrams!=null?Math.round(Number(item.estimatedGrams)||0):null,
-    kcal:item.calories!=null?Math.round(Number(item.calories)||0):null,
-    protein:item.protein!=null?roundMacro(item.protein):null,
-    carbs:item.carbs!=null?roundMacro(item.carbs):null,
-    fat:item.fat!=null?roundMacro(item.fat):null,
-    fibre:0,
-    source:'photo_estimate'
-  })):[{id:Date.now(),name,weight:null,kcal:totals.kcal,protein:totals.protein,carbs:totals.carbs,fat:totals.fat,fibre:0,source:'photo_estimate'}];
   const log=getLog();
   const date=selectedLogDate||localDateStr();
   if(!log[date]) log[date]={meals:[],totals:{kcal:0,protein:0,carbs:0,fat:0,fibre:0}};
@@ -861,6 +1010,7 @@ function saveReviewedPhotoEstimate(){
     source:'photo_estimate',
     confidence:_photoEstimateDraft.confidence||'low',
     notes:_photoEstimateDraft.notes||'',
+    portionScale:_photoEstimatePortion,
     ingredients,
     savedIngredients:ingredients,
     totals
@@ -870,6 +1020,7 @@ function saveReviewedPhotoEstimate(){
   saveLog(log);
   closePhotoEstimateModal();
   _photoEstimateDraft=null;
+  _photoEstimatePortion=1;
   showToast('Photo estimate saved',2400);
   renderHome();
 }
@@ -1185,6 +1336,7 @@ function initPhotoEstimate(){
   document.getElementById('photo-estimate-cancel-btn')?.addEventListener('click',closePhotoEstimateModal);
   document.getElementById('photo-estimate-modal')?.addEventListener('click',e=>{if(e.target===document.getElementById('photo-estimate-modal'))closePhotoEstimateModal();});
   document.getElementById('photo-estimate-save-btn')?.addEventListener('click',saveReviewedPhotoEstimate);
+  document.getElementById('photo-portion-select')?.addEventListener('change',e=>setPhotoEstimatePortion(e.target.value));
 }
 
 function init(){

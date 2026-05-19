@@ -1,21 +1,21 @@
 {
   "version": 1,
-  "type": "text-response-cache",
+  "type": "response-cache",
   "responses": {
-    "logged": "text/logged.json",
-    "added": "text/added.json",
-    "saved_to_breakfast": "text/saved_to_breakfast.json",
-    "saved_to_lunch": "text/saved_to_lunch.json",
-    "saved_to_dinner": "text/saved_to_dinner.json",
-    "saved_to_snacks": "text/saved_to_snacks.json",
-    "saved_to_supplements": "text/saved_to_supplements.json",
-    "deleted": "text/deleted.json",
-    "undone": "text/undone.json",
-    "done": "text/done.json",
-    "got_it": "text/got_it.json",
-    "realtime_ready": "text/realtime_ready.json",
-    "realtime_stopped": "text/realtime_stopped.json",
-    "realtime_error": "text/realtime_error.json",
-    "clarification_needed": "text/clarification_needed.json"
+    "logged":               { "text": "text/logged.json",               "audio": "audio/logged.mp3" },
+    "added":                { "text": "text/added.json",                "audio": "audio/added.mp3" },
+    "deleted":              { "text": "text/deleted.json",              "audio": "audio/deleted.mp3" },
+    "undone":               { "text": "text/undone.json",               "audio": "audio/undone.mp3" },
+    "done":                 { "text": "text/done.json",                 "audio": "audio/done.mp3" },
+    "got_it":               { "text": "text/got_it.json",               "audio": "audio/got_it.mp3" },
+    "saved_to_breakfast":   { "text": "text/saved_to_breakfast.json",   "audio": "audio/saved_to_breakfast.mp3" },
+    "saved_to_lunch":       { "text": "text/saved_to_lunch.json",       "audio": "audio/saved_to_lunch.mp3" },
+    "saved_to_dinner":      { "text": "text/saved_to_dinner.json",      "audio": "audio/saved_to_dinner.mp3" },
+    "saved_to_snacks":      { "text": "text/saved_to_snacks.json",      "audio": "audio/saved_to_snacks.mp3" },
+    "saved_to_supplements": { "text": "text/saved_to_supplements.json", "audio": "audio/saved_to_supplements.mp3" },
+    "clarification_needed": { "text": "text/clarification_needed.json", "audio": "audio/clarification_needed.mp3" },
+    "realtime_ready":       { "text": "text/realtime_ready.json",       "audio": "audio/realtime_ready.mp3" },
+    "realtime_stopped":     { "text": "text/realtime_stopped.json",     "audio": "audio/realtime_stopped.mp3" },
+    "realtime_error":       { "text": "text/realtime_error.json",       "audio": "audio/realtime_error.mp3" }
   }
 }

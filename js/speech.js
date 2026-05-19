@@ -863,15 +863,45 @@ function speakThenListen(text,onResult){
 }
 
 function speakCachedResponse(key,data={},onEnd){
-  const say=text=>{
-    if(!text) { if(onEnd) setTimeout(onEnd,0); return; }
+  try{
+    if(typeof localStorage!=='undefined'&&localStorage.getItem('sous_voice_feedback')==='0'){
+      if(onEnd) setTimeout(onEnd,0);
+      return;
+    }
+  }catch(e){}
+  const now=Date.now();
+  if(now-_lastSpeakAt<500){
+    console.log('[Sous Voice] skipped (debounce)');
+    if(onEnd) setTimeout(onEnd,0);
+    return;
+  }
+  const fallbackTTS=text=>{
+    if(!text){ if(onEnd) setTimeout(onEnd,0); return; }
     console.log('[Sous Voice] speaking:',key);
     speak(text,onEnd);
   };
-  const fallback=()=>say(typeof getCachedResponse==='function'?getCachedResponse(key,data):'');
-  if(typeof getCachedResponseAsync==='function'){
-    getCachedResponseAsync(key,data).then(say).catch(fallback);
-  } else fallback();
+  const tryAudio=(audioUrl,text)=>{
+    const audio=new Audio(audioUrl);
+    audio.onended=()=>{ if(onEnd) onEnd(); };
+    audio.onerror=()=>fallbackTTS(text);
+    _lastSpeakAt=Date.now();
+    console.log('[Sous Voice] speaking:',key);
+    audio.play().catch(()=>fallbackTTS(text));
+  };
+  const resolve=(text,audioUrl)=>{
+    if(audioUrl) tryAudio(audioUrl,text);
+    else fallbackTTS(text);
+  };
+  if(typeof getCachedAudioUrlAsync==='function'&&typeof getCachedResponseAsync==='function'){
+    Promise.all([
+      getCachedResponseAsync(key,data).catch(()=>''),
+      getCachedAudioUrlAsync(key).catch(()=>null)
+    ]).then(([text,audioUrl])=>resolve(text,audioUrl));
+  } else {
+    const text=typeof getCachedResponse==='function'?getCachedResponse(key,data):'';
+    const audioUrl=typeof getCachedAudioUrl==='function'?getCachedAudioUrl(key):null;
+    resolve(text,audioUrl);
+  }
 }
 
 // ═══════════════════════════════════════════

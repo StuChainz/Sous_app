@@ -33,6 +33,7 @@ const AI_RESPONSE_MAP={
 const AI_RESPONSE_STATIC_BASE='assets/voice-cache/';
 const AI_RESPONSE_RUNTIME_CACHE={};
 let AI_RESPONSE_STATIC_CACHE={};
+let AI_RESPONSE_STATIC_AUDIO={};  // key → resolved audio URL (if file exists)
 let AI_RESPONSE_STATIC_PROMISE=null;
 
 function cachedResponseValue(data,key){
@@ -61,16 +62,32 @@ async function loadStaticResponseCache(){
       const responses=manifest&&manifest.responses||{};
       const entries=await Promise.all(Object.keys(responses).map(async key=>{
         try{
-          const res=await fetch(AI_RESPONSE_STATIC_BASE+responses[key],{cache:'force-cache'});
+          // support both old string format and new {text, audio} object format
+          const entry=responses[key];
+          const textPath=typeof entry==='string'?entry:(entry&&entry.text);
+          const audioPath=entry&&typeof entry==='object'&&entry.audio?entry.audio:null;
+          const res=await fetch(AI_RESPONSE_STATIC_BASE+textPath,{cache:'force-cache'});
           if(!res.ok) return null;
           const data=await res.json();
-          return [key,String(data.text||'')];
+          const text=String(data.text||'');
+          // probe audio URL — only store if server confirms it exists
+          let audioUrl=null;
+          if(audioPath){
+            try{
+              const aRes=await fetch(AI_RESPONSE_STATIC_BASE+audioPath,{method:'HEAD',cache:'force-cache'});
+              if(aRes.ok) audioUrl=AI_RESPONSE_STATIC_BASE+audioPath;
+            }catch(e){}
+          }
+          return [key,text,audioUrl];
         }catch(e){return null;}
       }));
-      AI_RESPONSE_STATIC_CACHE=entries.reduce((acc,entry)=>{
-        if(entry&&entry[0]&&entry[1]) acc[entry[0]]=entry[1];
-        return acc;
-      },{});
+      AI_RESPONSE_STATIC_CACHE={};
+      AI_RESPONSE_STATIC_AUDIO={};
+      entries.forEach(entry=>{
+        if(!entry||!entry[0]) return;
+        if(entry[1]) AI_RESPONSE_STATIC_CACHE[entry[0]]=entry[1];
+        if(entry[2]) AI_RESPONSE_STATIC_AUDIO[entry[0]]=entry[2];
+      });
     }catch(e){}
     return AI_RESPONSE_STATIC_CACHE;
   })();
@@ -91,13 +108,24 @@ async function getCachedResponseAsync(eventKey,data={}){
   return getCachedResponse(eventKey,data);
 }
 
+function getCachedAudioUrl(eventKey){
+  return AI_RESPONSE_STATIC_AUDIO[eventKey]||null;
+}
+
+async function getCachedAudioUrlAsync(eventKey){
+  if(!AI_RESPONSE_STATIC_PROMISE) await loadStaticResponseCache();
+  return getCachedAudioUrl(eventKey);
+}
+
 if(typeof window!=='undefined'){
   window.AI_RESPONSE_MAP=AI_RESPONSE_MAP;
   window.AI_RESPONSE_RUNTIME_CACHE=AI_RESPONSE_RUNTIME_CACHE;
   window.getCachedResponse=getCachedResponse;
   window.getCachedResponseAsync=getCachedResponseAsync;
+  window.getCachedAudioUrl=getCachedAudioUrl;
+  window.getCachedAudioUrlAsync=getCachedAudioUrlAsync;
   window.setRuntimeCachedResponse=setRuntimeCachedResponse;
   window.loadStaticResponseCache=loadStaticResponseCache;
   loadStaticResponseCache();
 }
-if(typeof module!=='undefined') module.exports={AI_RESPONSE_MAP,getCachedResponse,getCachedResponseAsync,setRuntimeCachedResponse,loadStaticResponseCache};
+if(typeof module!=='undefined') module.exports={AI_RESPONSE_MAP,getCachedResponse,getCachedResponseAsync,getCachedAudioUrl,getCachedAudioUrlAsync,setRuntimeCachedResponse,loadStaticResponseCache};

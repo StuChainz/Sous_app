@@ -1187,22 +1187,31 @@ html,body{height:100%;height:var(--app-height);min-height:-webkit-fill-available
         <div class="custom-label-row" style="margin-bottom:10px;">
           <div class="custom-field-group">
             <div class="custom-field-label">Calories</div>
-            <input type="number" class="custom-input" id="photo-kcal" min="0">
+            <input type="number" class="custom-input" id="photo-kcal" min="0" readonly>
           </div>
           <div class="custom-field-group">
             <div class="custom-field-label">Protein (g)</div>
-            <input type="number" class="custom-input" id="photo-protein" min="0" step="0.1">
+            <input type="number" class="custom-input" id="photo-protein" min="0" step="0.1" readonly>
           </div>
         </div>
         <div class="custom-label-row" style="margin-bottom:10px;">
           <div class="custom-field-group">
             <div class="custom-field-label">Carbs (g)</div>
-            <input type="number" class="custom-input" id="photo-carbs" min="0" step="0.1">
+            <input type="number" class="custom-input" id="photo-carbs" min="0" step="0.1" readonly>
           </div>
           <div class="custom-field-group">
             <div class="custom-field-label">Fat (g)</div>
-            <input type="number" class="custom-input" id="photo-fat" min="0" step="0.1">
+            <input type="number" class="custom-input" id="photo-fat" min="0" step="0.1" readonly>
           </div>
+        </div>
+        <div class="custom-field-group" style="margin-bottom:10px;">
+          <div class="custom-field-label">Portion eaten</div>
+          <select class="custom-input" id="photo-portion-select">
+            <option value="1">Ate all</option>
+            <option value="0.75">Ate 3/4</option>
+            <option value="0.5">Ate 1/2</option>
+            <option value="0.25">Ate 1/4</option>
+          </select>
         </div>
         <div id="photo-items-list" style="font-size:12px;color:var(--text-muted);line-height:1.5;margin:8px 0 10px;"></div>
         <div style="font-size:12px;color:var(--text-muted);line-height:1.45;">Photo estimates are approximate. Portion size and hidden oils/sauces may be wrong.</div>

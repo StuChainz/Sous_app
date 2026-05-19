@@ -133,7 +133,10 @@ app.post('/api/photo-estimate', async (req, res) => {
   const prompt = [
     'Estimate restaurant meal nutrition from the photo.',
     'Return JSON only. Be conservative. If unsure, use low confidence.',
-    'Calories and macros are estimates for the visible edible meal only.'
+    'Break the visible edible meal into editable item-level rows.',
+    'For each item, estimate grams when visible enough; otherwise use null.',
+    'Calories and macros are estimates for the visible edible meal only.',
+    'Do not use meal history. Do not ask follow-up questions.'
   ].join('\n');
 
   try {
@@ -163,10 +166,6 @@ app.post('/api/photo-estimate', async (req, res) => {
               properties: {
                 mealName: { type: 'string' },
                 confidence: { type: 'string', enum: ['low', 'medium', 'high'] },
-                estimatedCalories: { type: 'number' },
-                protein: { type: 'number' },
-                carbs: { type: 'number' },
-                fat: { type: 'number' },
                 items: {
                   type: 'array',
                   items: {
@@ -175,17 +174,30 @@ app.post('/api/photo-estimate', async (req, res) => {
                     properties: {
                       name: { type: 'string' },
                       estimatedGrams: { type: ['number', 'null'] },
-                      calories: { type: ['number', 'null'] },
-                      protein: { type: ['number', 'null'] },
-                      carbs: { type: ['number', 'null'] },
-                      fat: { type: ['number', 'null'] }
+                      calories: { type: 'number' },
+                      protein: { type: 'number' },
+                      carbs: { type: 'number' },
+                      fat: { type: 'number' },
+                      confidence: { type: 'string', enum: ['low', 'medium', 'high'] },
+                      notes: { type: 'string' }
                     },
-                    required: ['name', 'estimatedGrams', 'calories', 'protein', 'carbs', 'fat']
+                    required: ['name', 'estimatedGrams', 'calories', 'protein', 'carbs', 'fat', 'confidence', 'notes']
                   }
+                },
+                totals: {
+                  type: 'object',
+                  additionalProperties: false,
+                  properties: {
+                    calories: { type: 'number' },
+                    protein: { type: 'number' },
+                    carbs: { type: 'number' },
+                    fat: { type: 'number' }
+                  },
+                  required: ['calories', 'protein', 'carbs', 'fat']
                 },
                 notes: { type: 'string' }
               },
-              required: ['mealName', 'confidence', 'estimatedCalories', 'protein', 'carbs', 'fat', 'items', 'notes']
+              required: ['mealName', 'confidence', 'items', 'totals', 'notes']
             }
           }
         }
