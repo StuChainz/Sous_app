@@ -31,6 +31,10 @@ const AI_RESPONSE_MAP={
   session_continuing:'Continuing.',
   session_resumed:'Session resumed.',
   got_it:'Got it.',
+  clarify_type:'What type?',
+  clarify_quantity:'How much?',
+  clarify_type_quantity:'What type and how much?',
+  clarify_confirm_food:'Did you mean {food}?',
   realtime_ready:'Realtime ready.',
   realtime_stopped:'Realtime stopped.',
   realtime_error:'Realtime is unavailable. Using standard voice.',
@@ -49,7 +53,11 @@ const AI_RESPONSE_AUDIO_SEMANTICS={
   recovery:{variants:['recovery_try_again','recovery_didnt_catch','recovery_say_again'],fallback:null},
   flow:{variants:['flow_go_ahead','flow_keep_going','flow_anything_else','flow_continue'],fallback:null},
   session_continuing:{variants:['session_continuing'],fallback:null},
-  session_resumed:{variants:['session_resumed'],fallback:null}
+  session_resumed:{variants:['session_resumed'],fallback:null},
+  clarify_type:{variants:['clarify_type'],fallback:'clarification_needed'},
+  clarify_quantity:{variants:['clarify_amount'],fallback:'clarification_needed'},
+  clarify_type_quantity:{variants:[],fallback:null},
+  clarify_confirm_food:{variants:[],fallback:null}
 };
 let AI_RESPONSE_STATIC_CACHE={};
 let AI_RESPONSE_STATIC_AUDIO={};  // key → resolved audio URL (if file exists)
