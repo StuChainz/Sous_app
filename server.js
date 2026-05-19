@@ -4,9 +4,33 @@
 
 const express = require('express');
 const cors = require('cors');
+const fs = require('fs');
+const path = require('path');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
+const ROOT_DIR = __dirname;
+
+function loadLocalEnv() {
+  const envPath = path.join(ROOT_DIR, '.env');
+  if (!fs.existsSync(envPath)) return;
+  const lines = fs.readFileSync(envPath, 'utf8').split(/\r?\n/);
+  lines.forEach(line => {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#')) return;
+    const match = trimmed.match(/^([A-Za-z_][A-Za-z0-9_]*)=(.*)$/);
+    if (!match) return;
+    const key = match[1];
+    if (process.env[key] !== undefined) return;
+    let value = match[2].trim();
+    if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+      value = value.slice(1, -1);
+    }
+    process.env[key] = value;
+  });
+}
+
+loadLocalEnv();
 
 app.use(express.json({ limit: '6mb' }));
 const allowedOrigins = [
@@ -23,8 +47,8 @@ app.use(cors({
   }
 }));
 
-// Serve the frontend from the project root.
-app.use(express.static(__dirname));
+// Serve the frontend from the project root without exposing local secrets.
+app.use(express.static(ROOT_DIR, { dotfiles: 'ignore' }));
 
 const REALTIME_MODEL = 'gpt-realtime-mini';
 const REALTIME_VOICE = 'marin';
@@ -421,6 +445,6 @@ app.post('/api/interpret', async (req, res) => {
   }
 });
 
-app.listen(PORT, () => {
+app.listen(PORT, '127.0.0.1', () => {
   console.log(`Sous proxy server running at http://localhost:${PORT}`);
 });

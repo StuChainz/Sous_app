@@ -6,6 +6,7 @@ let tapRec=null, alwaysOnRec=null, clarificationRec=null, isRecording=false, alw
 let voiceSessionActive=false, voiceCurrentlyListening=false, processingTranscript=false, voiceSessionStoppedManually=false, voiceSessionUseRealtime=false;
 let voiceRestartTimer=null, voiceProcessingTimer=null, voiceSpeakingTimer=null, voiceNoSpeechRetries=0;
 let voiceSessionState='idle', tapRecStarting=false, tapRecStopping=false, sousRealtimeStarting=false, voicePausedForVisibility=false;
+let voiceRestartCount=0, voiceDebugOverlayEl=null, voiceDebugOverlayTimer=null, voiceDebugOverlayDismissed=false, voiceDebugOverlayUpdateQueued=false;
 let _voiceMode=false;
 let nextIngId=1;
 let modalSelectedFood=null, modalActiveTab='search';
@@ -25,6 +26,7 @@ const VOICE_PROCESSING_TIMEOUT_MS=10000;
 const VOICE_SPEAKING_TIMEOUT_MS=9000;
 const VOICE_SESSION_STATES=new Set(['idle','listening','processing','speaking','restarting','error']);
 const VOICE_DEBUG_KEY='sous_voice_debug_trace';
+const VOICE_DEBUG_OVERLAY_KEY='sous_voice_debug_overlay';
 const VOICE_DEBUG_LIMIT=80;
 
 function voiceDebugClarificationSnapshot(){
@@ -64,10 +66,148 @@ function voiceDebugTrace(event,data={}){
     localStorage.setItem(VOICE_DEBUG_KEY,JSON.stringify(list.slice(-VOICE_DEBUG_LIMIT)));
   }catch(e){}
   console.debug('[Sous Voice Debug]',entry);
+  updateVoiceDebugOverlaySoon();
   return entry;
 }
 window.sousVoiceDebug=()=>{try{return JSON.parse(localStorage.getItem(VOICE_DEBUG_KEY)||'[]');}catch(e){return[];}};
 window.clearSousVoiceDebug=()=>{try{localStorage.removeItem(VOICE_DEBUG_KEY);}catch(e){};return true;};
+
+function voiceDebugOverlayEnabled(){
+  try{return !voiceDebugOverlayDismissed&&localStorage.getItem(VOICE_DEBUG_OVERLAY_KEY)==='true';}
+  catch(e){return false;}
+}
+function latestVoiceDebugEntry(list,predicate){
+  for(let i=list.length-1;i>=0;i--){
+    if(predicate(list[i])) return list[i];
+  }
+  return null;
+}
+function shortVoiceDebugText(value){
+  if(value==null||value==='') return '—';
+  const text=typeof value==='string'?value:JSON.stringify(value);
+  return text.length>72?text.slice(0,69)+'...':text;
+}
+function escapeVoiceDebugHtml(value){
+  return String(value).replace(/[&<>"']/g,ch=>({
+    '&':'&amp;',
+    '<':'&lt;',
+    '>':'&gt;',
+    '"':'&quot;',
+    "'":'&#39;'
+  }[ch]));
+}
+function summarizeVoiceDebugAction(entry){
+  if(!entry) return '—';
+  if(entry.event==='final_action') return shortVoiceDebugText(entry.action||entry.command||entry.event);
+  if(entry.event==='parser_result') return shortVoiceDebugText('parser '+((entry.results||[]).length)+' result'+((entry.results||[]).length===1?'':'s'));
+  if(entry.event==='ai_result') return shortVoiceDebugText('ai '+((entry.items||[]).length)+' item'+((entry.items||[]).length===1?'':'s'));
+  if(entry.event==='transcript_routed') return shortVoiceDebugText('route '+(entry.route||'unknown'));
+  if(entry.event==='voice_recovery') return shortVoiceDebugText('recovery '+(entry.issue||'unknown'));
+  return shortVoiceDebugText(entry.event);
+}
+function voiceDebugOverlaySnapshot(){
+  const list=window.sousVoiceDebug?window.sousVoiceDebug():[];
+  const transcriptEntry=latestVoiceDebugEntry(list,e=>e&&(
+    e.event==='transcript_heard'||
+    e.event==='clarification_heard'||
+    e.transcript||
+    e.rawText
+  ));
+  const actionEntry=latestVoiceDebugEntry(list,e=>e&&[
+    'final_action',
+    'parser_result',
+    'ai_result',
+    'transcript_routed',
+    'voice_recovery'
+  ].includes(e.event));
+  const errorEntry=latestVoiceDebugEntry(list,e=>e&&(
+    e.event==='voice_error'||
+    e.event==='ai_error'||
+    e.error||
+    e.message
+  ));
+  const transitionEntry=latestVoiceDebugEntry(list,e=>e&&e.event==='state_transition');
+  const transcriptText=document.getElementById('transcript-text')?.textContent||'';
+  return {
+    state:voiceSessionState,
+    recognizerActive:!!(voiceCurrentlyListening||isRecording||alwaysOnActive||clarificationRec||(sousRealtime&&sousRealtime.active)),
+    sessionActive:!!voiceSessionActive,
+    lastTranscript:shortVoiceDebugText(transcriptEntry?.transcript||transcriptEntry?.rawText||transcriptText.replace(/^"|"$/g,'')),
+    lastAction:summarizeVoiceDebugAction(actionEntry),
+    lastError:shortVoiceDebugText(errorEntry?.error||errorEntry?.message||errorEntry?.issue),
+    restartCount:voiceRestartCount,
+    lastReason:shortVoiceDebugText(transitionEntry?.reason)
+  };
+}
+function ensureVoiceDebugOverlay(){
+  if(!voiceDebugOverlayEnabled()){
+    if(voiceDebugOverlayEl) voiceDebugOverlayEl.style.display='none';
+    if(voiceDebugOverlayTimer){clearInterval(voiceDebugOverlayTimer);voiceDebugOverlayTimer=null;}
+    return null;
+  }
+  if(!document.body) return null;
+  if(!voiceDebugOverlayEl){
+    const el=document.createElement('div');
+    el.id='voice-debug-overlay';
+    el.setAttribute('aria-live','polite');
+    el.style.cssText=[
+      'position:fixed',
+      'right:10px',
+      'bottom:10px',
+      'z-index:99999',
+      'width:min(310px,calc(100vw - 20px))',
+      'max-height:42vh',
+      'overflow:auto',
+      'padding:9px 10px',
+      'border-radius:8px',
+      'background:rgba(10,14,18,.92)',
+      'color:#f8fafc',
+      'box-shadow:0 8px 28px rgba(0,0,0,.3)',
+      'font:11px/1.35 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace',
+      'letter-spacing:0',
+      'text-align:left',
+      'pointer-events:auto'
+    ].join(';');
+    el.innerHTML='<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px"><strong style="font-size:11px">Voice debug</strong><button type="button" aria-label="Close voice debug overlay" style="border:0;background:rgba(255,255,255,.14);color:#fff;border-radius:5px;width:22px;height:22px;font:14px/1 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace">x</button></div><div data-voice-debug-rows></div>';
+    el.querySelector('button').addEventListener('click',()=>{
+      voiceDebugOverlayDismissed=true;
+      if(voiceDebugOverlayEl) voiceDebugOverlayEl.style.display='none';
+      if(voiceDebugOverlayTimer){clearInterval(voiceDebugOverlayTimer);voiceDebugOverlayTimer=null;}
+    });
+    document.body.appendChild(el);
+    voiceDebugOverlayEl=el;
+  }
+  voiceDebugOverlayEl.style.display='block';
+  if(!voiceDebugOverlayTimer) voiceDebugOverlayTimer=setInterval(updateVoiceDebugOverlay,1000);
+  return voiceDebugOverlayEl;
+}
+function updateVoiceDebugOverlay(){
+  const el=ensureVoiceDebugOverlay();
+  if(!el) return;
+  const s=voiceDebugOverlaySnapshot();
+  const rows=[
+    ['state',s.state],
+    ['recognizer',s.recognizerActive?'yes':'no'],
+    ['session',s.sessionActive?'yes':'no'],
+    ['transcript',s.lastTranscript],
+    ['action',s.lastAction],
+    ['error',s.lastError],
+    ['restarts',s.restartCount],
+    ['reason',s.lastReason]
+  ];
+  const rowsEl=el.querySelector('[data-voice-debug-rows]');
+  if(rowsEl){
+    rowsEl.innerHTML=rows.map(([k,v])=>'<div style="display:grid;grid-template-columns:78px 1fr;gap:7px;margin:2px 0"><span style="color:#94a3b8">'+escapeVoiceDebugHtml(k)+'</span><span style="word-break:break-word">'+escapeVoiceDebugHtml(v)+'</span></div>').join('');
+  }
+}
+function updateVoiceDebugOverlaySoon(){
+  if(!voiceDebugOverlayEnabled()||voiceDebugOverlayUpdateQueued) return;
+  voiceDebugOverlayUpdateQueued=true;
+  setTimeout(()=>{
+    voiceDebugOverlayUpdateQueued=false;
+    updateVoiceDebugOverlay();
+  },0);
+}
 
 function snapshotMeal(){undoSnapshot=meal.map(i=>({...i}));updateUndoBtn();}
 function updateUndoBtn(){const r=document.getElementById('undo-row');if(r)r.style.display=undoSnapshot?'flex':'none';}
@@ -258,6 +398,7 @@ function setVoiceProcessing(active,reason='processing',opts={}){
     voiceProcessingTimer=setTimeout(()=>{
       if(!processingTranscript) return;
       voiceDebugTrace('voice_recovery',{issue:'processing_timeout'});
+      voiceDebugTrace('voice_error',{source:'voice_state',error:'processing_timeout'});
       if(sousRealtime&&sousRealtime.active) stopSousRealtimeVoice(false);
       processingTranscript=false;
       setVoiceSessionState('error','processing timeout');
@@ -279,6 +420,7 @@ function setVoiceSpeaking(active,reason='speaking',onTimeout){
     voiceSpeakingTimer=setTimeout(()=>{
       if(!isSpeaking) return;
       voiceDebugTrace('voice_recovery',{issue:'speaking_timeout'});
+      voiceDebugTrace('voice_error',{source:'speech',error:'speaking_timeout'});
       try{if(window.speechSynthesis) window.speechSynthesis.cancel();}catch(e){}
       isSpeaking=false;
       setVoiceSessionState('error','speaking timeout');
@@ -308,6 +450,8 @@ function scheduleVoiceSessionRestart(delay=VOICE_RESTART_DEFAULT_MS){
       return;
     }
     console.log('[Sous Voice] restarting for next item');
+    voiceRestartCount++;
+    updateVoiceDebugOverlaySoon();
     logVoiceState('restarting for next item');
     if(voiceSessionUseRealtime) startSousRealtimeVoice();
     else startTapRec({sessionRestart:true});
@@ -319,6 +463,7 @@ function maybeResumeVoiceSession(delay=VOICE_RESTART_DEFAULT_MS){
 }
 function beginVoiceSession(){
   stopAllVoiceActivity('session starting');
+  voiceRestartCount=0;
   voiceSessionActive=true;
   voiceSessionStoppedManually=false;
   voicePausedForVisibility=false;
@@ -1454,7 +1599,7 @@ function speak(text,onEnd){
   const pref=voices.slice().sort((a,b)=>score(b)-score(a))[0];
   if(pref) u.voice=pref;
   u.onend=()=>finish('speech ended');
-  u.onerror=()=>finish('speech error');
+  u.onerror=()=>{voiceDebugTrace('voice_error',{source:'speech',error:'speech_error'});finish('speech error');};
   setTimeout(()=>{
     try{window.speechSynthesis.speak(u);}
     catch(e){finish('speech failed');}
@@ -1492,6 +1637,7 @@ function speakCachedResponse(key,data={},onEnd){
     };
     audio.onended=()=>finish('cached speech ended');
     audio.onerror=()=>{
+      voiceDebugTrace('voice_error',{source:'cached_speech',error:'audio_error',key});
       setVoiceSpeaking(false,'cached speech error');
       fallbackTTS(text);
     };
@@ -1499,6 +1645,7 @@ function speakCachedResponse(key,data={},onEnd){
     console.log('[Sous Voice] speaking:',key);
     setVoiceSpeaking(true,'cached speech '+key,()=>finish('cached speech timeout'));
     audio.play().catch(()=>{
+      voiceDebugTrace('voice_error',{source:'cached_speech',error:'play_failed',key});
       setVoiceSpeaking(false,'cached speech failed');
       fallbackTTS(text);
     });
@@ -2518,6 +2665,7 @@ function buildTapRec(){
     utteranceStartTime=null;
     const err=e.error||'unknown';
     logVoiceState('recognition error',{error:err});
+    voiceDebugTrace('voice_error',{source:'tap',error:err});
     tapRecStarting=false;
     tapRecStopping=false;
     stopTapRec();
@@ -2765,6 +2913,7 @@ function handleRealtimeServerEvent(event){
   }
   if(event.type==='error'){
     console.log('[Sous Realtime] error', event.error?.message||event.error||'Realtime error');
+    voiceDebugTrace('voice_error',{source:'realtime',error:event.error?.message||event.error||'Realtime error'});
     if(processingTranscript) setVoiceProcessing(false,'realtime error');
     stopSousRealtimeVoice(false);
     voiceSessionUseRealtime=false;
@@ -2883,6 +3032,7 @@ async function startSousRealtimeVoice(){
     await pc.setRemoteDescription({type:'answer',sdp:await sdpRes.text()});
   }catch(e){
     console.log('[Sous Realtime] error', e.message);
+    voiceDebugTrace('voice_error',{source:'realtime',error:e.message});
     sousRealtimeStarting=false;
     stopSousRealtimeVoice(false);
     voiceSessionUseRealtime=false;
@@ -2940,6 +3090,7 @@ function startTapRec(opts={}){
   catch(e){
     tapRecStarting=false;
     logVoiceState('recognition error',{error:e.name||e.message||'start failed'});
+    voiceDebugTrace('voice_error',{source:'tap_start',error:e.name||e.message||'start failed'});
     if(e.name==='InvalidStateError'){
       setVoiceSessionState('error','recognition start overlap',{error:e.name});
       if(voiceSessionActive) scheduleVoiceSessionRestart(VOICE_RESTART_DEFAULT_MS);
@@ -2951,6 +3102,7 @@ function startTapRec(opts={}){
     catch(e2){
       tapRecStarting=false;
       setVoiceSessionState('error','recognition start failed',{error:e2.name||e2.message||'restart failed'});
+      voiceDebugTrace('voice_error',{source:'tap_start',error:e2.name||e2.message||'restart failed'});
       logVoiceState('recognition error',{error:e2.name||e2.message||'restart failed'});
       if(voiceSessionActive) scheduleVoiceSessionRestart(VOICE_RESTART_DEFAULT_MS);
     }
@@ -3091,6 +3243,7 @@ function resumeLog(){
 // LOG BUTTON WIRING (done after DOM ready)
 // ═══════════════════════════════════════════
 function wireLogButtons(){
+  updateVoiceDebugOverlay();
   document.addEventListener('visibilitychange',()=>{
     if(!voiceSessionActive) return;
     if(document.hidden){
