@@ -52,11 +52,32 @@ function voiceDebugResultSummary(results){
     };
   }).filter(Boolean);
 }
+function voiceDebugContextSnapshot(){
+  const nav=typeof navigator!=='undefined'?navigator:null;
+  const win=typeof window!=='undefined'?window:null;
+  let standalone=false, silentMode=false, realtimeEnabled=false;
+  try{standalone=!!(win&&win.matchMedia&&win.matchMedia('(display-mode: standalone)').matches)||!!nav?.standalone;}catch(e){}
+  try{silentMode=localStorage.getItem('sous_voice_feedback')==='0';}catch(e){}
+  try{realtimeEnabled=localStorage.getItem('sous_realtime_voice')==='1'||new URLSearchParams(location.search).get('realtime')==='1';}catch(e){}
+  return {
+    visibility:typeof document!=='undefined'?document.visibilityState:null,
+    standalone,
+    online:nav?nav.onLine:null,
+    userAgent:nav?String(nav.userAgent||'').slice(0,160):null,
+    speechRecognition:!!(win&&(win.SpeechRecognition||win.webkitSpeechRecognition)),
+    speechSynthesis:!!(win&&win.speechSynthesis),
+    realtimeEnabled,
+    silentMode,
+    currentTab:typeof currentTab!=='undefined'?currentTab:null,
+    logScreen:typeof document!=='undefined'?(document.querySelector('.log-screen.active')?.id||null):null
+  };
+}
 function voiceDebugTrace(event,data={}){
   const entry={
     t:new Date().toISOString(),
     event,
     voiceState:voiceSessionState,
+    context:voiceDebugContextSnapshot(),
     clarification:voiceDebugClarificationSnapshot(),
     ...data
   };
@@ -95,6 +116,39 @@ function escapeVoiceDebugHtml(value){
     '"':'&quot;',
     "'":'&#39;'
   }[ch]));
+}
+function voiceDebugTracePayload(){
+  return JSON.stringify({
+    createdAt:new Date().toISOString(),
+    snapshot:voiceDebugOverlaySnapshot(),
+    trace:window.sousVoiceDebug?window.sousVoiceDebug():[]
+  },null,2);
+}
+function copyVoiceDebugTrace(button){
+  const payload=voiceDebugTracePayload();
+  const done=ok=>{
+    if(button){
+      const original=button.dataset.label||button.textContent||'copy';
+      button.dataset.label=original;
+      button.textContent=ok?'copied':'failed';
+      setTimeout(()=>{button.textContent=button.dataset.label||original;},1400);
+    }
+  };
+  if(navigator.clipboard?.writeText){
+    navigator.clipboard.writeText(payload).then(()=>done(true)).catch(()=>done(false));
+    return;
+  }
+  try{
+    const ta=document.createElement('textarea');
+    ta.value=payload;
+    ta.setAttribute('readonly','');
+    ta.style.cssText='position:fixed;left:-9999px;top:0';
+    document.body.appendChild(ta);
+    ta.select();
+    const ok=document.execCommand('copy');
+    ta.remove();
+    done(ok);
+  }catch(e){done(false);}
 }
 function summarizeVoiceDebugAction(entry){
   if(!entry) return '—';
@@ -168,8 +222,10 @@ function ensureVoiceDebugOverlay(){
       'text-align:left',
       'pointer-events:auto'
     ].join(';');
-    el.innerHTML='<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px"><strong style="font-size:11px">Voice debug</strong><button type="button" aria-label="Close voice debug overlay" style="border:0;background:rgba(255,255,255,.14);color:#fff;border-radius:5px;width:22px;height:22px;font:14px/1 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace">x</button></div><div data-voice-debug-rows></div>';
-    el.querySelector('button').addEventListener('click',()=>{
+    const buttonStyle='border:0;background:rgba(255,255,255,.14);color:#fff;border-radius:5px;height:22px;padding:0 7px;font:11px/1 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace';
+    el.innerHTML='<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px"><strong style="font-size:11px">Voice debug</strong><div style="display:flex;gap:5px"><button type="button" data-copy-trace style="'+buttonStyle+'">copy</button><button type="button" data-close-overlay aria-label="Close voice debug overlay" style="'+buttonStyle+';width:22px;padding:0">x</button></div></div><div data-voice-debug-rows></div>';
+    el.querySelector('[data-copy-trace]').addEventListener('click',e=>copyVoiceDebugTrace(e.currentTarget));
+    el.querySelector('[data-close-overlay]').addEventListener('click',()=>{
       voiceDebugOverlayDismissed=true;
       if(voiceDebugOverlayEl) voiceDebugOverlayEl.style.display='none';
       if(voiceDebugOverlayTimer){clearInterval(voiceDebugOverlayTimer);voiceDebugOverlayTimer=null;}
