@@ -4,6 +4,7 @@ async function bootVoiceHarness(page) {
   await page.addInitScript(() => {
     localStorage.clear();
     localStorage.setItem('userPlan', 'free');
+    localStorage.setItem('sous_onboarding_seen', '1');
     localStorage.setItem('sous_voice_feedback', '0');
   });
   await page.goto('/');

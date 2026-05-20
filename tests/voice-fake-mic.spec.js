@@ -794,6 +794,7 @@ async function runScenario(scenario) {
     await context.addInitScript(({ silentMode, useShim, utterances }) => {
       localStorage.clear();
       localStorage.setItem('userPlan', 'free');
+      localStorage.setItem('sous_onboarding_seen', '1');
       localStorage.setItem('sous_voice_feedback', silentMode ? '0' : '1');
       localStorage.setItem('sous_realtime_voice', '0');
       localStorage.setItem('sous_voice_debug_overlay', 'true');

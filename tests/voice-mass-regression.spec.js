@@ -824,6 +824,7 @@ test('mass simulated voice regression scenarios', async ({ page }) => {
   await page.addInitScript(() => {
     localStorage.clear();
     localStorage.setItem('userPlan', 'free');
+    localStorage.setItem('sous_onboarding_seen', '1');
     localStorage.setItem('sous_voice_feedback', '0');
     localStorage.setItem('sous_voice_test_harness', '1');
   });
@@ -888,6 +889,7 @@ test('C simulated SpeechRecognition interim then final transcript follows turn i
   await page.addInitScript(() => {
     localStorage.clear();
     localStorage.setItem('userPlan', 'free');
+    localStorage.setItem('sous_onboarding_seen', '1');
     localStorage.setItem('sous_voice_feedback', '0');
     localStorage.setItem('sous_voice_test_harness', '1');
     navigator.mediaDevices = {
@@ -993,6 +995,7 @@ test('AI memory intent guardrails require confidence and local refs', async ({ p
   await page.addInitScript(() => {
     localStorage.clear();
     localStorage.setItem('userPlan', 'pro');
+    localStorage.setItem('sous_onboarding_seen', '1');
     localStorage.setItem('sous_voice_feedback', '0');
     localStorage.setItem('sous_voice_test_harness', '1');
   });
@@ -1063,6 +1066,7 @@ test.fail('warning: direct transcript helper bypasses browser SpeechRecognition 
   await page.addInitScript(() => {
     localStorage.clear();
     localStorage.setItem('userPlan', 'free');
+    localStorage.setItem('sous_onboarding_seen', '1');
     localStorage.setItem('sous_voice_feedback', '0');
     localStorage.setItem('sous_voice_test_harness', '1');
   });
@@ -1080,6 +1084,7 @@ test('non-silent voice prompts request audible feedback', async ({ page }) => {
   await page.addInitScript(() => {
     localStorage.clear();
     localStorage.setItem('userPlan', 'free');
+    localStorage.setItem('sous_onboarding_seen', '1');
     localStorage.setItem('sous_voice_feedback', '1');
     localStorage.setItem('sous_voice_test_harness', '1');
     navigator.mediaDevices = {

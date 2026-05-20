@@ -57,6 +57,7 @@ test('fake microphone audio can drive the real SpeechRecognition voice path', as
   await page.addInitScript(() => {
     localStorage.clear();
     localStorage.setItem('userPlan', 'free');
+    localStorage.setItem('sous_onboarding_seen', '1');
     localStorage.setItem('sous_voice_feedback', '0');
     localStorage.setItem('sous_realtime_voice', '0');
     localStorage.setItem('sous_voice_debug_overlay', 'true');
