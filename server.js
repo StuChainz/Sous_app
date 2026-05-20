@@ -121,6 +121,75 @@ function normalisePhotoEstimate(parsed) {
   };
 }
 
+function cleanBarcode(value) {
+  const code = String(value || '').replace(/\D/g, '');
+  return code.length >= 6 && code.length <= 18 ? code : '';
+}
+
+function cleanMacro(value) {
+  const number = Number(value);
+  return Number.isFinite(number) && number >= 0 ? Math.round(number * 10) / 10 : 0;
+}
+
+function pickNutriment(nutriments, keys) {
+  for (const key of keys) {
+    if (nutriments && nutriments[key] !== undefined && nutriments[key] !== null && nutriments[key] !== '') {
+      return cleanMacro(nutriments[key]);
+    }
+  }
+  return 0;
+}
+
+function normaliseBarcodeProduct(code, product) {
+  const nutriments = product && product.nutriments ? product.nutriments : {};
+  const name = String(
+    product && (
+      product.product_name ||
+      product.abbreviated_product_name ||
+      product.generic_name ||
+      product.brands ||
+      ''
+    ) || ''
+  ).trim();
+
+  const servingQuantity = cleanMacro(product && product.serving_quantity);
+  const servingUnit = String(product && product.serving_quantity_unit || '').trim().toLowerCase();
+  const productQuantity = cleanMacro(product && product.product_quantity);
+  const productUnit = String(product && product.product_quantity_unit || '').trim().toLowerCase();
+  const servingGrams = servingQuantity && (!servingUnit || ['g', 'ml'].includes(servingUnit))
+    ? servingQuantity
+    : productQuantity && (!productUnit || ['g', 'ml'].includes(productUnit))
+      ? productQuantity
+      : null;
+  const quantityUnit = servingUnit || productUnit;
+  const type = ['ml', 'l', 'cl'].includes(quantityUnit) ? 'liquid' : 'solid';
+
+  return {
+    barcode: code,
+    name: name || `Barcode ${code}`,
+    brand: String(product && product.brands || '').split(',')[0].trim(),
+    quantity: String(product && product.quantity || product && product.serving_size || '').trim(),
+    servingGrams,
+    imageUrl: String(product && product.image_front_small_url || '').trim(),
+    source: 'openfoodfacts',
+    sourceId: `off:${code}`,
+    nutritionPer100g: {
+      calories: pickNutriment(nutriments, ['energy-kcal_100g', 'energy-kcal', 'energy-kcal_value']),
+      protein: pickNutriment(nutriments, ['proteins_100g', 'proteins', 'proteins_value']),
+      carbs: pickNutriment(nutriments, ['carbohydrates_100g', 'carbohydrates', 'carbohydrates_value']),
+      fat: pickNutriment(nutriments, ['fat_100g', 'fat', 'fat_value']),
+      fibre: pickNutriment(nutriments, ['fiber_100g', 'fiber', 'fiber_value', 'fibre_100g', 'fibre'])
+    },
+    raw: {
+      productName: product && product.product_name || '',
+      brands: product && product.brands || '',
+      quantity: product && product.quantity || '',
+      servingSize: product && product.serving_size || ''
+    },
+    type
+  };
+}
+
 function compactRealtimeFoods(foods) {
   if (!Array.isArray(foods)) return '';
   return foods
@@ -341,6 +410,60 @@ app.post('/api/photo-estimate', async (req, res) => {
   } catch (err) {
     console.error('[Sous Photo Estimate] error', err.message);
     res.status(500).json({ error: 'Photo estimate request failed.', detail: err.message });
+  }
+});
+
+app.get('/api/barcode/:code', async (req, res) => {
+  const code = cleanBarcode(req.params.code);
+  if (!code) {
+    return res.status(400).json({ error: 'A valid barcode is required.' });
+  }
+
+  const fields = [
+    'code',
+    'product_name',
+    'abbreviated_product_name',
+    'generic_name',
+    'brands',
+    'quantity',
+    'serving_size',
+    'serving_quantity',
+    'serving_quantity_unit',
+    'product_quantity',
+    'product_quantity_unit',
+    'nutriments',
+    'image_front_small_url'
+  ].join(',');
+  const url = new URL(`https://world.openfoodfacts.org/api/v3/product/${code}`);
+  url.searchParams.set('product_type', 'food');
+  url.searchParams.set('fields', fields);
+
+  try {
+    const upstream = await fetch(url, {
+      headers: {
+        'Accept': 'application/json',
+        'User-Agent': 'Sous/1.0 (https://stuchainz.github.io)'
+      }
+    });
+    const data = await upstream.json().catch(() => null);
+
+    if (upstream.status === 404 || data?.result?.id === 'product_not_found') {
+      return res.status(404).json({ error: 'Product not found.', barcode: code });
+    }
+    if (!upstream.ok) {
+      return res.status(upstream.status).json({
+        error: `Open Food Facts error: ${upstream.status}`,
+        detail: data?.errors || data?.result || null
+      });
+    }
+    if (!data || !data.product) {
+      return res.status(404).json({ error: 'Product not found.', barcode: code });
+    }
+
+    res.json(normaliseBarcodeProduct(code, data.product));
+  } catch (err) {
+    console.error('[Sous Barcode] error', err.message);
+    res.status(500).json({ error: 'Barcode lookup failed.', detail: err.message });
   }
 });
 
