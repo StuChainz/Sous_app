@@ -60,6 +60,24 @@ function makeScenario(overrides) {
   };
 }
 
+function dateOffset(days) {
+  const date = new Date();
+  date.setDate(date.getDate() + days);
+  return date.toISOString().slice(0, 10);
+}
+
+function testIngredient(name, weight = 100) {
+  return {
+    name,
+    weight,
+    kcal: Math.round(weight),
+    protein: Math.round(weight / 10),
+    carbs: Math.round(weight / 8),
+    fat: Math.round(weight / 20),
+    fibre: 0
+  };
+}
+
 class VoiceInvariantError extends Error {
   constructor(invariant, message, details = {}) {
     super(`${invariant}: ${message}`);
@@ -377,6 +395,76 @@ const correctionScenarios = [
   })
 ];
 
+const memoryScenarios = [
+  makeScenario({
+    name: 'memory repeat same lunch uses last local meal',
+    startingState: {
+      section: 'lunch',
+      log: {
+        [dateOffset(-2)]: {
+          meals: [{
+            id: 'history_lunch_1',
+            name: 'Rice lunch',
+            section: 'lunch',
+            time: `${dateOffset(-2)}T12:30:00.000Z`,
+            ingredients: [testIngredient('White rice', 150), testIngredient('Chicken breast', 120)]
+          }]
+        }
+      }
+    },
+    utterances: ['same lunch'],
+    expectedMealIngredients: { contains: ['White rice', 'Chicken breast'], minCount: 2 },
+    expectedVoicePromptResult: { requiredEventTypes: ['transcript received', 'parser result', 'ingredient row added'] }
+  }),
+  makeScenario({
+    name: 'memory usual breakfast uses local usual meal',
+    startingState: {
+      section: 'breakfast',
+      usualMeals: {
+        breakfast: [{
+          id: 'usual_breakfast_1',
+          name: 'Usual oats',
+          section: 'breakfast',
+          useCount: 4,
+          lastUsed: Date.now(),
+          ingredients: [testIngredient('Oats', 50), testIngredient('Banana', 100)]
+        }]
+      }
+    },
+    utterances: ['usual breakfast'],
+    expectedMealIngredients: { contains: ['Oats', 'Banana'], minCount: 2 },
+    expectedVoicePromptResult: { requiredEventTypes: ['transcript received', 'parser result', 'ingredient row added'] }
+  }),
+  makeScenario({
+    name: 'memory same as yesterday with one meal copies local history',
+    startingState: {
+      section: 'dinner',
+      log: {
+        [dateOffset(-1)]: {
+          meals: [{
+            id: 'history_yesterday_1',
+            name: 'Yesterday dinner',
+            section: 'dinner',
+            time: `${dateOffset(-1)}T19:00:00.000Z`,
+            ingredients: [testIngredient('Cheddar', 30)]
+          }]
+        }
+      }
+    },
+    utterances: ['same as yesterday'],
+    expectedMealIngredients: { contains: ['Cheddar'], minCount: 1 },
+    expectedVoicePromptResult: { requiredEventTypes: ['transcript received', 'parser result', 'ingredient row added'] }
+  }),
+  makeScenario({
+    name: 'memory no usual match stays no-op',
+    startingState: { section: 'breakfast', usualMeals: { breakfast: [] } },
+    utterances: ['usual breakfast'],
+    expectedMealIngredients: { maxCount: 0 },
+    expectedVoicePromptResult: { requiredEventTypes: ['transcript received', 'parser result'], anyEventTypes: ['voice feedback requested', 'error/fallback shown', 'silent_mode_skipped_feedback'] },
+    forbiddenStates: ['processingListeningConflict', 'stuckProcessing', 'duplicateRecognizerState']
+  })
+];
+
 const fallbackScenarios = [
   '',
   '   ',
@@ -405,6 +493,7 @@ const scenarios = [
   ...reviewScenarios,
   ...promptAndClarificationScenarios,
   ...correctionScenarios,
+  ...memoryScenarios,
   ...fallbackScenarios
 ];
 
@@ -560,9 +649,17 @@ function assertVoiceInvariants(scenario, result) {
 async function resetAppForScenario(page, scenario) {
   await page.goto('/?sousVoiceTest=1');
   await page.waitForFunction(() => typeof window.__sousStartVoiceTestSession === 'function');
-  await page.evaluate(silentMode => {
+  await page.evaluate(({ silentMode, log, usualMeals }) => {
+    localStorage.removeItem('sous_log');
+    localStorage.removeItem('sous_usual_meals');
+    if (log) localStorage.setItem('sous_log', JSON.stringify(log));
+    if (usualMeals) localStorage.setItem('sous_usual_meals', JSON.stringify(usualMeals));
     localStorage.setItem('sous_voice_feedback', silentMode ? '0' : '1');
-  }, scenario.startingState.silentMode !== false);
+  }, {
+    silentMode: scenario.startingState.silentMode !== false,
+    log: scenario.startingState.log || null,
+    usualMeals: scenario.startingState.usualMeals || null
+  });
   await page.evaluate(section => window.__sousStartVoiceTestSession(section), scenario.startingState.section);
   await page.waitForFunction(() => window.__sousVoiceState().state === 'listening');
   for (const seed of scenario.startingState.seedUtterances) {

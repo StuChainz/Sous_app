@@ -511,6 +511,85 @@ function applyAIModifyMealCopy(action){
   return addAIClonedItemsToCurrent(items,sourceMeal,'modified-history-ai');
 }
 
+function deterministicMemorySection(text){
+  const s=String(text||'').toLowerCase();
+  if(/\bbreakfast\b/.test(s)) return 'breakfast';
+  if(/\blunch\b/.test(s)) return 'lunch';
+  if(/\b(?:dinner|tea|supper)\b/.test(s)) return 'dinner';
+  if(/\b(?:snack|snacks)\b/.test(s)) return 'snacks';
+  if(/\bsupplements?\b/.test(s)) return 'supplements';
+  return null;
+}
+function deterministicMemoryQuery(text){
+  return String(text||'')
+    .replace(/\b(?:add|log|track|use|copy|repeat|same|again|my|the|meal|usual|regular|last)\b/g,' ')
+    .replace(/\b(?:as|from|like|for)\s+yesterday(?:'s)?\b/g,' ')
+    .replace(/\byesterday(?:'s)?\b/g,' ')
+    .replace(/\b(?:breakfast|lunch|dinner|tea|supper|snack|snacks|supplements?)\b/g,' ')
+    .replace(/\s+/g,' ')
+    .trim();
+}
+function parseDeterministicMemoryCommand(transcript){
+  const normalized=typeof normaliseLogText==='function'
+    ?normaliseLogText(transcript)
+    :String(transcript||'').toLowerCase().trim();
+  if(!normalized) return null;
+  const section=deterministicMemorySection(normalized);
+  const query=deterministicMemoryQuery(normalized);
+  const asksUsual=/\b(?:usual|regular)\b/.test(normalized);
+  const asksYesterday=/\byesterday(?:'s)?\b/.test(normalized);
+  const asksRepeat=/^(?:same|repeat|copy|last)\b/.test(normalized)||/\b(?:same|repeat|copy)\s+(?:meal|breakfast|lunch|dinner|tea|supper|snacks?|supplements?)\b/.test(normalized);
+  if(asksUsual) return {type:'usual',section,query};
+  if(asksYesterday||asksRepeat){
+    if(!asksYesterday&&!section&&!/\bmeal\b/.test(normalized)) return null;
+    return {type:'history',section,query,when:asksYesterday?'yesterday':'latest'};
+  }
+  return null;
+}
+function deterministicYesterdayMealResult(section,query){
+  if(section||query||typeof getLog!=='function') return null;
+  const date=localDateOffset(-1);
+  const meals=Array.isArray(getLog()?.[date]?.meals)?getLog()[date].meals:[];
+  if(meals.length===1) return {meal:{...meals[0],_historyDate:date,_historyIndex:0}};
+  if(meals.length>1) return {ambiguous:true,message:'Which meal from yesterday?'};
+  return {missing:true};
+}
+function handleDeterministicMemoryCommand(command,transcript){
+  if(!command) return false;
+  if(typeof voiceDebugTrace==='function'){
+    voiceDebugTrace('parser_result',{
+      source:'deterministic-memory',
+      transcript:String(transcript||'').trim(),
+      escalationReason:'none',
+      results:[{command:command.type,section:command.section||null,query:command.query||'',when:command.when||null}]
+    });
+  }
+  let sourceMeal=null;
+  if(command.type==='usual'){
+    sourceMeal=findAIUsualMeal({section:command.section,source:{query:command.query,section:command.section,kind:'usual_meal'}});
+  } else {
+    const yesterday=command.when==='yesterday'?deterministicYesterdayMealResult(command.section,command.query):null;
+    if(yesterday?.ambiguous){
+      showToast(yesterday.message,2600);
+      if(typeof speakCachedResponse==='function') speakCachedResponse('clarification_needed',{},()=>typeof maybeResumeVoiceSession==='function'&&maybeResumeVoiceSession(320));
+      else if(typeof maybeResumeVoiceSession==='function') maybeResumeVoiceSession(320);
+      return true;
+    }
+    sourceMeal=yesterday?.meal||findAIHistoryMeal({section:command.section,query:command.query,when:command.when});
+  }
+  if(!sourceMeal){
+    const message=command.type==='usual'?"Couldn't find that usual meal.":"Couldn't find that meal.";
+    showToast(message,2600);
+    if(typeof speakCachedResponse==='function') speakCachedResponse('recovery',{},()=>typeof maybeResumeVoiceSession==='function'&&maybeResumeVoiceSession(320));
+    else if(typeof maybeResumeVoiceSession==='function') maybeResumeVoiceSession(320);
+    return true;
+  }
+  const source=command.type==='usual'?'usual-deterministic':'history-deterministic';
+  const applied=addAIClonedItemsToCurrent(sourceMeal.ingredients||[],sourceMeal,source);
+  if(!applied.ok&&applied.message) showToast(applied.message,2600);
+  return true;
+}
+
 // Words that carry no food meaning and are safe to ignore when scanning
 // for unresolved terms after parser matches.
 const _PARTIAL_FILLER=new Set([
@@ -653,6 +732,7 @@ function aiDraftToParserResults(draft){
 // parser found food(s) but meaningful unresolved words remain in the transcript.
 async function handleTranscript(transcript,rawText){
   const cleanTranscript=String(transcript||'').trim();
+  if(handleDeterministicMemoryCommand(parseDeterministicMemoryCommand(cleanTranscript),cleanTranscript)) return;
   if(cleanTranscript&&canUseAIInterpretation()&&typeof aiActionReferenceTrigger==='function'&&aiActionReferenceTrigger(cleanTranscript)&&typeof interpretMealActionWithAI==='function'){
     try{
       const action=await interpretMealActionWithAI({
