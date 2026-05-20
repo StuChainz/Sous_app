@@ -156,7 +156,7 @@ const FOODS=[
   // GB curated pack
   {name:'Back bacon',      w:100,kcal:225,p:23,  c:0.5, f:15,  fi:0,   icon:'ti-meat',       kw:['back bacon','bacon','bacon rasher','bacon rashers','rasher','rashers'],countryCodes:['GB'],source:'curated',defaultUnit:'rasher',units:[{label:'rasher',grams:30,defaultQty:2},{label:'g',grams:1}],nutritionPer100g:{calories:225,protein:23,carbs:0.5,fat:15,fibre:0}},
   {name:'Pork sausage',    w:100,kcal:301,p:13,  c:8,   f:25,  fi:0,   icon:'ti-meat',       kw:['pork sausage','pork sausages','sausage','sausages','banger','bangers'],countryCodes:['GB'],source:'curated',defaultUnit:'sausage',units:[{label:'sausage',grams:57,defaultQty:2},{label:'g',grams:1}],nutritionPer100g:{calories:301,protein:13,carbs:8,fat:25,fibre:0}},
-  {name:'Baked beans',     w:100,kcal:78, p:4.7, c:12.5,f:0.4, fi:3.7, icon:'ti-leaf',       kw:['baked beans','beans on toast','tinned baked beans'],countryCodes:['GB'],source:'curated',defaultUnit:'half tin',units:[{label:'half tin',grams:200},{label:'tin',grams:400},{label:'g',grams:1}],nutritionPer100g:{calories:78,protein:4.7,carbs:12.5,fat:0.4,fibre:3.7}},
+  {name:'Baked beans',     w:100,kcal:81, p:5,   c:15,  f:0.5, fi:3.8, icon:'ti-leaf',       kw:['baked beans','beans on toast','tinned baked beans'],countryCodes:['GB'],source:'cofid_2021',sourceId:'cofid:13-532',sourceDescription:'Baked beans, canned in tomato sauce',defaultUnit:'half tin',units:[{label:'half tin',grams:200},{label:'tin',grams:400},{label:'g',grams:1}],nutritionPer100g:{calories:81,protein:5,carbs:15,fat:0.5,fibre:3.8}},
   {name:'Crumpet',         w:55, kcal:97, p:3.6, c:19,  f:0.7, fi:1.3, icon:'ti-bread',      kw:['crumpet','crumpets'],countryCodes:['GB'],source:'curated',defaultUnit:'crumpet',units:[{label:'crumpet',grams:55,defaultQty:2},{label:'g',grams:1}],nutritionPer100g:{calories:176,protein:6.5,carbs:34.5,fat:1.3,fibre:2.4}},
   {name:'English muffin',  w:65, kcal:150,p:5.5, c:29,  f:1.5, fi:2,   icon:'ti-bread',      kw:['english muffin','breakfast muffin','muffin'],countryCodes:['GB'],source:'curated',defaultUnit:'muffin',units:[{label:'muffin',grams:65},{label:'g',grams:1}],nutritionPer100g:{calories:231,protein:8.5,carbs:44.6,fat:2.3,fibre:3.1}},
   {name:'Medium sliced bread',w:36,kcal:88,p:3.5,c:17,  f:0.9, fi:1.5, icon:'ti-bread',      kw:['medium sliced bread','toastie bread','bread slice','slice of bread','white medium bread','warburtons style bread'],countryCodes:['GB'],source:'curated',defaultUnit:'slice',units:[{label:'slice',grams:36,defaultQty:2},{label:'g',grams:1}],nutritionPer100g:{calories:244,protein:9.7,carbs:47.2,fat:2.5,fibre:4.2}},
@@ -277,7 +277,6 @@ const FOODS=[
   {name:"Pancake",w:100,kcal:227,p:6.4,c:28.3,f:9.7,fi:0,icon:"ti-bread",kw:["pancake"],countryCodes:["GLOBAL","US"],source:"usda_sr_legacy_2018",sourceId:"fdc:175009",sourceDescription:"Pancakes, plain, prepared from recipe",nutritionPer100g:{calories:227,protein:6.4,carbs:28.3,fat:9.7,fibre:0}},
   {name:"Pancake",w:100,kcal:234,p:6.3,c:37.9,f:7.4,fi:0.9,icon:"ti-bread",kw:["pancake"],countryCodes:["GB"],source:"cofid_2021",sourceId:"cofid:11-1141",sourceDescription:"Pancakes, sweet, made with skimmed milk, homemade",nutritionPer100g:{calories:234,protein:6.3,carbs:37.9,fat:7.4,fibre:0.9}},
   {name:"Baked beans",w:100,kcal:94,p:4.8,c:21.1,f:0.4,fi:4.1,icon:"ti-leaf",kw:["baked beans"],countryCodes:["GLOBAL","US"],source:"usda_sr_legacy_2018",sourceId:"fdc:175182",sourceDescription:"Beans, baked, canned, plain or vegetarian",nutritionPer100g:{calories:94,protein:4.8,carbs:21.1,fat:0.4,fibre:4.1}},
-  {name:"Baked beans",w:100,kcal:81,p:5,c:15,f:0.5,fi:3.8,icon:"ti-leaf",kw:["baked beans"],countryCodes:["GB"],source:"cofid_2021",sourceId:"cofid:13-532",sourceDescription:"Baked beans, canned in tomato sauce",nutritionPer100g:{calories:81,protein:5,carbs:15,fat:0.5,fibre:3.8}},
   {name:"Cannellini beans",w:100,kcal:114,p:7.3,c:21.2,f:0.3,fi:4.8,icon:"ti-leaf",kw:["cannellini beans"],countryCodes:["GLOBAL","US"],source:"usda_sr_legacy_2018",sourceId:"fdc:175204",sourceDescription:"Beans, white, mature seeds, canned",nutritionPer100g:{calories:114,protein:7.3,carbs:21.2,fat:0.3,fibre:4.8}},
   {name:"Cannellini beans",w:100,kcal:104,p:7.6,c:15.9,f:1.6,fi:6.1,icon:"ti-leaf",kw:["cannellini beans"],countryCodes:["GB"],source:"cofid_2021",sourceId:"cofid:13-666",sourceDescription:"Beans, cannellini, canned, re-heated, drained",nutritionPer100g:{calories:104,protein:7.6,carbs:15.9,fat:1.6,fibre:6.1}},
   {name:"Black eyed beans",w:100,kcal:117,p:8.1,c:20.3,f:0.7,fi:3.6,icon:"ti-leaf",kw:["black eyed beans"],countryCodes:["GLOBAL","US"],source:"usda_sr_legacy_2018",sourceId:"fdc:175209",sourceDescription:"Cowpeas, catjang, mature seeds, cooked, boiled, without salt",nutritionPer100g:{calories:117,protein:8.1,carbs:20.3,fat:0.7,fibre:3.6}},
@@ -414,8 +413,8 @@ const FOODS=[
   {name:"Tortilla chips",w:100,kcal:504,p:7.2,c:60.8,f:27.4,fi:5.7,icon:"ti-cookie",kw:["tortilla chips"],countryCodes:["GB"],source:"cofid_2021",sourceId:"cofid:17-644",sourceDescription:"Tortilla chips fried in sunflower oil",nutritionPer100g:{calories:504,protein:7.2,carbs:60.8,fat:27.4,fibre:5.7}},
   {name:"Orange juice",w:100,kcal:45,p:0.7,c:10.4,f:0.2,fi:0.2,icon:"ti-glass",kw:["orange juice"],countryCodes:["GLOBAL","US"],source:"usda_sr_legacy_2018",sourceId:"fdc:169098",sourceDescription:"Orange juice, raw (Includes foods for USDA's Food Distribution Program)",type:"liquid",nutritionPer100g:{calories:45,protein:0.7,carbs:10.4,fat:0.2,fibre:0.2}},
   {name:"Orange juice",w:100,kcal:36,p:0.9,c:8.6,f:0,fi:0.2,icon:"ti-glass",kw:["orange juice"],countryCodes:["GB"],source:"cofid_2021",sourceId:"cofid:14-329",sourceDescription:"Orange juice, chilled",type:"liquid",nutritionPer100g:{calories:36,protein:0.9,carbs:8.6,fat:0,fibre:0.2}},
-  {name:"Apple juice",w:100,kcal:46,p:0.1,c:11.3,f:0.1,fi:0.2,icon:"ti-glass",kw:["apple","apple juice"],countryCodes:["GLOBAL","US"],source:"usda_sr_legacy_2018",sourceId:"fdc:167771",sourceDescription:"Apple juice, canned or bottled, unsweetened, with added ascorbic acid",type:"liquid",nutritionPer100g:{calories:46,protein:0.1,carbs:11.3,fat:0.1,fibre:0.2}},
-  {name:"Apple juice",w:100,kcal:37,p:0.1,c:9.7,f:0,fi:0,icon:"ti-glass",kw:["apple","apple juice"],countryCodes:["GB"],source:"cofid_2021",sourceId:"cofid:14-331",sourceDescription:"Apple juice, clear, ambient and chilled",type:"liquid",nutritionPer100g:{calories:37,protein:0.1,carbs:9.7,fat:0,fibre:0}},
+  {name:"Apple juice",w:100,kcal:46,p:0.1,c:11.3,f:0.1,fi:0.2,icon:"ti-glass",kw:["apple juice"],countryCodes:["GLOBAL","US"],source:"usda_sr_legacy_2018",sourceId:"fdc:167771",sourceDescription:"Apple juice, canned or bottled, unsweetened, with added ascorbic acid",type:"liquid",nutritionPer100g:{calories:46,protein:0.1,carbs:11.3,fat:0.1,fibre:0.2}},
+  {name:"Apple juice",w:100,kcal:37,p:0.1,c:9.7,f:0,fi:0,icon:"ti-glass",kw:["apple juice"],countryCodes:["GB"],source:"cofid_2021",sourceId:"cofid:14-331",sourceDescription:"Apple juice, clear, ambient and chilled",type:"liquid",nutritionPer100g:{calories:37,protein:0.1,carbs:9.7,fat:0,fibre:0}},
   {name:"Tomato juice",w:100,kcal:17,p:0.8,c:3.5,f:0.3,fi:0.4,icon:"ti-glass",kw:["tomato juice"],countryCodes:["GLOBAL","US"],source:"usda_sr_legacy_2018",sourceId:"fdc:170545",sourceDescription:"Tomato juice, canned, without salt added",type:"liquid",nutritionPer100g:{calories:17,protein:0.8,carbs:3.5,fat:0.3,fibre:0.4}},
   {name:"Tomato juice",w:100,kcal:14,p:0.8,c:3,f:0,fi:0.6,icon:"ti-glass",kw:["tomato juice"],countryCodes:["GB"],source:"cofid_2021",sourceId:"cofid:13-382",sourceDescription:"Tomato juice",type:"liquid",nutritionPer100g:{calories:14,protein:0.8,carbs:3,fat:0,fibre:0.6}},
   {name:"Coffee",w:100,kcal:2,p:0.3,c:0.2,f:0,fi:0,icon:"ti-glass",kw:["coffee"],countryCodes:["GLOBAL","US"],source:"usda_sr_legacy_2018",sourceId:"fdc:171881",sourceDescription:"Beverages, coffee, brewed, breakfast blend",type:"liquid",nutritionPer100g:{calories:2,protein:0.3,carbs:0.2,fat:0,fibre:0}},
@@ -567,7 +566,7 @@ const FOOD_MATCH_IGNORED_WORDS=new Set([
   'half','quarter',
   'slice','slices','piece','pieces','serving','servings','portion','portions',
   'scoop','scoops','cup','cups','tbsp','tsp','tablespoon','tablespoons','teaspoon','teaspoons',
-  'small','medium','large','big','little','fresh','raw','cooked'
+  'small','medium','large','big','little','fresh','raw'
 ]);
 
 function getFoodMatchKeys(food){
@@ -757,7 +756,7 @@ function foodMatchesCountry(food,countryCode){
 function isCountrySpecificFood(food,countryCode){
   const code=normaliseCountryCode(countryCode);
   const codes=foodCountryCodes(food);
-  return !!code&&code!=='GLOBAL'&&codes.includes(code)&&!codes.includes('GLOBAL');
+  return !!code&&code!=='GLOBAL'&&codes.includes(code);
 }
 
 function globalFoods(){
