@@ -160,6 +160,125 @@ function canUseAIInterpretation(){
   return plan==='pro';
 }
 
+function normalizeAIActionText(text){
+  if(typeof normaliseLogText==='function') return normaliseLogText(text||'');
+  return String(text||'').toLowerCase().trim();
+}
+
+function aiActionCurrentIndexFromRef(ref){
+  const match=String(ref||'').match(/^current:item:(\d+)$/);
+  if(!match) return -1;
+  const index=Number(match[1]);
+  return Number.isInteger(index)&&index>=0&&index<meal.length?index:-1;
+}
+
+function findCurrentMealItemIndexByName(name){
+  const target=normalizeAIActionText(name);
+  if(!target) return meal.length?meal.length-1:-1;
+  let best=-1,bestScore=0;
+  meal.forEach((item,index)=>{
+    const itemName=normalizeAIActionText(item.name||'');
+    const rawName=normalizeAIActionText(item.rawFood?.name||'');
+    const haystack=[itemName,rawName].filter(Boolean).join(' ');
+    let score=0;
+    if(itemName===target||rawName===target) score=1000;
+    else if(haystack.includes(target)) score=700+target.length;
+    else {
+      target.split(/\s+/).filter(t=>t.length>2).forEach(token=>{
+        if(haystack.includes(token)) score+=token.length;
+      });
+    }
+    if(index===meal.length-1) score+=2;
+    if(score>bestScore){best=index;bestScore=score;}
+  });
+  return bestScore>0?best:-1;
+}
+
+function aiActionTargetIndex(action={},change=null){
+  const ref=change?.targetRef||action.target?.ref||null;
+  const refIndex=aiActionCurrentIndexFromRef(ref);
+  if(refIndex>=0) return refIndex;
+  if(action.target?.scope==='last_item') return meal.length?meal.length-1:-1;
+  return findCurrentMealItemIndexByName(change?.from||change?.food||action.targetFood||action.target?.food||action.food);
+}
+
+function aiActionResolveFood(name){
+  const text=String(name||'').trim();
+  if(!text) return {food:null,error:'missing_food'};
+  if(typeof resolveReplacementFood==='function'){
+    const resolved=resolveReplacementFood(text);
+    if(resolved.ambiguous) return {food:null,ambiguous:true,options:resolved.options||[]};
+    return {food:resolved.food||null,error:resolved.food?null:'food_not_found'};
+  }
+  const food=typeof findFoodByText==='function'?findFoodByText(text):null;
+  return {food,error:food?null:'food_not_found'};
+}
+
+function aiActionCommitCurrentMeal(message,key='updated'){
+  if(typeof _persistDraft==='function') _persistDraft();
+  if(typeof renderCurrentMeal==='function') renderCurrentMeal();
+  if(typeof updateHome==='function') updateHome();
+  if(message) showToast(message,2600);
+  if(typeof speakCachedResponse==='function') speakCachedResponse(key,{},()=>typeof maybeResumeVoiceSession==='function'&&maybeResumeVoiceSession(320));
+  else if(typeof maybeResumeVoiceSession==='function') maybeResumeVoiceSession(320);
+}
+
+function applyAIReplaceFood(action,change=null){
+  const replacement=change?.to||change?.food||action.replacementFood||action.food;
+  const idx=aiActionTargetIndex(action,change);
+  if(idx<0) return {ok:false,message:"Couldn't find that item."};
+  const resolved=aiActionResolveFood(replacement);
+  if(resolved.ambiguous) return {ok:false,message:'Which one did you mean?'};
+  if(!resolved.food) return {ok:false,message:"Couldn't match the replacement food."};
+  snapshotMeal();
+  const item=meal[idx];
+  const grams=item.weight||resolved.food.w;
+  if(typeof recalcMealItemFromFood==='function') recalcMealItemFromFood(item,resolved.food,grams);
+  else Object.assign(item,foodScale(resolved.food,grams),{rawFood:resolved.food});
+  if(typeof syncServingFromWeight==='function') syncServingFromWeight(item);
+  aiActionCommitCurrentMeal('Updated '+item.name,'updated');
+  return {ok:true};
+}
+
+function applyAIRemoveFood(action,change=null){
+  const idx=aiActionTargetIndex(action,change);
+  if(idx<0) return {ok:false,message:"Couldn't find that item."};
+  snapshotMeal();
+  const removed=meal.splice(idx,1)[0];
+  aiActionCommitCurrentMeal((removed?.name||'Item')+' removed','removed');
+  return {ok:true};
+}
+
+function applyAIChangeQuantity(action,change=null){
+  const idx=aiActionTargetIndex(action,change);
+  if(idx<0) return {ok:false,message:"Couldn't find that item."};
+  const item=meal[idx];
+  const food=item.rawFood||(typeof findFoodByText==='function'?findFoodByText(item.name):null);
+  let grams=null;
+  const factor=change?.factor??action.factor;
+  if(Number.isFinite(Number(factor))&&Number(factor)>0){
+    grams=Math.round((item.weight||food?.w||100)*Number(factor));
+  } else {
+    const quantityText=change?.quantityText||action.quantityText;
+    grams=typeof gramsFromQuantityText==='function'?gramsFromQuantityText(quantityText,food):null;
+  }
+  if(!grams||grams<=0) return {ok:false,message:"I couldn't catch the amount."};
+  snapshotMeal();
+  if(food&&typeof recalcMealItemFromFood==='function') recalcMealItemFromFood(item,food,grams);
+  else item.weight=Math.round(grams);
+  if(typeof syncServingFromWeight==='function') syncServingFromWeight(item);
+  aiActionCommitCurrentMeal('Updated '+item.name,'updated');
+  return {ok:true};
+}
+
+function applyAIActionToCurrentMeal(action){
+  if(!action||!action.type) return {ok:false};
+  if(action.type==='replace_food') return applyAIReplaceFood(action);
+  if(action.type==='remove_food') return applyAIRemoveFood(action);
+  if(action.type==='change_quantity') return applyAIChangeQuantity(action);
+  return {ok:false,unsupported:true};
+}
+
 // Words that carry no food meaning and are safe to ignore when scanning
 // for unresolved terms after parser matches.
 const _PARTIAL_FILLER=new Set([
@@ -301,6 +420,25 @@ function aiDraftToParserResults(draft){
 // Tries the parser; falls back to AI when the parser finds no food OR when the
 // parser found food(s) but meaningful unresolved words remain in the transcript.
 async function handleTranscript(transcript,rawText){
+  const cleanTranscript=String(transcript||'').trim();
+  if(cleanTranscript&&canUseAIInterpretation()&&typeof aiActionReferenceTrigger==='function'&&aiActionReferenceTrigger(cleanTranscript)&&typeof interpretMealActionWithAI==='function'){
+    try{
+      const action=await interpretMealActionWithAI({
+        transcript:cleanTranscript,
+        section:typeof currentMealSection!=='undefined'?currentMealSection:null,
+        countryCode:typeof currentCountry!=='undefined'?currentCountry:null
+      });
+      if(action&&['replace_food','remove_food','change_quantity'].includes(action.type)){
+        if(typeof voiceDebugTrace==='function') voiceDebugTrace('ai_action_result',{transcript:cleanTranscript,action});
+        const applied=applyAIActionToCurrentMeal(action);
+        if(applied.ok) return;
+        if(applied.message) showToast(applied.message,2600);
+      }
+    }catch(e){
+      console.warn('[Sous] AI action error:',e);
+      if(typeof voiceDebugTrace==='function') voiceDebugTrace('ai_action_error',{transcript:cleanTranscript,message:e?.message||String(e)});
+    }
+  }
   const results=parseText(transcript);
   const escalationReason=aiEscalationReason(transcript,results);
   const uncertain=escalationReason==='empty'||escalationReason==='low-confidence';
