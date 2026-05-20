@@ -54,7 +54,8 @@ function getAIInterpreterConfig(){
 
 function aiActionReferenceTrigger(transcript){
   const s=String(transcript||'').toLowerCase();
-  return /\b(same|usual|regular|yesterday|last time|normally|instead of|swap|replace|change|make that|make it|half|halve|double|the one i usually|the one i normally)\b/.test(s);
+  if(/\b(same|usual|regular|yesterday|last time|normally|instead of|swap|replace|change|make that|make it|the one i usually|the one i normally)\b/.test(s)) return true;
+  return /\b(half|halve|double)\b.*\b(that|it|last|current|yesterday|lunch|breakfast|dinner|snack|meal|from)\b/.test(s);
 }
 
 function cloneAIContextIngredient(item,index,prefix){

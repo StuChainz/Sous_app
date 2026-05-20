@@ -638,6 +638,13 @@ async function handleTranscript(transcript,rawText){
         section:typeof currentMealSection!=='undefined'?currentMealSection:null,
         countryCode:typeof currentCountry!=='undefined'?currentCountry:null
       });
+      if(action&&action.type==='clarify'){
+        const msg=action.message||'I need one more detail.';
+        showToast(msg,3200);
+        const el=document.getElementById('transcript-text'); if(el) el.textContent=msg;
+        if(typeof speakCachedResponse==='function') speakCachedResponse('clarification_needed',{},()=>typeof maybeResumeVoiceSession==='function'&&maybeResumeVoiceSession(320));
+        return;
+      }
       if(action&&['replace_food','remove_food','change_quantity','repeat_meal','add_usual_meal','modify_meal_copy'].includes(action.type)){
         if(typeof voiceDebugTrace==='function') voiceDebugTrace('ai_action_result',{transcript:cleanTranscript,action});
         const applied=applyAIActionToCurrentMeal(action);
