@@ -5,6 +5,7 @@
   "scripts": {
     "start": "node server.js",
     "test:onboarding": "playwright test tests/onboarding.spec.cjs",
+    "test:bug-report": "playwright test tests/bug-report.spec.cjs",
     "test:voice": "playwright test tests/voice-simulation.spec.cjs",
     "test:voice:mass": "playwright test tests/voice-mass-regression.spec.js",
     "test:voice:fake-mic": "playwright test tests/voice-fake-mic.spec.js",

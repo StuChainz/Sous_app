@@ -11,7 +11,8 @@ test('onboarding appears on first load', async ({ page }) => {
   await page.goto('/');
 
   await expect(page.getByTestId('onboarding-overlay')).toBeVisible();
-  await expect(page.getByRole('heading', { name: 'Tap once, keep logging' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Testing? Tap Bug' })).toBeVisible();
+  await expect(page.getByText('send the error log to Stu on WhatsApp')).toBeVisible();
 });
 
 test('dismissing onboarding stores the seen flag', async ({ page }) => {
@@ -43,7 +44,7 @@ test('__sousShowOnboarding reopens onboarding', async ({ page }) => {
 
   await page.evaluate(() => window.__sousShowOnboarding());
   await expect(page.getByTestId('onboarding-overlay')).toBeVisible();
-  await expect(page.getByRole('heading', { name: 'Tap once, keep logging' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Testing? Tap Bug' })).toBeVisible();
 });
 
 test('onboarding remains usable on a small mobile viewport', async ({ page }) => {

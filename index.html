@@ -166,6 +166,13 @@ html,body{height:100%;height:var(--app-height);min-height:-webkit-fill-available
 .onboarding-actions{display:flex;gap:10px;flex-shrink:0;}
 .onboarding-actions .btn-secondary,.onboarding-actions .btn-primary{min-height:48px;display:flex;align-items:center;justify-content:center;}
 .onboarding-actions .btn-secondary:disabled{opacity:.35;cursor:default;background:var(--card);}
+.bug-report-button{position:fixed;right:calc(14px + env(safe-area-inset-right));bottom:calc(var(--bottom-nav-space) + 12px);z-index:90;display:none;align-items:center;gap:6px;background:var(--raised);color:var(--accent);border:.5px solid var(--border-strong);border-radius:999px;padding:9px 12px;font-family:'Geist',sans-serif;font-size:12px;font-weight:700;box-shadow:0 8px 24px rgba(0,0,0,.18);cursor:pointer;}
+.bug-report-button.show{display:flex;}
+.bug-report-button i{font-size:16px;}
+.bug-report-sheet{max-width:390px;}
+.bug-report-textarea{width:100%;min-height:120px;resize:vertical;background:var(--bg);border:.5px solid var(--border);border-radius:var(--radius-sm);color:var(--text);font-family:'Geist',sans-serif;font-size:14px;line-height:1.45;padding:12px;outline:none;margin-bottom:14px;}
+.bug-report-textarea:focus{border-color:var(--accent-2);}
+.bug-report-status{min-height:18px;color:var(--text-muted);font-size:12px;line-height:1.4;margin-top:10px;}
 @media (max-height:620px){
   .onboarding-dialog{padding-top:10px;}
   .onboarding-icon{width:46px;height:46px;border-radius:15px;font-size:24px;margin-bottom:16px;}
@@ -1186,6 +1193,26 @@ html,body{height:100%;height:var(--app-height);min-height:-webkit-fill-available
   </div>
 </div>
 
+<button class="bug-report-button" type="button" id="bug-report-button" aria-label="Open bug report form" data-testid="bug-report-button">
+  <i class="ti ti-bug"></i><span>Bug</span>
+</button>
+
+<!-- TESTER BUG REPORT MODAL -->
+<div class="modal-overlay" id="bug-report-modal" aria-hidden="true" data-testid="bug-report-modal">
+  <div class="modal-sheet bug-report-sheet" role="dialog" aria-modal="true" aria-labelledby="bug-report-title">
+    <div class="modal-header">
+      <span class="modal-title" id="bug-report-title">What went wrong?</span>
+      <button class="modal-close" type="button" id="bug-report-close" aria-label="Close bug report">x</button>
+    </div>
+    <textarea class="bug-report-textarea" id="bug-report-note" placeholder="What did you say or tap? What did Sous do instead?"></textarea>
+    <div class="modal-btns">
+      <button class="modal-btn primary" type="button" id="bug-report-copy">Copy bug report</button>
+      <button class="modal-btn secondary" type="button" id="bug-report-cancel">Cancel</button>
+    </div>
+    <div class="bug-report-status" id="bug-report-status" aria-live="polite"></div>
+  </div>
+</div>
+
 <!-- FIRST-LAUNCH ONBOARDING -->
 <div class="onboarding-overlay" id="onboarding-overlay" role="dialog" aria-modal="true" aria-labelledby="onboarding-title" aria-describedby="onboarding-body" aria-hidden="true" data-testid="onboarding-overlay">
   <div class="onboarding-dialog">
@@ -1195,10 +1222,10 @@ html,body{height:100%;height:var(--app-height);min-height:-webkit-fill-available
     </div>
     <div class="onboarding-cards" id="onboarding-cards">
       <section class="onboarding-card active" data-onboarding-card>
-        <div class="onboarding-icon"><i class="ti ti-microphone"></i></div>
+        <div class="onboarding-icon"><i class="ti ti-bug"></i></div>
         <div class="onboarding-step">1 / 5</div>
-        <h2 class="onboarding-title" id="onboarding-title">Tap once, keep logging</h2>
-        <p class="onboarding-body" id="onboarding-body">Start voice logging, say your foods, and Sous will return to listening after each item.</p>
+        <h2 class="onboarding-title" id="onboarding-title">Testing? Tap Bug</h2>
+        <p class="onboarding-body" id="onboarding-body">If something goes wrong, tap the Bug button and copy the report. Add what you expected, then send the error log to Stu on WhatsApp.</p>
       </section>
       <section class="onboarding-card" data-onboarding-card>
         <div class="onboarding-icon"><i class="ti ti-message-circle"></i></div>
@@ -1626,6 +1653,7 @@ window.sousApiUrl=path=>`${window.SOUS_API_BASE}${path}`;
 <script src="js/profile.js?v=8"></script>
 <script src="js/recipes.js?v=8"></script>
 <script src="js/onboarding.js?v=1"></script>
+<script src="js/test-mode.js?v=1"></script>
 <script src="js/app.js?v=16"></script>
 <script src="js/ai-interpreter.js?v=3"></script>
 <script src="js/barcode.js?v=1"></script>
