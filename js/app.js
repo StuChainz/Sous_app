@@ -785,6 +785,14 @@ async function handleTranscript(transcript,rawText){
 let _multiResolvePending=null;
 
 function showMultiFoodFallback(rawPhrase,beforeItems,afterItems){
+  if(typeof voiceDebugTrace==='function'){
+    voiceDebugTrace('fallback_shown',{
+      route:'multi_food_resolve',
+      rawText:String(rawPhrase||''),
+      beforeCount:Array.isArray(beforeItems)?beforeItems.length:0,
+      afterCount:Array.isArray(afterItems)?afterItems.length:0
+    });
+  }
   // Split into segments using the parser's splitIngredients when available,
   // falling back to a simple separator split.
   let terms=[];
