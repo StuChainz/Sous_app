@@ -3,10 +3,11 @@
 // ═══════════════════════════════════════════
 let meal=[], itemQueue=[], pendingFood=null, currentAmbig=null;
 let tapRec=null, alwaysOnRec=null, clarificationRec=null, isRecording=false, alwaysOnActive=false, isSpeaking=false;
-let voiceSessionActive=false, voiceCurrentlyListening=false, processingTranscript=false, voiceSessionStoppedManually=false, voiceSessionUseRealtime=false;
+let voiceSessionActive=false, voiceCurrentlyListening=false, processingTranscript=false, voiceSessionStoppedManually=false, voiceSessionUseRealtime=false, voiceTestSessionActive=false;
 let voiceRestartTimer=null, voiceProcessingTimer=null, voiceSpeakingTimer=null, voiceListeningWatchdogTimer=null, voiceNoSpeechRetries=0;
 let voiceSessionState='idle', tapRecStarting=false, tapRecStopping=false, sousRealtimeStarting=false, voicePausedForVisibility=false;
 let voiceRestartCount=0, voiceSuccessCueCount=0, voiceFlowCueCooldownUntil=0, voiceDebugOverlayEl=null, voiceDebugOverlayTimer=null, voiceDebugOverlayDismissed=false, voiceDebugOverlayUpdateQueued=false;
+let voiceListenStartedAt=0;
 let _voiceMode=false;
 let nextIngId=1;
 let modalSelectedFood=null, modalActiveTab='search';
@@ -20,9 +21,9 @@ let _lastSpeakAt=0;
 let _suppressNextConfirmSpeechUntil=0;
 let clarificationState=null;
 let voiceRecoveryState={issue:null,attempts:0};
-const VOICE_RESTART_MIN_MS=250;
-const VOICE_RESTART_DEFAULT_MS=320;
-const VOICE_POST_SPEECH_QUIET_MS=550;
+const VOICE_RESTART_MIN_MS=180;
+const VOICE_RESTART_DEFAULT_MS=260;
+const VOICE_POST_SPEECH_QUIET_MS=420;
 const VOICE_LISTENING_STALL_MS=15000;
 const VOICE_AUDIO_START_TIMEOUT_MS=1800;
 const VOICE_TTS_START_TIMEOUT_MS=2500;
@@ -171,6 +172,8 @@ function summarizeVoiceDebugAction(entry){
   if(entry.event==='parser_result') return shortVoiceDebugText('parser '+((entry.results||[]).length)+' result'+((entry.results||[]).length===1?'':'s'));
   if(entry.event==='ai_result') return shortVoiceDebugText('ai '+((entry.items||[]).length)+' item'+((entry.items||[]).length===1?'':'s'));
   if(entry.event==='transcript_routed') return shortVoiceDebugText('route '+(entry.route||'unknown'));
+  if(entry.event==='transcript_repaired') return shortVoiceDebugText('repaired '+(entry.from||'')+' -> '+(entry.to||''));
+  if(entry.event==='voice_timing') return shortVoiceDebugText('timing '+(entry.totalMs||entry.processingMs||0)+'ms');
   if(entry.event==='voice_recovery') return shortVoiceDebugText('recovery '+(entry.issue||'unknown'));
   return shortVoiceDebugText(entry.event);
 }
@@ -186,7 +189,9 @@ function voiceDebugOverlaySnapshot(){
     'final_action',
     'parser_result',
     'ai_result',
+    'transcript_repaired',
     'transcript_routed',
+    'voice_timing',
     'voice_recovery'
   ].includes(e.event));
   const errorEntry=latestVoiceDebugEntry(list,e=>e&&(
@@ -555,6 +560,14 @@ function scheduleVoiceSessionRestart(delay=VOICE_RESTART_DEFAULT_MS){
     voiceRestartCount++;
     updateVoiceDebugOverlaySoon();
     logVoiceState('restarting for next item');
+    if(voiceTestSessionActive){
+      voiceCurrentlyListening=true;
+      isRecording=false;
+      setVoiceSessionState('listening','test session restart');
+      setMicState('recording');
+      voiceDebugTrace('test_session_listening',{restartCount:voiceRestartCount});
+      return;
+    }
     if(voiceSessionUseRealtime) startSousRealtimeVoice();
     else startTapRec({sessionRestart:true});
   },safeDelay);
@@ -591,6 +604,7 @@ function stopAllVoiceActivity(reason){
   logVoiceState('hard cleanup',{reason});
   clearVoiceTimers();
   voiceSessionActive=false;
+  voiceTestSessionActive=false;
   voiceSessionStoppedManually=true;
   voiceCurrentlyListening=false;
   processingTranscript=false;
@@ -612,6 +626,281 @@ function stopAllVoiceActivity(reason){
   alwaysOnActive=false;
   setVoiceSessionState('idle',reason);
 }
+
+const VOICE_COMMON_FOOD_REPAIRS=[
+  {from:'jeans',to:['cheese','beans']},
+  {from:'gene',to:['cheese','beans']},
+  {from:'genes',to:['cheese','beans']},
+  {from:'source',to:['sauce']},
+  {from:'sore',to:['sauce']},
+  {from:'sores',to:['sauce']},
+  {from:'saws',to:['sauce']},
+  {from:'bred',to:['bread']},
+  {from:'mill',to:['milk']},
+  {from:'meet',to:['meat']},
+  {from:'flower',to:['flour']},
+  {from:'floor',to:['flour']},
+  {from:'serial',to:['cereal']},
+  {from:'serials',to:['cereal']},
+  {from:'chilly',to:['chilli']},
+  {from:'chili',to:['chilli']},
+  {from:'muscles',to:['mussels']},
+  {from:'stake',to:['steak']},
+  {from:'pairs',to:['pears']},
+  {from:'peace',to:['peas']},
+  {from:'piece',to:['peas']}
+];
+
+function normalizeVoiceTranscriptText(text){
+  return String(text||'').replace(/\s+/g,' ').trim();
+}
+function normalizeVoiceAlternative(input){
+  if(input==null) return null;
+  if(typeof input==='string') return {text:normalizeVoiceTranscriptText(input),confidence:null,source:'alternative'};
+  const text=normalizeVoiceTranscriptText(input.transcript||input.text||input.raw||'');
+  if(!text) return null;
+  const confidence=typeof input.confidence==='number'?input.confidence:null;
+  return {text,confidence,source:input.source||'alternative',repair:input.repair||null};
+}
+function uniqVoiceCandidates(candidates){
+  const seen=new Set();
+  return (candidates||[]).map(normalizeVoiceAlternative).filter(candidate=>{
+    if(!candidate||!candidate.text) return false;
+    const key=candidate.text.toLowerCase();
+    if(seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+function voiceParsedScore(text){
+  const clean=normalizeVoiceTranscriptText(text);
+  if(!clean||typeof parseText!=='function') return {score:-100,results:[],reason:'empty'};
+  let results=[];
+  try{results=parseText(clean)||[];}catch(e){results=[];}
+  const commands=results.filter(r=>r&&r.command);
+  if(commands.length) return {score:900+commands.length*20,results,reason:'command'};
+  const foods=results.filter(r=>r&&!r.command);
+  const resolved=foods.filter(r=>!r.ambiguous);
+  const clear=foods.filter(isClearIngredient);
+  const specified=foods.filter(r=>r.weightSpecified);
+  const ambiguous=foods.filter(r=>r.ambiguous);
+  const low=foods.filter(r=>r.confidence==='low'||r.needsConfirm);
+  const reason=typeof aiEscalationReason==='function'?aiEscalationReason(clean,results):(!foods.length?'empty':'none');
+  let score=foods.length*110+resolved.length*35+clear.length*45+specified.length*25;
+  score-=ambiguous.length*18+low.length*18;
+  if(reason==='none') score+=70;
+  if(reason==='partial') score-=35;
+  if(reason==='low-confidence') score-=20;
+  if(reason==='empty') score-=90;
+  return {score,results,reason};
+}
+function voiceRepairVariants(text,base={}){
+  const clean=normalizeVoiceTranscriptText(text);
+  const variants=[];
+  VOICE_COMMON_FOOD_REPAIRS.forEach(rule=>{
+    const re=new RegExp('\\b'+rule.from.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+'\\b','gi');
+    if(!re.test(clean)) return;
+    rule.to.forEach(to=>{
+      const repaired=clean.replace(re,to);
+      variants.push({
+        text:repaired,
+        confidence:base.confidence??null,
+        source:'food_repair',
+        repair:{from:rule.from,to}
+      });
+    });
+  });
+  return variants;
+}
+function chooseVoiceTranscript(transcript,{alternatives=[],confidence=null,source='tap'}={}){
+  const original=normalizeVoiceTranscriptText(transcript);
+  const baseCandidates=uniqVoiceCandidates([
+    {text:original,confidence,source:'primary'},
+    ...alternatives
+  ]);
+  const repairCandidates=baseCandidates.flatMap(candidate=>voiceRepairVariants(candidate.text,candidate));
+  const candidates=uniqVoiceCandidates([...baseCandidates,...repairCandidates]);
+  const scored=candidates.map(candidate=>({
+    ...candidate,
+    ...voiceParsedScore(candidate.text)
+  })).sort((a,b)=>b.score-a.score);
+  const originalScore=voiceParsedScore(original);
+  const best=scored[0]||{text:original,score:originalScore.score,reason:originalScore.reason,results:originalScore.results};
+  const shouldReplace=best.text&&best.text!==original&&(
+    best.score>=originalScore.score+35||
+    (originalScore.reason==='empty'&&best.score>0)||
+    (originalScore.reason==='partial'&&best.reason==='none')
+  );
+  voiceDebugTrace('transcript_candidates',{
+    source,
+    transcript:original,
+    alternatives:baseCandidates.map(c=>({text:c.text,confidence:c.confidence,source:c.source})).slice(0,8),
+    top:scored.slice(0,5).map(c=>({text:c.text,score:Math.round(c.score),reason:c.reason,source:c.source,repair:c.repair||null}))
+  });
+  if(!shouldReplace) return {transcript:original,original,changed:false,score:originalScore.score,reason:originalScore.reason,alternatives:baseCandidates};
+  voiceDebugTrace('transcript_repaired',{
+    source,
+    from:original,
+    to:best.text,
+    scoreBefore:Math.round(originalScore.score),
+    scoreAfter:Math.round(best.score),
+    reasonBefore:originalScore.reason,
+    reasonAfter:best.reason,
+    repair:best.repair||null
+  });
+  return {
+    transcript:best.text,
+    original,
+    changed:true,
+    score:best.score,
+    reason:best.reason,
+    forceHighConfidence:best.reason==='none'||best.score>originalScore.score+70,
+    alternatives:baseCandidates
+  };
+}
+
+async function routeFinalVoiceTranscript(transcript,{source='tap',confidence=null,lowConfidence=null,alternatives=[],timing={}}={}){
+  const selected=chooseVoiceTranscript(transcript,{alternatives,confidence,source});
+  const clean=String(selected.transcript||'').trim();
+  if(!clean) return false;
+  if(processingTranscript){
+    voiceDebugTrace('transcript_rejected',{source,transcript:clean,reason:'processing'});
+    return false;
+  }
+  voiceNoSpeechRetries=0;
+  logVoiceState('speech result received',{source,transcript:clean,originalTranscript:selected.original,confidence});
+  voiceDebugTrace('transcript_heard',{source,transcript:clean,originalTranscript:selected.original,confidence,corrected:selected.changed});
+  const isLow=lowConfidence==null
+    ?(!selected.forceHighConfidence&&typeof confidence==='number'&&confidence>0&&confidence<0.75)
+    :!!lowConfidence;
+  const routeStartedAt=Date.now();
+  _voiceMode=true;
+  setVoiceProcessing(true,'transcript processing');
+  console.log('[Sous Voice] processing transcript');
+  logVoiceState('transcript processing started',{transcript:clean,lowConfidence:isLow,source});
+  const done=(opts={})=>{
+    setVoiceProcessing(false,'transcript processing');
+    logVoiceState('transcript processing finished',{source});
+    voiceDebugTrace('voice_timing',{
+      source,
+      transcript:clean,
+      corrected:selected.changed,
+      listenToFinalMs:timing.listenStartedAt?Math.max(0,routeStartedAt-timing.listenStartedAt):null,
+      firstHeardToFinalMs:timing.firstHeardAt?Math.max(0,routeStartedAt-timing.firstHeardAt):null,
+      processingMs:Math.max(0,Date.now()-routeStartedAt),
+      totalMs:timing.listenStartedAt?Math.max(0,Date.now()-timing.listenStartedAt):null
+    });
+    if(opts.restart!==false&&document.querySelector('.log-screen.active')?.id==='ls-listening') scheduleVoiceSessionRestart(VOICE_RESTART_DEFAULT_MS);
+    return true;
+  };
+  try{
+    if(document.querySelector('.log-screen.active')?.id==='ls-multi-confirm'){
+      voiceDebugTrace('transcript_routed',{route:'multi_confirm_fill',source,transcript:clean});
+      try{handleMultiConfirmVoiceFill(clean);}catch(e){console.warn('[Sous Voice] multi-confirm fill error',e);}
+      return done({restart:false});
+    }
+    if(clarificationState?.active){
+      voiceDebugTrace('transcript_routed',{route:'clarification',source,transcript:clean});
+      await Promise.resolve(handleClarification(clean));
+      return done({restart:false});
+    }
+    const recoveryIssue=transcriptRecoveryIssue(clean,isLow);
+    if(maybeRecoverVoiceTranscript(recoveryIssue,clean)){
+      voiceDebugTrace('transcript_routed',{route:'voice_recovery',source,issue:recoveryIssue,transcript:clean});
+      return done({restart:false});
+    }
+    if(isLow){
+      voiceDebugTrace('transcript_routed',{route:'low_confidence_review',source,transcript:clean});
+      showVoiceCorrection(clean);
+      return done();
+    }
+    voiceDebugTrace('transcript_routed',{route:'normal_parser',source,transcript:clean});
+    await Promise.resolve(handleTranscript(clean,clean));
+    return done();
+  }catch(e){
+    console.warn('[Sous Voice] transcript error',e);
+    return done();
+  }
+}
+
+function sousVoiceTestHarnessAllowed(){
+  try{
+    const host=location.hostname;
+    return location.protocol==='file:'||
+      host==='localhost'||host==='127.0.0.1'||host==='[::1]'||host==='::1'||
+      new URLSearchParams(location.search).get('sousVoiceTest')==='1'||
+      localStorage.getItem('sous_voice_test_harness')==='1';
+  }catch(e){return false;}
+}
+function sousVoiceStateSnapshot(){
+  return {
+    state:voiceSessionState,
+    sessionActive:!!voiceSessionActive,
+    testSessionActive:!!voiceTestSessionActive,
+    recognizerActive:!!(voiceCurrentlyListening||isRecording||clarificationRec||(sousRealtime&&sousRealtime.active)),
+    processing:!!processingTranscript,
+    speaking:!!isSpeaking,
+    restartCount:voiceRestartCount,
+    activeScreen:document.querySelector('.log-screen.active')?.id||null,
+    currentTab:typeof currentTab!=='undefined'?currentTab:null,
+    clarification:voiceDebugClarificationSnapshot(),
+    meal:meal.map(item=>({
+      id:item.id,
+      name:item.name,
+      weight:item.weight,
+      kcal:item.kcal,
+      protein:item.protein,
+      carbs:item.carbs,
+      fat:item.fat
+    }))
+  };
+}
+function exposeSousVoiceTestHarness(){
+  if(!sousVoiceTestHarnessAllowed()) return;
+  window.__sousVoiceState=sousVoiceStateSnapshot;
+  window.__sousStartVoiceTestSession=(presetSection=null)=>{
+    if(typeof switchTab==='function') switchTab('log',{fresh:true,silent:true,section:presetSection||null});
+    else startSilentLog(presetSection||null);
+    clearVoiceTimers();
+    hideVoiceCorrectBar();
+    voiceRestartCount=0;
+    voiceSuccessCueCount=0;
+    voiceFlowCueCooldownUntil=0;
+    voiceSessionActive=true;
+    voiceTestSessionActive=true;
+    voiceSessionStoppedManually=false;
+    voicePausedForVisibility=false;
+    voiceSessionUseRealtime=false;
+    voiceCurrentlyListening=true;
+    isRecording=false;
+    processingTranscript=false;
+    isSpeaking=false;
+    setVoiceSessionState('listening','test session started');
+    setMicState('recording');
+    voiceDebugTrace('test_session_started');
+    return sousVoiceStateSnapshot();
+  };
+  window.__sousStopVoiceTestSession=()=>{
+    stopAllVoiceActivity('test session stopped');
+    setMicState('idle');
+    voiceDebugTrace('test_session_stopped');
+    return sousVoiceStateSnapshot();
+  };
+  window.__sousTestVoiceTranscript=async input=>{
+    const payload=typeof input==='object'&&input?input:{transcript:input};
+    const clean=String(payload.transcript||payload.text||'').trim();
+    if(!clean) return false;
+    clearVoiceListeningWatchdog();
+    clearVoiceRestartTimer();
+    voiceCurrentlyListening=false;
+    isRecording=false;
+    const el=document.getElementById('transcript-text');
+    if(el) el.textContent='"'+clean+'"';
+    const alternatives=Array.isArray(payload.alternatives)?payload.alternatives:[];
+    return routeFinalVoiceTranscript(clean,{source:'test',confidence:payload.confidence??1,lowConfidence:false,alternatives});
+  };
+}
+exposeSousVoiceTestHarness();
 
 // ═══════════════════════════════════════════
 // QUEUE HELPERS
@@ -3185,12 +3474,13 @@ function saveMealToLog(saveAsUsual=false){
 function buildTapRec(){
   if(!SR) return null;
   let pendingTranscript="";
+  let pendingAlternatives=[];
   let finalizeTimer=null;
   let utteranceStartTime=null;
   let pendingConfidence=null;
 
-  const BASE_DELAY=600;
-  const EXTENDED_DELAY=1200;
+  const BASE_DELAY=420;
+  const EXTENDED_DELAY=950;
   const MAX_UTTERANCE_MS=10000;
 
   function getAdaptiveDelay(text){
@@ -3216,8 +3506,11 @@ function buildTapRec(){
 
     const transcript=pendingTranscript.trim();
     const finalConf=pendingConfidence;
+    const alternatives=pendingAlternatives.slice(0,10);
+    const firstHeardAt=utteranceStartTime;
 
     pendingTranscript="";
+    pendingAlternatives=[];
     pendingConfidence=null;
     utteranceStartTime=null;
     if(finalizeTimer) clearTimeout(finalizeTimer);
@@ -3225,57 +3518,88 @@ function buildTapRec(){
 
     requestTapStop('finalizing transcript');
 
-    voiceNoSpeechRetries=0;
-    logVoiceState('speech result received',{transcript,confidence:finalConf});
-    voiceDebugTrace('transcript_heard',{source:'tap',transcript,confidence:finalConf});
     stopTapRec();
-    const isLow=typeof finalConf==='number'&&finalConf>0&&finalConf<0.75;
-    _voiceMode=true;
-    setVoiceProcessing(true,'transcript processing');
-    console.log('[Sous Voice] processing transcript');
-    logVoiceState('transcript processing started',{transcript,lowConfidence:isLow});
-    const done=(opts={})=>{
-      setVoiceProcessing(false,'transcript processing');
-      logVoiceState('transcript processing finished');
-      if(opts.restart!==false&&document.querySelector('.log-screen.active')?.id==='ls-listening') scheduleVoiceSessionRestart(VOICE_RESTART_DEFAULT_MS);
-    };
-    if(document.querySelector('.log-screen.active')?.id==='ls-multi-confirm'){
-      voiceDebugTrace('transcript_routed',{route:'multi_confirm_fill',transcript});
-      try{handleMultiConfirmVoiceFill(transcript);}catch(e){console.warn('[Sous Voice] multi-confirm fill error',e);}
-      done({restart:false});
-    } else if(clarificationState?.active){
-      voiceDebugTrace('transcript_routed',{route:'clarification',transcript});
-      Promise.resolve(handleClarification(transcript)).then(()=>done({restart:false})).catch(e=>{console.warn('[Sous Voice] clarification error',e);done({restart:false});});
-    } else {
-      const recoveryIssue=transcriptRecoveryIssue(transcript,isLow);
-      if(maybeRecoverVoiceTranscript(recoveryIssue,transcript)){
-        voiceDebugTrace('transcript_routed',{route:'voice_recovery',issue:recoveryIssue,transcript});
-        done({restart:false});
-        return;
-      }
-      if(isLow){
-        voiceDebugTrace('transcript_routed',{route:'low_confidence_review',transcript});
-        showVoiceCorrection(transcript);done();
-        return;
-      }
-      voiceDebugTrace('transcript_routed',{route:'normal_parser',transcript});
-      Promise.resolve(handleTranscript(transcript,transcript)).then(done).catch(e=>{console.warn('[Sous Voice] transcript error',e);done();});
-    }
+    routeFinalVoiceTranscript(transcript,{
+      source:'tap',
+      confidence:finalConf,
+      alternatives,
+      timing:{listenStartedAt:voiceListenStartedAt,firstHeardAt}
+    });
   }
 
   const r=new SR(); r.lang='en-GB'; r.interimResults=true; r.continuous=true; r.maxAlternatives=3;
-  r.onstart=()=>{tapRecStarting=false;tapRecStopping=false;isRecording=true;voiceCurrentlyListening=true;setVoiceSessionState('listening','recognition started');console.log('[Sous Voice] listening');logVoiceState('recognition actually started');setMicState('recording');startVoiceListeningWatchdog('tap');};
+  function speechResultAlternatives(result){
+    const alts=[];
+    if(!result) return alts;
+    const count=Math.min(result.length||0,3);
+    for(let i=0;i<count;i++){
+      const alt=result[i];
+      const text=normalizeVoiceTranscriptText(alt?.transcript||'');
+      if(text) alts.push({text,confidence:alt?.confidence??null,source:i===0?'primary':'speech_alt'});
+    }
+    return alts;
+  }
+  function combineSpeechAlternativeGroups(groups,limit=10){
+    if(!groups.length) return [];
+    let combined=[{text:'',confidence:null,source:'speech_alt'}];
+    groups.forEach(group=>{
+      const next=[];
+      const usable=group.length?group:[{text:'',confidence:null,source:'speech_alt'}];
+      combined.forEach(prefix=>{
+        usable.forEach(alt=>{
+          const text=normalizeVoiceTranscriptText([prefix.text,alt.text].filter(Boolean).join(' '));
+          const confidence=[prefix.confidence,alt.confidence].filter(v=>typeof v==='number');
+          next.push({
+            text,
+            confidence:confidence.length?Math.min(...confidence):null,
+            source:alt.source||prefix.source||'speech_alt'
+          });
+        });
+      });
+      combined=next.slice(0,limit);
+    });
+    return combined.filter(c=>c.text);
+  }
+  function mergePendingAlternatives(previousText,existing,newSegmentAlternatives){
+    const previous=normalizeVoiceTranscriptText(previousText);
+    const bases=existing.length?existing:[previous?{text:previous,confidence:pendingConfidence,source:'primary'}:{text:'',confidence:null,source:'primary'}];
+    const merged=[];
+    bases.forEach(base=>{
+      (newSegmentAlternatives.length?newSegmentAlternatives:[{text:'',confidence:null,source:'speech_alt'}]).forEach(alt=>{
+        const text=normalizeVoiceTranscriptText([base.text,alt.text].filter(Boolean).join(' '));
+        if(text) merged.push({text,confidence:alt.confidence??base.confidence??null,source:alt.source||base.source||'speech_alt'});
+      });
+    });
+    return uniqVoiceCandidates(merged).slice(0,10);
+  }
+  r.onstart=()=>{tapRecStarting=false;tapRecStopping=false;isRecording=true;voiceCurrentlyListening=true;voiceListenStartedAt=Date.now();setVoiceSessionState('listening','recognition started');console.log('[Sous Voice] listening');logVoiceState('recognition actually started');setMicState('recording');startVoiceListeningWatchdog('tap');};
   r.onresult=e=>{
     startVoiceListeningWatchdog('tap');
     let interim='',final='',finalConf=null;
-    for(let i=e.resultIndex;i<e.results.length;i++){const res=e.results[i];if(res.isFinal){final+=res[0].transcript;if(finalConf===null)finalConf=res[0].confidence;}else interim+=res[0].transcript;}
+    const finalAltGroups=[];
+    for(let i=e.resultIndex;i<e.results.length;i++){
+      const res=e.results[i];
+      if(res.isFinal){
+        final+=res[0].transcript;
+        finalAltGroups.push(speechResultAlternatives(res));
+        if(finalConf===null)finalConf=res[0].confidence;
+      }else interim+=res[0].transcript;
+    }
     const el=document.getElementById('transcript-text');
     const heard=[pendingTranscript,final,interim].filter(Boolean).join(' ').replace(/\s+/g,' ').trim();
     if(el) el.textContent=heard?'"'+heard+'"':'—';
     if(final){
       if(!pendingTranscript) utteranceStartTime=Date.now();
+      const previousTranscript=pendingTranscript;
+      const newAlternatives=combineSpeechAlternativeGroups(finalAltGroups);
       pendingTranscript=[pendingTranscript,final.trim()].filter(Boolean).join(' ').replace(/\s+/g,' ').trim();
+      pendingAlternatives=mergePendingAlternatives(previousTranscript,pendingAlternatives,newAlternatives);
       if(finalConf!==null) pendingConfidence=finalConf;
+      voiceDebugTrace('speech_alternatives',{
+        source:'tap',
+        transcript:pendingTranscript,
+        alternatives:pendingAlternatives.map(a=>({text:a.text,confidence:a.confidence,source:a.source})).slice(0,8)
+      });
 
       if(finalizeTimer) clearTimeout(finalizeTimer);
 
@@ -3293,6 +3617,7 @@ function buildTapRec(){
     if(finalizeTimer) clearTimeout(finalizeTimer);
     finalizeTimer=null;
     pendingTranscript="";
+    pendingAlternatives=[];
     pendingConfidence=null;
     utteranceStartTime=null;
     const err=e.error||'unknown';

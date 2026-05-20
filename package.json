@@ -3,11 +3,15 @@
   "version": "1.0.0",
   "type": "commonjs",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "test:voice": "playwright test tests/voice-simulation.spec.cjs"
   },
   "dependencies": {
     "cors": "^2.8.5",
     "express": "^4.19.2",
     "openai": "^6.38.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.60.0"
   }
 }
