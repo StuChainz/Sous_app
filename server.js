@@ -445,6 +445,147 @@ app.post('/api/interpret', async (req, res) => {
   }
 });
 
+app.post('/api/interpret-action', async (req, res) => {
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) {
+    return res.status(500).json({ error: 'OPENAI_API_KEY is not set on the server.' });
+  }
+
+  const { transcript, section = null, context = {} } = req.body || {};
+  const cleanTranscript = String(transcript || '').trim();
+  if (!cleanTranscript) {
+    return res.status(400).json({ error: 'transcript is required.' });
+  }
+
+  const compactContext = JSON.stringify(context || {}).slice(0, 18000);
+  const prompt = [
+    'You are Sous, interpreting food logging intent into safe app actions.',
+    'Return JSON only. No prose, no markdown.',
+    'You are not a nutrition source. Never return calories, macros, nutrients, or saved-meal claims.',
+    'Use only action intent and references. The app will resolve foods and nutrition locally.',
+    'Prefer refs from context when relevant. Use clarify when the source/target is ambiguous.',
+    'Allowed action types: add_food, replace_food, remove_food, change_quantity, repeat_meal, modify_meal_copy, add_usual_meal, clarify, none.',
+    'Allowed change ops for modify_meal_copy: replace, remove, scale, set_quantity, add.',
+    'For "that" or "last", target the current meal last item.',
+    'For "same breakfast", repeat the latest breakfast from history unless another date is specified.',
+    'For "yesterday\'s lunch", use source dateOffset -1 and section lunch.',
+    'For usual meals, use add_usual_meal with a usualRef when possible.',
+    `Current section: ${section || ''}`,
+    `Transcript: ${cleanTranscript}`,
+    `Context JSON: ${compactContext}`
+  ].join('\n');
+
+  const actionSchema = {
+    type: 'object',
+    additionalProperties: false,
+    properties: {
+      type: {
+        type: 'string',
+        enum: ['add_food','replace_food','remove_food','change_quantity','repeat_meal','modify_meal_copy','add_usual_meal','clarify','none']
+      },
+      confidence: { type: 'string', enum: ['low','medium','high'] },
+      message: { type: ['string','null'] },
+      food: { type: ['string','null'] },
+      targetFood: { type: ['string','null'] },
+      replacementFood: { type: ['string','null'] },
+      quantityText: { type: ['string','null'] },
+      factor: { type: ['number','null'] },
+      section: { type: ['string','null'] },
+      source: {
+        type: ['object','null'],
+        additionalProperties: false,
+        properties: {
+          ref: { type: ['string','null'] },
+          kind: { type: ['string','null'], enum: ['current_meal','history_meal','usual_meal',null] },
+          section: { type: ['string','null'] },
+          date: { type: ['string','null'] },
+          dateOffset: { type: ['number','null'] },
+          when: { type: ['string','null'], enum: ['latest','yesterday',null] },
+          query: { type: ['string','null'] }
+        },
+        required: ['ref','kind','section','date','dateOffset','when','query']
+      },
+      target: {
+        type: ['object','null'],
+        additionalProperties: false,
+        properties: {
+          ref: { type: ['string','null'] },
+          scope: { type: ['string','null'], enum: ['current_meal','source_meal','last_item',null] },
+          food: { type: ['string','null'] }
+        },
+        required: ['ref','scope','food']
+      },
+      usualRef: { type: ['string','null'] },
+      changes: {
+        type: 'array',
+        items: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            op: { type: 'string', enum: ['replace','remove','scale','set_quantity','add'] },
+            targetRef: { type: ['string','null'] },
+            from: { type: ['string','null'] },
+            to: { type: ['string','null'] },
+            food: { type: ['string','null'] },
+            quantityText: { type: ['string','null'] },
+            factor: { type: ['number','null'] }
+          },
+          required: ['op','targetRef','from','to','food','quantityText','factor']
+        }
+      }
+    },
+    required: ['type','confidence','message','food','targetFood','replacementFood','quantityText','factor','section','source','target','usualRef','changes']
+  };
+
+  try {
+    const upstream = await fetch('https://api.openai.com/v1/responses', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`
+      },
+      body: JSON.stringify({
+        model: 'gpt-4.1-mini',
+        input: prompt,
+        text: {
+          format: {
+            type: 'json_schema',
+            name: 'meal_action_intent',
+            strict: true,
+            schema: actionSchema
+          }
+        }
+      })
+    });
+
+    if (!upstream.ok) {
+      const text = await upstream.text();
+      return res.status(upstream.status).json({ error: `OpenAI error: ${upstream.status}`, detail: text });
+    }
+
+    const data = await upstream.json();
+    let rawText = '';
+    if (typeof data.output_text === 'string') rawText = data.output_text;
+    else if (Array.isArray(data.output)) {
+      rawText = data.output
+        .flatMap(item => Array.isArray(item.content) ? item.content : [])
+        .map(part => part.text || part.output_text || '')
+        .filter(Boolean)
+        .join('\n');
+    }
+
+    let parsed;
+    try { parsed = JSON.parse(rawText); }
+    catch {
+      return res.status(502).json({ error: 'Invalid JSON returned by OpenAI.', raw: rawText });
+    }
+
+    res.json(parsed);
+  } catch (err) {
+    res.status(500).json({ error: 'Action interpretation request failed.', detail: err.message });
+  }
+});
+
 const HOST = process.env.HOST || '0.0.0.0';
 
 app.listen(PORT, HOST, () => {

@@ -10,7 +10,12 @@
 const DEFAULT_AI_ENDPOINT=typeof window!=='undefined'&&typeof window.sousApiUrl==='function'
   ? window.sousApiUrl('/api/interpret')
   : '/api/interpret';
+const DEFAULT_AI_ACTION_ENDPOINT=typeof window!=='undefined'&&typeof window.sousApiUrl==='function'
+  ? window.sousApiUrl('/api/interpret-action')
+  : '/api/interpret-action';
 const DEFAULT_AI_MODEL='gpt-4.1-mini';
+const AI_ACTION_TYPES=new Set(['add_food','replace_food','remove_food','change_quantity','repeat_meal','modify_meal_copy','add_usual_meal','clarify','none']);
+const AI_ACTION_CHANGE_OPS=new Set(['replace','remove','scale','set_quantity','add']);
 
 function fallbackCreateIngredientDraft(input={}){
   return {
@@ -41,9 +46,154 @@ function getAIInterpreterConfig(){
   const globalKey=typeof window!=='undefined'?window.SOUS_OPENAI_API_KEY:null;
   return {
     endpoint:globalConfig.endpoint||stored.endpoint||DEFAULT_AI_ENDPOINT,
+    actionEndpoint:globalConfig.actionEndpoint||stored.actionEndpoint||DEFAULT_AI_ACTION_ENDPOINT,
     apiKey:globalConfig.apiKey||stored.apiKey||globalKey||null,
     model:globalConfig.model||stored.model||DEFAULT_AI_MODEL
   };
+}
+
+function aiActionReferenceTrigger(transcript){
+  const s=String(transcript||'').toLowerCase();
+  return /\b(same|usual|regular|yesterday|last time|normally|instead of|swap|replace|change|make that|make it|half|halve|double|the one i usually|the one i normally)\b/.test(s);
+}
+
+function cloneAIContextIngredient(item,index,prefix){
+  if(!item) return null;
+  return {
+    ref:prefix+':item:'+index,
+    name:String(item.name||'').trim(),
+    weight:item.weight!=null?Math.round(Number(item.weight)||0):null,
+    serving:item.serving?{
+      label:item.serving.label||null,
+      quantity:item.serving.quantity??null,
+      grams:item.serving.grams??null
+    }:null
+  };
+}
+
+function isoDateOffset(days){
+  const d=new Date();
+  d.setDate(d.getDate()+days);
+  return d.toISOString().slice(0,10);
+}
+
+function buildAIActionContext({section=null}={}){
+  const context={
+    currentSection:section||null,
+    today:isoDateOffset(0),
+    yesterday:isoDateOffset(-1),
+    currentMeal:[],
+    historyMeals:[],
+    usualMeals:[],
+    recentIngredients:[]
+  };
+
+  try{
+    if(Array.isArray(window.meal||meal)){
+      const active=window.meal||meal;
+      context.currentMeal=active.map((item,index)=>cloneAIContextIngredient(item,index,'current')).filter(Boolean);
+    }
+  }catch(e){}
+
+  try{
+    const log=typeof getLog==='function'?getLog():{};
+    Object.keys(log||{}).sort().reverse().slice(0,14).forEach(date=>{
+      const meals=Array.isArray(log[date]?.meals)?log[date].meals:[];
+      meals.forEach((mealObj,index)=>{
+        const ref='history:'+date+':'+index;
+        context.historyMeals.push({
+          ref,
+          date,
+          section:mealObj.section||null,
+          name:mealObj.name||'Meal',
+          ingredients:(mealObj.ingredients||[]).map((item,itemIndex)=>cloneAIContextIngredient(item,itemIndex,ref)).filter(Boolean)
+        });
+      });
+    });
+    context.historyMeals=context.historyMeals.slice(0,24);
+  }catch(e){}
+
+  try{
+    const usuals=typeof getUsualMeals==='function'?getUsualMeals():{};
+    Object.keys(usuals||{}).forEach(sectionKey=>{
+      const list=Array.isArray(usuals[sectionKey])?usuals[sectionKey]:[];
+      list.forEach((usual,index)=>{
+        const ref='usual:'+sectionKey+':'+index;
+        context.usualMeals.push({
+          ref,
+          section:usual.section||sectionKey,
+          name:usual.name||'Usual meal',
+          useCount:usual.useCount||0,
+          ingredients:(usual.ingredients||[]).map((item,itemIndex)=>cloneAIContextIngredient(item,itemIndex,ref)).filter(Boolean)
+        });
+      });
+    });
+  }catch(e){}
+
+  try{
+    context.recentIngredients=(typeof getRecentIngredients==='function'?getRecentIngredients():[])
+      .slice(0,20)
+      .map(item=>({name:item.name||'',weight:item.weight??null}));
+  }catch(e){}
+
+  return context;
+}
+
+function sanitizeAIAction(action){
+  if(!action||typeof action!=='object'||!AI_ACTION_TYPES.has(action.type)) return null;
+  const clean={
+    type:action.type,
+    confidence:['low','medium','high'].includes(action.confidence)?action.confidence:'low',
+    message:action.message==null?null:String(action.message).slice(0,160),
+    food:action.food==null?null:String(action.food).trim(),
+    targetFood:action.targetFood==null?null:String(action.targetFood).trim(),
+    replacementFood:action.replacementFood==null?null:String(action.replacementFood).trim(),
+    quantityText:action.quantityText==null?null:String(action.quantityText).trim(),
+    factor:Number.isFinite(Number(action.factor))?Number(action.factor):null,
+    section:action.section==null?null:String(action.section).trim(),
+    usualRef:action.usualRef==null?null:String(action.usualRef).trim(),
+    source:action.source&&typeof action.source==='object'?{...action.source}:null,
+    target:action.target&&typeof action.target==='object'?{...action.target}:null,
+    changes:Array.isArray(action.changes)?action.changes.filter(change=>change&&AI_ACTION_CHANGE_OPS.has(change.op)).map(change=>({
+      op:change.op,
+      targetRef:change.targetRef==null?null:String(change.targetRef).trim(),
+      from:change.from==null?null:String(change.from).trim(),
+      to:change.to==null?null:String(change.to).trim(),
+      food:change.food==null?null:String(change.food).trim(),
+      quantityText:change.quantityText==null?null:String(change.quantityText).trim(),
+      factor:Number.isFinite(Number(change.factor))?Number(change.factor):null
+    })):[]
+  };
+  return clean;
+}
+
+async function interpretMealActionWithAI({transcript='',section=null,countryCode=null}={}){
+  const cleanTranscript=String(transcript||'').trim();
+  if(!cleanTranscript||!aiActionReferenceTrigger(cleanTranscript)) return null;
+  const config=getAIInterpreterConfig();
+  const endpoint=config.actionEndpoint||DEFAULT_AI_ACTION_ENDPOINT;
+  const isProxy=endpoint.startsWith('/')||endpoint.includes('/api/interpret-action');
+  if(!isProxy&&!config.apiKey) return null;
+  const context=buildAIActionContext({section});
+
+  const controller=new AbortController();
+  const timeout=setTimeout(()=>controller.abort(),10000);
+  try{
+    const headers={'Content-Type':'application/json'};
+    if(!isProxy&&config.apiKey) headers['Authorization']=`Bearer ${config.apiKey}`;
+    const res=await fetch(endpoint,{
+      method:'POST',
+      signal:controller.signal,
+      headers,
+      body:JSON.stringify({transcript:cleanTranscript,section,countryCode,context})
+    });
+    if(!res.ok) return null;
+    return sanitizeAIAction(await res.json());
+  }catch(e){
+    return null;
+  }finally{
+    clearTimeout(timeout);
+  }
 }
 
 function emptyAIDraft(section,makeMealDraft){
@@ -143,5 +293,10 @@ async function interpretMealWithAI({transcript='',section=null,countryCode=null,
   }
 }
 
-if(typeof window!=='undefined') window.interpretMealWithAI=interpretMealWithAI;
-if(typeof module!=='undefined') module.exports={interpretMealWithAI};
+if(typeof window!=='undefined'){
+  window.interpretMealWithAI=interpretMealWithAI;
+  window.interpretMealActionWithAI=interpretMealActionWithAI;
+  window.buildAIActionContext=buildAIActionContext;
+  window.aiActionReferenceTrigger=aiActionReferenceTrigger;
+}
+if(typeof module!=='undefined') module.exports={interpretMealWithAI,interpretMealActionWithAI,buildAIActionContext,aiActionReferenceTrigger,sanitizeAIAction};
