@@ -30,7 +30,7 @@ async function useDefaultQuantityIfAsked(page) {
 async function commitReviewIfShown(page) {
   if ((await activeScreen(page)) === 'ls-multi-confirm') {
     await expect(page.locator('#mc-list > div')).toHaveCount(3);
-    await expect(page.locator('#mc-list input[type="number"]')).toHaveCount(12);
+    await expect(page.locator('#mc-list input[type="number"]')).toHaveCount(15);
     await page.locator('#mc-add-btn').click();
     await expect.poll(() => activeScreen(page)).toBe('ls-listening');
   }

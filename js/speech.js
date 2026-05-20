@@ -1584,12 +1584,14 @@ function parseClarificationInput(baseItem,answer,state=clarificationState){
   const answerQtyText=answerQty.known?clarificationQuantityText(answerQty.grams,answerQty.unit):'';
   const fullInput=normaliseClarificationInput(`${carryQty} ${answer} ${baseItem}`);
   const candidates=[
+    normaliseClarificationInput(`${carryQty} ${answer}`),
+    quantityFirstClarificationInput(`${carryQty} ${answer}`),
+    normaliseClarificationInput(answer),
+    quantityFirstClarificationInput(answer),
     fullInput,
     quantityFirstClarificationInput(fullInput),
     normaliseClarificationInput(`${carryQty} ${baseItem} ${answer}`),
-    quantityFirstClarificationInput(`${carryQty} ${baseItem} ${answer}`),
-    normaliseClarificationInput(answer),
-    quantityFirstClarificationInput(answer)
+    quantityFirstClarificationInput(`${carryQty} ${baseItem} ${answer}`)
   ].filter((text,index,arr)=>text&&arr.indexOf(text)===index);
   let fallback={text:fullInput,results:typeof parseText==='function'?parseText(fullInput):[]};
   for(const text of candidates){
