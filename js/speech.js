@@ -5,7 +5,7 @@ let meal=[], itemQueue=[], pendingFood=null, currentAmbig=null;
 let tapRec=null, alwaysOnRec=null, clarificationRec=null, isRecording=false, alwaysOnActive=false, isSpeaking=false;
 let voiceSessionActive=false, voiceCurrentlyListening=false, processingTranscript=false, voiceSessionStoppedManually=false, voiceSessionUseRealtime=false, voiceTestSessionActive=false;
 let voiceRestartTimer=null, voiceProcessingTimer=null, voiceSpeakingTimer=null, voiceListeningWatchdogTimer=null, voiceNoSpeechRetries=0;
-let voiceSessionState='idle', tapRecStarting=false, tapRecStopping=false, sousRealtimeStarting=false, voicePausedForVisibility=false;
+let voiceSessionState='idle', tapRecStarting=false, tapRecStopping=false, sousRealtimeStarting=false, voicePausedForVisibility=false, voiceMicWarmupActive=false;
 let voiceRestartCount=0, voiceSuccessCueCount=0, voiceFlowCueCooldownUntil=0, voiceDebugOverlayEl=null, voiceDebugOverlayTimer=null, voiceDebugOverlayDismissed=false, voiceDebugOverlayUpdateQueued=false;
 let voiceListenStartedAt=0;
 let _voiceMode=false;
@@ -29,6 +29,7 @@ const VOICE_AUDIO_START_TIMEOUT_MS=1800;
 const VOICE_TTS_START_TIMEOUT_MS=2500;
 const VOICE_PROCESSING_TIMEOUT_MS=10000;
 const VOICE_SPEAKING_TIMEOUT_MS=14000;
+const VOICE_MIC_WARMUP_TIMEOUT_MS=1800;
 const VOICE_FLOW_CUE_MIN_SUCCESSES=3;
 const VOICE_FLOW_CUE_COOLDOWN_MS=18000;
 const VOICE_FLOW_CUE_CHANCE=0.55;
@@ -326,6 +327,7 @@ function logVoiceState(event,extra={}){
     processingTranscript,
     tapRecStarting,
     tapRecStopping,
+    voiceMicWarmupActive,
     realtimeStarting:sousRealtimeStarting,
     clarificationActive:!!(clarificationRec||clarificationState?.active),
     realtimeActive:!!(sousRealtime&&sousRealtime.active),
@@ -448,6 +450,7 @@ function logRestartBlocked(reason){
 function voiceRestartBlockReason(){
   if(!voiceSessionActive) return 'session inactive';
   if(voicePausedForVisibility) return 'page hidden';
+  if(voiceMicWarmupActive) return 'mic warming up';
   if(tapRecStarting) return 'recognition starting';
   if(tapRecStopping) return 'recognition stopping';
   if(voiceCurrentlyListening||isRecording) return 'already listening';
@@ -576,7 +579,40 @@ function maybeResumeVoiceSession(delay=VOICE_RESTART_DEFAULT_MS){
   if(voiceSessionActive) scheduleVoiceSessionRestart(delay);
   else if(cookingModeEnabled()) setTimeout(restartAlwaysOn,delay);
 }
-function beginVoiceSession(){
+async function warmUpVoiceInput(){
+  if(!navigator.mediaDevices?.getUserMedia) return false;
+  if(voiceMicWarmupActive) return false;
+  voiceMicWarmupActive=true;
+  setMicState('arming');
+  voiceDebugTrace('voice_mic_warmup',{status:'started'});
+  let timeout=null;
+  try{
+    const warmup=navigator.mediaDevices.getUserMedia({
+      audio:{
+        echoCancellation:true,
+        noiseSuppression:true,
+        autoGainControl:true
+      }
+    });
+    const stream=await Promise.race([
+      warmup,
+      new Promise((_,reject)=>{
+        timeout=setTimeout(()=>reject(new Error('mic warmup timeout')),VOICE_MIC_WARMUP_TIMEOUT_MS);
+      })
+    ]);
+    if(timeout){clearTimeout(timeout);timeout=null;}
+    try{stream&&stream.getTracks&&stream.getTracks().forEach(track=>track.stop());}catch(e){}
+    voiceDebugTrace('voice_mic_warmup',{status:'ready'});
+    return true;
+  }catch(e){
+    voiceDebugTrace('voice_mic_warmup',{status:'skipped',error:e?.message||String(e)});
+    return false;
+  }finally{
+    if(timeout) clearTimeout(timeout);
+    voiceMicWarmupActive=false;
+  }
+}
+async function beginVoiceSession(){
   stopAllVoiceActivity('session starting');
   voiceRestartCount=0;
   voiceSuccessCueCount=0;
@@ -589,7 +625,10 @@ function beginVoiceSession(){
   console.log('[Sous Voice] session started');
   logVoiceState('session started',{useRealtime:voiceSessionUseRealtime});
   if(voiceSessionUseRealtime) startSousRealtimeVoice();
-  else startTapRec();
+  else {
+    await warmUpVoiceInput();
+    if(voiceSessionActive&&!voiceSessionStoppedManually) startTapRec();
+  }
 }
 function endVoiceSession(label='Voice logging stopped'){
   if(!voiceSessionActive&&!isRecording&&!voiceCurrentlyListening&&!sousRealtime) return;
@@ -610,6 +649,7 @@ function stopAllVoiceActivity(reason){
   processingTranscript=false;
   voiceSessionUseRealtime=false;
   voiceNoSpeechRetries=0;
+  voiceMicWarmupActive=false;
   tapRecStarting=false;
   tapRecStopping=false;
   sousRealtimeStarting=false;
@@ -2419,6 +2459,13 @@ function setMicState(state){
     speaking:  {dc:'aob-dot speaking', tc:'aob-text on', tt:'Ready for next food',             st:'Ready for next food',   sc:'listen-status on'},
   };
   const m=map[state]||map.idle;
+  if(state==='arming'&&!map.arming){
+    m.dc='aob-dot speaking';
+    m.tc='aob-text on';
+    m.tt='Getting mic ready...';
+    m.st='Getting mic ready...';
+    m.sc='listen-status on';
+  }
   dot.className=m.dc; txt.className=m.tc; txt.textContent=m.tt;
   if(status){status.className=m.sc;status.textContent=m.st;}
 }
