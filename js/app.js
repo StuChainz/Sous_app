@@ -250,6 +250,28 @@ function applyAIRemoveFood(action,change=null){
 }
 
 function applyAIChangeQuantity(action,change=null){
+  const shouldUseSourceFirst=!!(action.source&&(action.source.ref||action.source.kind==='history_meal'||action.source.kind==='usual_meal'||action.source.date||action.source.dateOffset!=null||action.source.when));
+  if(shouldUseSourceFirst){
+    const sourceMeal=action.source.kind==='usual_meal'?findAIUsualMeal(action):findAIHistoryMeal(action.source);
+    if(sourceMeal){
+      const sourceItems=(sourceMeal.ingredients||[]).map(cloneMealIngredientForAIAction);
+      const targetIndex=findAIItemIndex(sourceItems,{targetRef:action.target?.ref,from:action.targetFood||action.target?.food||action.food});
+      if(targetIndex>=0){
+        const item=sourceItems[targetIndex];
+        const result=applyAIChangeToClonedItems(sourceItems,{
+          op:Number.isFinite(Number(action.factor))?'scale':'set_quantity',
+          targetRef:null,
+          from:item.name,
+          to:null,
+          food:item.name,
+          quantityText:action.quantityText,
+          factor:action.factor
+        });
+        if(!result.ok) return result;
+        return addAIClonedItemsToCurrent([sourceItems[targetIndex]],sourceMeal,'history-item-ai');
+      }
+    }
+  }
   const idx=aiActionTargetIndex(action,change);
   if(idx<0&&action.source){
     const sourceMeal=action.source.kind==='usual_meal'?findAIUsualMeal(action):findAIHistoryMeal(action.source);
