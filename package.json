@@ -4,7 +4,8 @@
   "type": "commonjs",
   "scripts": {
     "start": "node server.js",
-    "test:voice": "playwright test tests/voice-simulation.spec.cjs"
+    "test:voice": "playwright test tests/voice-simulation.spec.cjs",
+    "test:voice:mass": "playwright test tests/voice-mass-regression.spec.js"
   },
   "dependencies": {
     "cors": "^2.8.5",
