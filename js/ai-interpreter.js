@@ -54,7 +54,7 @@ function getAIInterpreterConfig(){
 
 function aiActionReferenceTrigger(transcript){
   const s=String(transcript||'').toLowerCase();
-  if(/\b(same|usual|regular|yesterday|last time|normally|instead of|swap|replace|change|make that|make it|the one i usually|the one i normally)\b/.test(s)) return true;
+  if(/\b(same|usual|regular|yesterday|last time|normally|instead of|swap|replace|change|make that|make it|usually have|normally have|the one i usually|the one i normally)\b/.test(s)) return true;
   return /\b(half|halve|double)\b.*\b(that|it|last|current|yesterday|lunch|breakfast|dinner|snack|meal|from)\b/.test(s);
 }
 

@@ -188,7 +188,7 @@ function findCurrentMealItemIndexByName(name){
         if(haystack.includes(token)) score+=token.length;
       });
     }
-    if(index===meal.length-1) score+=2;
+    if(score>0&&index===meal.length-1) score+=2;
     if(score>bestScore){best=index;bestScore=score;}
   });
   return bestScore>0?best:-1;
