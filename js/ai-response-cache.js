@@ -46,7 +46,8 @@ const AI_RESPONSE_MAP={
 const AI_RESPONSE_STATIC_BASE='assets/voice-cache/';
 const AI_RESPONSE_RUNTIME_CACHE={};
 const AI_RESPONSE_AUDIO_SEMANTICS={
-  added:{variants:['added_01','added_02','added_03','added_04','added_05'],fallback:'added'},
+  added:{variants:['added_01','added_02','added_03','added_04','added_05','added_06','added_07','added_08','added_09'],fallback:'added'},
+  logged:{variants:['logged_01','logged_02','logged_03','logged_04','logged_05'],fallback:'logged'},
   updated:{variants:['updated_01','updated_02','updated_03'],fallback:null},
   deleted:{variants:['removed_01','removed_02'],fallback:'deleted'},
   removed:{variants:['removed_01','removed_02'],fallback:'deleted'},
@@ -54,7 +55,7 @@ const AI_RESPONSE_AUDIO_SEMANTICS={
   done:{variants:['done_01','done_02','added_04'],fallback:'done'},
   cleared:{variants:['cleared_01','cleared_02'],fallback:null},
   recovery:{variants:['recovery_try_again','recovery_didnt_catch','recovery_say_again'],fallback:null},
-  flow:{variants:['flow_go_ahead','flow_keep_going','flow_anything_else','flow_continue'],fallback:null},
+  flow:{variants:['flow_anything_else','flow_what_next','flow_next_one','flow_ready_for_the_next_one','flow_go_on','flow_still_with_you'],fallback:'flow_anything_else'},
   session_continuing:{variants:['session_continuing'],fallback:null},
   session_resumed:{variants:['session_resumed'],fallback:null},
   session_ready:{variants:['session_ready'],fallback:null},

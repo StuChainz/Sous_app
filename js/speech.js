@@ -6,7 +6,7 @@ let tapRec=null, alwaysOnRec=null, clarificationRec=null, isRecording=false, alw
 let voiceSessionActive=false, voiceCurrentlyListening=false, processingTranscript=false, voiceSessionStoppedManually=false, voiceSessionUseRealtime=false;
 let voiceRestartTimer=null, voiceProcessingTimer=null, voiceSpeakingTimer=null, voiceListeningWatchdogTimer=null, voiceNoSpeechRetries=0;
 let voiceSessionState='idle', tapRecStarting=false, tapRecStopping=false, sousRealtimeStarting=false, voicePausedForVisibility=false;
-let voiceRestartCount=0, voiceFlowCueCooldownUntil=0, voiceDebugOverlayEl=null, voiceDebugOverlayTimer=null, voiceDebugOverlayDismissed=false, voiceDebugOverlayUpdateQueued=false;
+let voiceRestartCount=0, voiceSuccessCueCount=0, voiceFlowCueCooldownUntil=0, voiceDebugOverlayEl=null, voiceDebugOverlayTimer=null, voiceDebugOverlayDismissed=false, voiceDebugOverlayUpdateQueued=false;
 let _voiceMode=false;
 let nextIngId=1;
 let modalSelectedFood=null, modalActiveTab='search';
@@ -28,6 +28,9 @@ const VOICE_AUDIO_START_TIMEOUT_MS=1800;
 const VOICE_TTS_START_TIMEOUT_MS=2500;
 const VOICE_PROCESSING_TIMEOUT_MS=10000;
 const VOICE_SPEAKING_TIMEOUT_MS=14000;
+const VOICE_FLOW_CUE_MIN_SUCCESSES=3;
+const VOICE_FLOW_CUE_COOLDOWN_MS=18000;
+const VOICE_FLOW_CUE_CHANCE=0.55;
 const VOICE_SESSION_STATES=new Set(['idle','listening','processing','speaking','restarting','error']);
 const VOICE_DEBUG_KEY='sous_voice_debug_trace';
 const VOICE_DEBUG_OVERLAY_KEY='sous_voice_debug_overlay';
@@ -563,6 +566,8 @@ function maybeResumeVoiceSession(delay=VOICE_RESTART_DEFAULT_MS){
 function beginVoiceSession(){
   stopAllVoiceActivity('session starting');
   voiceRestartCount=0;
+  voiceSuccessCueCount=0;
+  voiceFlowCueCooldownUntil=0;
   voiceSessionActive=true;
   voiceSessionStoppedManually=false;
   voicePausedForVisibility=false;
@@ -2074,14 +2079,17 @@ function maybeSpeakFlowCue(reason,onEnd){
   if(!voiceSessionActive||isVoiceSilentMode()){if(onEnd)onEnd();return false;}
   if(document.querySelector('.log-screen.active')?.id!=='ls-listening'){if(onEnd)onEnd();return false;}
   const now=Date.now();
-  if(now<voiceFlowCueCooldownUntil||now-_lastSpeakAt<900){if(onEnd)onEnd();return false;}
-  if(Math.random()>0.12){if(onEnd)onEnd();return false;}
-  voiceFlowCueCooldownUntil=now+45000;
+  const enoughLogged=reason!=='after_success'||voiceSuccessCueCount>=VOICE_FLOW_CUE_MIN_SUCCESSES;
+  if(!enoughLogged||now<voiceFlowCueCooldownUntil||now-_lastSpeakAt<900){if(onEnd)onEnd();return false;}
+  if(Math.random()>VOICE_FLOW_CUE_CHANCE){if(onEnd)onEnd();return false;}
+  voiceSuccessCueCount=0;
+  voiceFlowCueCooldownUntil=now+VOICE_FLOW_CUE_COOLDOWN_MS;
   voiceDebugTrace('voice_flow_cue',{reason});
   speakCachedResponse('flow',{},onEnd);
   return true;
 }
 function speakSuccessCue(onEnd){
+  voiceSuccessCueCount++;
   speakCachedResponse('added',{},()=>{
     const spokeFlowCue=maybeSpeakFlowCue('after_success',onEnd);
     if(!spokeFlowCue&&!onEnd&&voiceSessionActive&&document.querySelector('.log-screen.active')?.id==='ls-listening'){
@@ -3514,7 +3522,8 @@ function handleRealtimeActionText(text){
     setVoiceProcessing(true,'realtime action processing');
     routeRealtimeTranscriptToReview(transcript);
     setVoiceProcessing(false,'realtime action processing');
-    speakCachedResponse(action.ingredients&&action.ingredients.length?'added':'logged');
+    if(action.ingredients&&action.ingredients.length) speakSuccessCue();
+    else speakCachedResponse('logged');
     if(document.querySelector('.log-screen.active')?.id==='ls-listening') maybeResumeVoiceSession(VOICE_RESTART_DEFAULT_MS);
   }
 }

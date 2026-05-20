@@ -40,12 +40,11 @@ for (const [key, text] of responses) {
 
   const audio = await client.audio.speech.create({
     model: "gpt-4o-mini-tts",
-    voice: "alloy",
+    voice: "marin",
     input: text,
     response_format: "mp3",
     instructions:
-      "Speak in a short, neutral, natural assistant tone. Keep it quick and clean with no extra words.",
-  });
+  "Speak in a calm, natural British English accent. Warm but understated. Short, quick confirmations. No exaggerated emotion. Sound like a modern UK fitness assistant."  });
 
   const buffer = Buffer.from(await audio.arrayBuffer());
   fs.writeFileSync(filePath, buffer);
@@ -79,15 +78,14 @@ for (const food of foods) {
 
   const audio = await client.audio.speech.create({
     model: "gpt-4o-mini-tts",
-    voice: "alloy",
+    voice: "marin",
     input: food,
     response_format: "mp3",
     instructions:
-      "Speak this single word naturally, as if mid-sentence. Keep it short and neutral.",
-  });
+  "Speak in a calm, natural British English accent. Warm but understated. Short, quick confirmations. No exaggerated emotion. Sound like a modern UK fitness assistant.",
+});
 
-  const buffer = Buffer.from(await audio.arrayBuffer());
-  fs.writeFileSync(filePath, buffer);
+const buffer = Buffer.from(await audio.arrayBuffer());
 }
 
 // ===============================
@@ -187,7 +185,54 @@ for (const [key, text] of extraResponses) {
     input: text,
     response_format: "mp3",
     instructions:
-      "Speak in a short, warm, natural assistant tone. Keep it quick, understated, and clean with no extra words.",
+  "Speak in a calm, natural British English accent. Warm but understated. Short, quick confirmations. No exaggerated emotion. Sound like a modern UK fitness assistant."  });
+
+  const buffer = Buffer.from(await audio.arrayBuffer());
+  fs.writeFileSync(filePath, buffer);
+}
+
+// ===============================
+// Human-feeling logging variants
+// ===============================
+
+const humanLoggingResponses = [
+  // Core confirmations: short, no food names, safe for continuous listening.
+  ["added_06", "Added."],
+  ["added_07", "Logged."],
+  ["added_08", "Got that."],
+  ["added_09", "That's in."],
+
+  ["logged_01", "Logged."],
+  ["logged_02", "Added."],
+  ["logged_03", "Got that."],
+  ["logged_04", "That's in."],
+  ["logged_05", "All set."],
+
+  // Occasional flow prompts, used after a few successful foods.
+  ["flow_what_next", "What next?"],
+  ["flow_next_one", "Next one?"],
+  ["flow_ready_for_the_next_one", "Ready for the next one."],
+  ["flow_go_on", "Go on."],
+  ["flow_still_with_you", "Still with you."]
+];
+
+for (const [key, text] of humanLoggingResponses) {
+  const filePath = path.join(OUT_DIR, `${key}.mp3`);
+
+  if (fs.existsSync(filePath)) {
+    console.log(`Skipping existing: ${filePath}`);
+    continue;
+  }
+
+  console.log(`Generating human logging audio: ${key} -> "${text}"`);
+
+  const audio = await client.audio.speech.create({
+    model: "gpt-4o-mini-tts",
+    voice: "marin",
+    input: text,
+    response_format: "mp3",
+    instructions:
+      "Speak in a calm, natural British English accent. Warm but understated. Short, quick confirmations. No exaggerated emotion. Sound like a modern UK fitness assistant."
   });
 
   const buffer = Buffer.from(await audio.arrayBuffer());
