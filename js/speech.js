@@ -300,6 +300,22 @@ function latestVoiceDebugEntry(list,predicate){
   }
   return null;
 }
+function voiceLifecycleSnapshot(opts={}){
+  const includeAlwaysOn=!!opts.includeAlwaysOn;
+  return {
+    state:voiceSessionState,
+    sessionActive:!!voiceSessionActive,
+    testSessionActive:!!voiceTestSessionActive,
+    recognizerActive:!!(voiceCurrentlyListening||isRecording||(includeAlwaysOn&&alwaysOnActive)||clarificationRec||(sousRealtime&&sousRealtime.active)),
+    voiceCurrentlyListening:!!voiceCurrentlyListening,
+    isRecording:!!isRecording,
+    tapRecStarting:!!tapRecStarting,
+    tapRecStopping:!!tapRecStopping,
+    processing:!!processingTranscript,
+    speaking:!!isSpeaking,
+    restartCount:voiceRestartCount
+  };
+}
 function shortVoiceDebugText(value){
   if(value==null||value==='') return '—';
   const text=typeof value==='string'?value:JSON.stringify(value);
@@ -363,13 +379,10 @@ function voiceDebugOverlaySnapshot(){
   const transitionEntry=latestVoiceDebugEntry(list,e=>e&&e.event==='state_transition');
   const transcriptText=document.getElementById('transcript-text')?.textContent||'';
   return {
-    state:voiceSessionState,
-    recognizerActive:!!(voiceCurrentlyListening||isRecording||alwaysOnActive||clarificationRec||(sousRealtime&&sousRealtime.active)),
-    sessionActive:!!voiceSessionActive,
+    ...voiceLifecycleSnapshot({includeAlwaysOn:true}),
     lastTranscript:shortVoiceDebugText(transcriptEntry?.transcript||transcriptEntry?.rawText||transcriptText.replace(/^"|"$/g,'')),
     lastAction:summarizeVoiceDebugAction(actionEntry),
     lastError:shortVoiceDebugText(errorEntry?.error||errorEntry?.message||errorEntry?.issue),
-    restartCount:voiceRestartCount,
     lastReason:shortVoiceDebugText(transitionEntry?.reason)
   };
 }
@@ -1173,17 +1186,7 @@ function sousVoiceTestHarnessAllowed(){
 }
 function sousVoiceStateSnapshot(){
   return {
-    state:voiceSessionState,
-    sessionActive:!!voiceSessionActive,
-    testSessionActive:!!voiceTestSessionActive,
-    recognizerActive:!!(voiceCurrentlyListening||isRecording||clarificationRec||(sousRealtime&&sousRealtime.active)),
-    voiceCurrentlyListening:!!voiceCurrentlyListening,
-    isRecording:!!isRecording,
-    tapRecStarting:!!tapRecStarting,
-    tapRecStopping:!!tapRecStopping,
-    processing:!!processingTranscript,
-    speaking:!!isSpeaking,
-    restartCount:voiceRestartCount,
+    ...voiceLifecycleSnapshot(),
     activeScreen:document.querySelector('.log-screen.active')?.id||null,
     transcriptText:document.getElementById('transcript-text')?.textContent||'',
     listenStatus:document.getElementById('listen-status')?.textContent||'',
