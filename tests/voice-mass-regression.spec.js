@@ -15,6 +15,7 @@ function makeScenario(overrides) {
     startingState: {
       section: 'breakfast',
       seedUtterances: [],
+      silentMode: true,
       ...(overrides.startingState || {})
     },
     utterances: overrides.utterances || [],
@@ -57,6 +58,14 @@ function makeScenario(overrides) {
       ...(overrides.interactions || {})
     }
   };
+}
+
+class VoiceInvariantError extends Error {
+  constructor(invariant, message, details = {}) {
+    super(`${invariant}: ${message}`);
+    this.invariant = invariant;
+    this.details = details;
+  }
 }
 
 const weightedFoods = [
@@ -176,7 +185,7 @@ const reviewScenarios = [
 
 const promptAndClarificationScenarios = [
   makeScenario({
-    name: 'mandatory oats regression prompt',
+    name: 'A fresh voice meal oats prompt ownership',
     utterances: ['oats'],
     interactions: { quantity: 'none', review: 'none' },
     expectedUiResult: { allowedScreens: ['ls-quantity', 'ls-food-choice', 'ls-confirm', 'ls-listening'] },
@@ -195,10 +204,60 @@ const promptAndClarificationScenarios = [
     ]
   }),
   makeScenario({
-    name: 'cheese clarification to cheddar',
+    name: 'B oats repeated quickly stays separate turns',
+    utterances: ['oats', 'oats'],
+    interactions: { quantity: 'none', review: 'none' },
+    expectedUiResult: { allowedScreens: ['ls-quantity', 'ls-food-choice', 'ls-confirm', 'ls-listening'] },
+    expectedVoicePromptResult: {
+      requiredEventTypes: ['transcript received', 'transcript_turn_started', 'transcript_accepted', 'outcome_decided'],
+      anyEventTypes: ['clarification shown', 'voice feedback requested', 'silent_mode_skipped_feedback']
+    },
+    forbiddenStates: [
+      'recognizedTranscriptWithDidntCatch',
+      'processingListeningConflict',
+      'stuckProcessing',
+      'duplicateRecognizerState'
+    ]
+  }),
+  makeScenario({
+    name: 'D cheese clarification to cheddar',
     utterances: ['cheese', 'cheddar 30g'],
     expectedMealIngredients: { contains: ['Cheddar'], minCount: 1 },
     expectedVoicePromptResult: { requiredEventTypes: ['transcript received', 'clarification shown', 'parser result', 'ingredient row added'] }
+  }),
+  makeScenario({
+    name: 'E oats quantity answer resolves pending item',
+    utterances: ['oats', '50g'],
+    interactions: { quantity: 'none', review: 'commit' },
+    expectedMealIngredients: { contains: ['Oats'], minCount: 1 },
+    expectedVoicePromptResult: {
+      requiredEventTypes: ['transcript received', 'transcript_turn_started', 'transcript_accepted', 'outcome_decided'],
+      anyEventTypes: ['clarification shown', 'voice feedback requested', 'silent_mode_skipped_feedback', 'ingredient row added']
+    },
+    forbiddenStates: [
+      'recognizedTranscriptWithDidntCatch',
+      'processingListeningConflict',
+      'stuckProcessing',
+      'duplicateRecognizerState',
+      'silentScreenMove'
+    ]
+  }),
+  makeScenario({
+    name: 'F silent mode oats records skipped feedback',
+    startingState: { silentMode: true },
+    utterances: ['oats'],
+    interactions: { quantity: 'none', review: 'none' },
+    expectedUiResult: { allowedScreens: ['ls-quantity', 'ls-food-choice', 'ls-confirm', 'ls-listening'] },
+    expectedVoicePromptResult: {
+      requiredEventTypes: ['transcript received', 'transcript_accepted', 'silent_mode_skipped_feedback'],
+      anyEventTypes: ['clarification shown', 'silent_mode_skipped_feedback']
+    },
+    forbiddenStates: [
+      'recognizedTranscriptWithDidntCatch',
+      'processingListeningConflict',
+      'stuckProcessing',
+      'duplicateRecognizerState'
+    ]
   }),
   makeScenario({
     name: 'greek yoghurt asks for type or resolves',
@@ -307,7 +366,7 @@ const correctionScenarios = [
     name: 'save meal utterance falls back without stuck state',
     startingState: { seedUtterances: ['50g oats'] },
     utterances: ['save meal'],
-    expectedVoicePromptResult: { requiredEventTypes: ['transcript received', 'parser result'], anyEventTypes: ['error/fallback shown', 'voice feedback requested'] },
+    expectedVoicePromptResult: { requiredEventTypes: ['transcript received'], anyEventTypes: ['error/fallback shown', 'voice feedback requested', 'silent_mode_skipped_feedback'] },
     forbiddenStates: ['processingListeningConflict', 'stuckProcessing', 'duplicateRecognizerState']
   }),
   makeScenario({
@@ -373,23 +432,156 @@ function assertContainsGroups(actualNames, expectedGroups, label) {
   }
 }
 
+function eventText(event) {
+  return [
+    event.type,
+    event.event,
+    event.transcript,
+    event.prompt,
+    event.key,
+    event.reason,
+    event.outcome,
+    event.screen
+  ].filter(Boolean).join(' ').toLowerCase();
+}
+
+function compactEvents(events) {
+  return events.map(event => ({
+    type: event.type,
+    event: event.event,
+    turnId: event.turnId,
+    transcript: event.transcript,
+    key: event.key,
+    route: event.route,
+    reason: event.reason,
+    outcome: event.outcome,
+    screen: event.screen,
+    item: event.item
+  }));
+}
+
+function failInvariant(name, message, scenario, result, turnId = null, utterance = null, events = result.events) {
+  throw new VoiceInvariantError(name, message, {
+    scenario: scenario.name,
+    turnId,
+    utterance,
+    expectedInvariant: name,
+    actualTraceEvents: compactEvents(events),
+    visibleUiText: result.visibleText,
+    mealRows: namesFromMeal(result.state.meal),
+    reviewRows: result.reviewRows,
+    voiceState: result.state
+  });
+}
+
+function assertVoiceInvariants(scenario, result) {
+  const { events, visibleText, state } = result;
+  const acceptedTurns = events.filter(event => event.type === 'transcript_accepted');
+  const lowerVisible = visibleText.toLowerCase();
+  const feedbackTypes = new Set([
+    'voice_feedback_requested',
+    'voice_feedback_played',
+    'voice_feedback_blocked',
+    'silent_mode_skipped_feedback'
+  ]);
+
+  for (const accepted of acceptedTurns) {
+    const turnId = accepted.turnId;
+    const utterance = accepted.transcript;
+    const turnEvents = events.filter(event => event.turnId === turnId);
+    const outcomes = turnEvents.filter(event => event.type === 'outcome_decided');
+    if (outcomes.length !== 1) {
+      failInvariant('Every accepted transcript has exactly one outcome', `expected 1 outcome, got ${outcomes.length}`, scenario, result, turnId, utterance, turnEvents);
+    }
+
+    const sameTurnCatch = turnEvents.some(event =>
+      ['error/fallback shown', 'ui_updated'].includes(event.type) &&
+      /didn'?t catch/.test(eventText(event))
+    );
+    if (sameTurnCatch && lowerVisible.includes(String(utterance || '').toLowerCase())) {
+      failInvariant('No accepted transcript may later show generic did not catch for same turn', 'recognized transcript and generic fallback co-exist', scenario, result, turnId, utterance, turnEvents);
+    }
+
+    const feedbackPathIndex = turnEvents.findIndex(event => feedbackTypes.has(event.type));
+    if (feedbackPathIndex < 0) {
+      failInvariant('Accepted transcript records feedback path', 'missing requested/played/blocked/silent feedback event', scenario, result, turnId, utterance, turnEvents);
+    }
+
+    const promptEvent = turnEvents.find(event =>
+      event.type === 'clarification shown' ||
+      /clarify|quantity|fallback|recovery|didn'?t catch|how much/.test(eventText(event))
+    );
+    if (promptEvent && feedbackPathIndex < 0) {
+      failInvariant('Prompts record voice or silent feedback', 'prompt appeared without feedback path', scenario, result, turnId, utterance, turnEvents);
+    }
+
+    const restartIndex = turnEvents.findIndex(event => event.type === 'session_restart_requested' || event.type === 'session_restart_completed');
+    if (restartIndex >= 0 && feedbackPathIndex >= 0 && restartIndex < feedbackPathIndex) {
+      failInvariant('Listening does not restart before feedback path', 'restart was recorded before feedback was requested/played/skipped', scenario, result, turnId, utterance, turnEvents);
+    }
+
+    const added = turnEvents.filter(event => event.type === 'ingredient row added');
+    const addedKeys = added.map(event => {
+      const item = event.item || {};
+      return `${item.name || event.prompt || 'unknown'}:${item.weight || ''}`;
+    });
+    const duplicateAdded = addedKeys.find((key, index) => addedKeys.indexOf(key) !== index);
+    if (duplicateAdded) {
+      failInvariant('No duplicate ingredient rows from one transcript turn', `duplicate added row ${duplicateAdded}`, scenario, result, turnId, utterance, turnEvents);
+    }
+  }
+
+  const staleFallbacks = events.filter(event => event.type === 'fallback_timer_ignored_stale_turn');
+  for (const stale of staleFallbacks) {
+    const staleIndex = events.indexOf(stale);
+    const nextUi = events.slice(staleIndex + 1).find(event => event.type === 'ui_updated' && event.turnId === stale.turnId);
+    if (nextUi && /didn'?t catch|recovery/.test(eventText(nextUi))) {
+      failInvariant('Stale fallback timers do not update UI', 'stale fallback produced recovery UI', scenario, result, stale.turnId, stale.transcript, events.slice(staleIndex, staleIndex + 8));
+    }
+  }
+
+  if (state.processing && (state.recognizerActive || state.voiceCurrentlyListening || state.isRecording)) {
+    failInvariant('No processing/listening conflict', 'processing and listening flags are both active', scenario, result);
+  }
+  if (state.tapRecStarting && state.tapRecStopping) {
+    failInvariant('No duplicate recogniser/session states', 'tap recognizer is both starting and stopping', scenario, result);
+  }
+
+  const completed = events.filter(event => event.type === 'session_restart_completed');
+  for (let i = 1; i < completed.length; i++) {
+    const prev = completed[i - 1];
+    const current = completed[i];
+    if (prev.turnId === current.turnId && Math.abs(new Date(current.t || 0) - new Date(prev.t || 0)) < 20) {
+      failInvariant('No duplicate recogniser/session states', 'duplicate restart completion for one turn', scenario, result, current.turnId, current.transcript, [prev, current]);
+    }
+  }
+}
+
 async function resetAppForScenario(page, scenario) {
   await page.goto('/?sousVoiceTest=1');
   await page.waitForFunction(() => typeof window.__sousStartVoiceTestSession === 'function');
+  await page.evaluate(silentMode => {
+    localStorage.setItem('sous_voice_feedback', silentMode ? '0' : '1');
+  }, scenario.startingState.silentMode !== false);
   await page.evaluate(section => window.__sousStartVoiceTestSession(section), scenario.startingState.section);
   await page.waitForFunction(() => window.__sousVoiceState().state === 'listening');
   for (const seed of scenario.startingState.seedUtterances) {
     await sendAndSettle(page, seed, { quantity: 'default', review: 'commit' });
   }
+  return page.evaluate(() => window.__sousLastVoiceEvents().length);
 }
 
-async function snapshot(page) {
+async function snapshot(page, eventOffset = 0) {
   return page.evaluate(() => ({
     state: window.__sousVoiceState(),
     events: window.__sousLastVoiceEvents(),
+    debugTrace: window.sousVoiceDebug ? window.sousVoiceDebug() : [],
     visibleText: document.body.innerText,
     reviewRows: Array.from(document.querySelectorAll('#mc-list > div')).map(card => card.innerText),
     savedMealCount: Object.values(JSON.parse(localStorage.getItem('sous_log') || '{}')).flatMap(day => day.meals || []).length
+  })).then(result => ({
+    ...result,
+    events: result.events.slice(eventOffset)
   }));
 }
 
@@ -443,6 +635,7 @@ async function sendAndSettle(page, utterance, interactions) {
 
 function validateScenarioResult(scenario, result) {
   const { state, events, visibleText, reviewRows, savedMealCount } = result;
+  assertVoiceInvariants(scenario, result);
   const eventTypes = events.map(event => event.type);
   const mealNames = namesFromMeal(state.meal);
   const reviewText = reviewRows.join('\n');
@@ -544,12 +737,13 @@ test('mass simulated voice regression scenarios', async ({ page }) => {
   const results = [];
   for (const scenario of scenarios) {
     const started = Date.now();
+    let eventOffset = 0;
     try {
-      await resetAppForScenario(page, scenario);
+      eventOffset = await resetAppForScenario(page, scenario);
       for (const utterance of scenario.utterances) {
         await sendAndSettle(page, utterance, scenario.interactions);
       }
-      const result = await snapshot(page);
+      const result = await snapshot(page, eventOffset);
       validateScenarioResult(scenario, result);
       results.push({
         name: scenario.name,
@@ -560,15 +754,22 @@ test('mass simulated voice regression scenarios', async ({ page }) => {
         events: result.events.map(event => event.type)
       });
     } catch (error) {
-      const result = await snapshot(page).catch(() => null);
+      const result = await snapshot(page, eventOffset).catch(() => null);
+      const invariantDetails = error instanceof VoiceInvariantError ? error.details : null;
       results.push({
         name: scenario.name,
         ok: false,
         ms: Date.now() - started,
         error: error.message,
+        invariant: error.invariant || null,
+        turnId: invariantDetails?.turnId ?? null,
+        utterance: invariantDetails?.utterance ?? null,
+        expectedInvariant: invariantDetails?.expectedInvariant || null,
+        actualTraceEvents: invariantDetails?.actualTraceEvents || null,
         screen: result?.state?.activeScreen || null,
         state: result?.state || null,
         meal: result?.state ? namesFromMeal(result.state.meal) : [],
+        reviewRows: result?.reviewRows || [],
         events: result?.events?.map(event => event.type) || [],
         visibleText: result?.visibleText?.slice(0, 700) || ''
       });
@@ -583,4 +784,244 @@ test('mass simulated voice regression scenarios', async ({ page }) => {
   }
   expect(consoleErrors, 'console errors').toEqual([]);
   expect(failed, 'failed voice scenarios').toEqual([]);
+});
+
+test('C simulated SpeechRecognition interim then final transcript follows turn invariants', async ({ page }) => {
+  await page.route('**/favicon.ico', route => route.fulfill({ status: 204, body: '' }));
+  await page.addInitScript(() => {
+    localStorage.clear();
+    localStorage.setItem('userPlan', 'free');
+    localStorage.setItem('sous_voice_feedback', '0');
+    localStorage.setItem('sous_voice_test_harness', '1');
+    navigator.mediaDevices = {
+      getUserMedia: async () => ({
+        getTracks: () => [{ stop() {} }]
+      })
+    };
+    class MockAudio {
+      constructor() {
+        this.onended = null;
+        this.onplaying = null;
+        this.onerror = null;
+        this.src = '';
+      }
+      play() {
+        setTimeout(() => {
+          if (this.onplaying) this.onplaying();
+          if (this.onended) this.onended();
+        }, 0);
+        return Promise.resolve();
+      }
+      pause() {}
+    }
+    window.Audio = MockAudio;
+    window.SpeechSynthesisUtterance = function SpeechSynthesisUtterance(text) {
+      this.text = text;
+    };
+    window.speechSynthesis = {
+      speaking: false,
+      cancel() {},
+      getVoices() { return []; },
+      speak(utterance) {
+        this.speaking = true;
+        setTimeout(() => {
+          if (utterance.onstart) utterance.onstart();
+          this.speaking = false;
+          if (utterance.onend) utterance.onend();
+        }, 0);
+      }
+    };
+    class MockSpeechRecognition {
+      constructor() {
+        this.onstart = null;
+        this.onend = null;
+        this.onerror = null;
+        this.onresult = null;
+        window.__mockRecognizers = window.__mockRecognizers || [];
+        window.__mockRecognizers.push(this);
+      }
+      start() {
+        setTimeout(() => this.onstart && this.onstart(), 0);
+      }
+      stop() {
+        setTimeout(() => this.onend && this.onend(), 0);
+      }
+      abort() {
+        this.stop();
+      }
+    }
+    window.SpeechRecognition = MockSpeechRecognition;
+    window.webkitSpeechRecognition = MockSpeechRecognition;
+  });
+
+  await page.goto('/?sousVoiceTest=1');
+  await page.waitForFunction(() => typeof window.__sousStartVoiceTestSession === 'function');
+  await page.evaluate(() => {
+    switchTab('log', { fresh: true, silent: true, section: 'breakfast' });
+    beginVoiceSession();
+  });
+  await page.waitForFunction(() => (window.__mockRecognizers || []).length > 0);
+  const eventOffset = await page.evaluate(() => window.__sousLastVoiceEvents().length);
+  await page.evaluate(() => {
+    const rec = window.__mockRecognizers[window.__mockRecognizers.length - 1];
+    const interim = [{ transcript: 'oa', confidence: 0.4 }];
+    interim.isFinal = false;
+    rec.onresult({ resultIndex: 0, results: [interim] });
+    const final = [{ transcript: 'oats', confidence: 0.96 }];
+    final.isFinal = true;
+    rec.onresult({ resultIndex: 0, results: [final] });
+  });
+  await waitUntilNotProcessing(page);
+  await expect.poll(
+    () => page.evaluate(() => window.__sousLastVoiceEvents().some(event => event.type === 'transcript_accepted' && event.transcript === 'oats')),
+    { timeout: 3000, intervals: [50, 100, 200] }
+  ).toBe(true);
+  const result = await snapshot(page, eventOffset);
+  const scenario = makeScenario({
+    name: 'C SpeechRecognition interim partial then final oats',
+    utterances: ['oa', 'oats'],
+    interactions: { quantity: 'none', review: 'none' },
+    expectedUiResult: { allowedScreens: ['ls-quantity', 'ls-food-choice', 'ls-confirm', 'ls-listening'] },
+    expectedVoicePromptResult: {
+      requiredEventTypes: ['transcript_accepted', 'outcome_decided'],
+      anyEventTypes: ['silent_mode_skipped_feedback', 'clarification shown']
+    }
+  });
+  validateScenarioResult(scenario, result);
+  expect(result.visibleText.toLowerCase()).not.toContain('"oa"\ndidn\'t catch');
+});
+
+test.fail('warning: direct transcript helper bypasses browser SpeechRecognition lifecycle', async ({ page }) => {
+  await page.route('**/favicon.ico', route => route.fulfill({ status: 204, body: '' }));
+  await page.addInitScript(() => {
+    localStorage.clear();
+    localStorage.setItem('userPlan', 'free');
+    localStorage.setItem('sous_voice_feedback', '0');
+    localStorage.setItem('sous_voice_test_harness', '1');
+  });
+  await page.goto('/?sousVoiceTest=1');
+  await page.waitForFunction(() => typeof window.__sousStartVoiceTestSession === 'function');
+  await page.evaluate(() => window.__sousStartVoiceTestSession('breakfast'));
+  await page.evaluate(() => window.__sousTestVoiceTranscript('oats'));
+  await waitUntilNotProcessing(page);
+  const bypassed = await page.evaluate(() => window.sousVoiceDebug().some(event => event.event === 'test_helper_bypasses_recognizer'));
+  expect(bypassed).toBe(false);
+});
+
+test('non-silent voice prompts request audible feedback', async ({ page }) => {
+  await page.route('**/favicon.ico', route => route.fulfill({ status: 204, body: '' }));
+  await page.addInitScript(() => {
+    localStorage.clear();
+    localStorage.setItem('userPlan', 'free');
+    localStorage.setItem('sous_voice_feedback', '1');
+    localStorage.setItem('sous_voice_test_harness', '1');
+    navigator.mediaDevices = {
+      getUserMedia: async () => ({
+        getTracks: () => [{ stop() {} }]
+      })
+    };
+    class MockAudio {
+      constructor() {
+        this.onended = null;
+        this.onplaying = null;
+        this.onerror = null;
+        this.src = '';
+      }
+      play() {
+        setTimeout(() => {
+          if (this.onplaying) this.onplaying();
+          if (this.onended) this.onended();
+        }, 0);
+        return Promise.resolve();
+      }
+      pause() {}
+    }
+    window.Audio = MockAudio;
+    window.SpeechSynthesisUtterance = function SpeechSynthesisUtterance(text) {
+      this.text = text;
+    };
+    window.speechSynthesis = {
+      speaking: false,
+      cancel() {},
+      getVoices() { return []; },
+      speak(utterance) {
+        this.speaking = true;
+        setTimeout(() => {
+          if (utterance.onstart) utterance.onstart();
+          this.speaking = false;
+          if (utterance.onend) utterance.onend();
+        }, 0);
+      }
+    };
+    class MockSpeechRecognition {
+      constructor() {
+        this.onstart = null;
+        this.onend = null;
+        this.onerror = null;
+        this.onresult = null;
+        window.__mockRecognizers = window.__mockRecognizers || [];
+        window.__mockRecognizers.push(this);
+      }
+      start() {
+        setTimeout(() => this.onstart && this.onstart(), 0);
+      }
+      stop() {
+        setTimeout(() => this.onend && this.onend(), 0);
+      }
+      abort() {
+        this.stop();
+      }
+    }
+    window.SpeechRecognition = MockSpeechRecognition;
+    window.webkitSpeechRecognition = MockSpeechRecognition;
+  });
+
+  await page.goto('/?sousVoiceTest=1');
+  await page.waitForFunction(() => typeof window.__sousStartVoiceTestSession === 'function');
+
+  await page.evaluate(() => {
+    switchTab('log', { fresh: true, silent: true, section: 'breakfast' });
+    beginVoiceSession();
+  });
+  await expect.poll(
+    () => page.evaluate(() => window.sousVoiceDebug().some(event =>
+      event.event === 'feedback_audio' &&
+      event.key === 'session_ready' &&
+      !['silent', 'skipped_debounce'].includes(event.route)
+    )),
+    { timeout: 3000, intervals: [50, 100, 200] }
+  ).toBe(true);
+  await page.waitForFunction(() => (window.__mockRecognizers || []).length > 0);
+  await page.evaluate(() => {
+    const recognizers = window.__mockRecognizers || [];
+    const rec = recognizers[recognizers.length - 1];
+    const primary = { transcript: 'oats', confidence: 0.96 };
+    const result = [primary];
+    result.isFinal = true;
+    const results = [result];
+    rec.onresult({ resultIndex: 0, results });
+    rec.onerror({ error: 'no-speech' });
+  });
+  await waitUntilNotProcessing(page);
+  await expect.poll(
+    () => page.evaluate(() => {
+      const visible = document.body.innerText.toLowerCase();
+      const hasAcceptedOats = window.sousVoiceDebug().some(event => event.event === 'transcript_heard' && event.transcript === 'oats');
+      return hasAcceptedOats && !visible.includes("didn't catch");
+    }),
+    { timeout: 3000, intervals: [50, 100, 200] }
+  ).toBe(true);
+
+  await page.evaluate(() => window.__sousStartVoiceTestSession('breakfast'));
+  await page.waitForFunction(() => window.__sousVoiceState().state === 'listening');
+  await page.evaluate(() => window.__sousTestVoiceTranscript('oats'));
+  await waitUntilNotProcessing(page);
+  const result = await snapshot(page);
+  const promptFeedback = result.events.find(event =>
+    event.type === 'voice feedback requested' &&
+    ['clarify_confirm_food', 'clarify_quantity', 'clarification_needed'].includes(event.key) &&
+    !['silent', 'skipped_debounce'].includes(event.route)
+  );
+  expect(promptFeedback, `events: ${JSON.stringify(result.events, null, 2)}`).toBeTruthy();
+  expect(result.visibleText.toLowerCase()).not.toContain('"oats"\ndidn\'t catch');
 });
