@@ -11,6 +11,7 @@ let voiceListenStartedAt=0;
 let voiceTestEvents=[];
 let voiceTranscriptTurn=0, activeVoiceTranscriptTurn=0, lastAcceptedTranscript='', lastAcceptedTranscriptAt=0;
 let voiceOutcomeTurns=new Set();
+let voicePromptOwner=null;
 let _voiceMode=false;
 let nextIngId=1;
 let modalSelectedFood=null, modalActiveTab='search';
@@ -153,7 +154,7 @@ function recordVoiceTestEventFromTrace(entry){
   if(entry.event==='transcript_heard') recordVoiceTestEvent('transcript received',entry);
   if(entry.event==='parser_result') recordVoiceTestEvent('parser result',entry);
   if(entry.event==='clarification_prompt'||entry.event==='clarification_shown'||entry.event==='clarification_started') recordVoiceTestEvent('clarification shown',entry);
-  if(entry.event==='ingredient_added'||(entry.event==='final_action'&&entry.action==='ingredient_added')) recordVoiceTestEvent('ingredient row added',entry);
+  if(entry.event==='ingredient_added') recordVoiceTestEvent('ingredient row added',entry);
   if(entry.event==='feedback_audio') recordVoiceTestEvent('voice feedback requested',entry);
   if(entry.event==='state_transition'&&/page hidden|pagehide|screen leave|session stopped|test session stopped/i.test(entry.reason||'')) recordVoiceTestEvent('session paused',entry);
   if(entry.event==='test_session_stopped') recordVoiceTestEvent('session paused',entry);
@@ -172,6 +173,7 @@ function voiceDebugTrace(event,data={}){
     voiceState:voiceSessionState,
     sessionActive:!!voiceSessionActive,
     recognizerActive:!!(voiceCurrentlyListening||isRecording||clarificationRec||(sousRealtime&&sousRealtime.active)),
+    promptOwner:voicePromptOwner?{...voicePromptOwner}:null,
     screen,
     turnId:data.turnId??(activeVoiceTranscriptTurn||null),
     ...data
@@ -182,6 +184,24 @@ function voiceDebugTrace(event,data={}){
   if(voiceDebugConsoleEnabled()) console.debug('[Sous Voice Debug]',entry);
   updateVoiceDebugOverlaySoon();
   return entry;
+}
+function setVoicePromptOwner(type,data={}){
+  voicePromptOwner={
+    type,
+    turnId:data.turnId??(activeVoiceTranscriptTurn||null),
+    prompt:data.prompt||null,
+    item:data.item||null,
+    screen:typeof document!=='undefined'?(document.querySelector('.log-screen.active')?.id||null):null,
+    startedAt:Date.now()
+  };
+  voiceDebugTrace('prompt_owner_set',{owner:voicePromptOwner});
+  return voicePromptOwner;
+}
+function clearVoicePromptOwner(reason='resolved'){
+  if(!voicePromptOwner) return;
+  const owner=voicePromptOwner;
+  voicePromptOwner=null;
+  voiceDebugTrace('prompt_owner_cleared',{owner,reason});
 }
 function voiceDebugConsoleEnabled(){
   try{return voiceDebugOverlayEnabled()||localStorage.getItem('sous_voice_debug_console')==='true'||new URLSearchParams(location.search).get('voiceDebug')==='1';}
@@ -644,6 +664,7 @@ function cancelPendingQuantityFromVoice(command,turnId){
   if(!pendingFood) return false;
   const name=pendingFood.name||command?.target||'item';
   pendingFood=null;
+  clearVoicePromptOwner('quantity_cancelled');
   voiceDebugTrace('final_action',{action:'command',command:'remove',handled:true,reason:'pending_quantity_cancelled',target:name,turnId});
   showToast('Removed '+name);
   showLogScreen('listening');
@@ -654,7 +675,7 @@ function handleVoiceMealFlowCommand(transcript,turnId){
   const text=typeof normaliseLogText==='function'
     ?normaliseLogText(transcript)
     :String(transcript||'').toLowerCase().trim();
-  if(!/^(?:save|save this|save the|finish|finish this|finish the)\s+meal$/.test(text)) return false;
+  if(!/^(?:finish|finish this|finish the)\s+meal$/.test(text)) return false;
   if(!meal.length){
     const message='Add ingredients first';
     const el=document.getElementById('transcript-text');
@@ -1750,6 +1771,14 @@ function promptIngredientClarification(){
   if(!clarificationState?.active) return;
   const prompt=clarificationPromptForState(clarificationState);
   clarificationState.step=(clarificationState.missingFields||[]).join('_')||'detail';
+  setVoicePromptOwner('clarification',{
+    prompt:prompt.text,
+    item:{
+      baseItem:clarificationState.baseItem,
+      family:clarificationState.family,
+      missingFields:clarificationState.missingFields||[]
+    }
+  });
   voiceDebugTrace('clarification_shown',{prompt:prompt.text,cacheKey:prompt.cacheKey,missingFields:clarificationState.missingFields||[]});
   voiceDebugTrace('clarification_prompt',{prompt:prompt.text,cacheKey:prompt.cacheKey,missingFields:clarificationState.missingFields||[]});
   const el=document.getElementById('transcript-text');
@@ -1786,6 +1815,7 @@ function beginIngredientClarification(baseItem,fallback,context={}){
 }
 function clearIngredientClarification(){
   clarificationState=null;
+  clearVoicePromptOwner('clarification_resolved');
 }
 function cancelIngredientClarification({resume=true}={}){
   if(!clarificationState?.active) return;
@@ -2961,6 +2991,7 @@ function commitQuantity(grams){
   const r=grams/food.w;
   const item={name:food.name,weight:Math.round(grams),kcal:Math.round(food.kcal*r),protein:Math.round(food.p*r*10)/10,carbs:Math.round(food.c*r*10)/10,fat:Math.round(food.f*r*10)/10,fibre:Math.round((food.fi||0)*r*10)/10,icon:food.icon,type:food.type||'solid',rawFood:food};
   addIngredientToMeal(item, {source:'voice'});
+  clearVoicePromptOwner('quantity_resolved');
   showToast('Added '+item.name+' '+Math.round(grams)+'g ✓');
   speakSuccessCue();
   pendingFood=null;
@@ -3001,6 +3032,7 @@ function commitUsualFromQuantityPrompt(){
     _persistDraft();
   }
   showToast('Added '+usual.name+' ✓');
+  clearVoicePromptOwner('usual_from_quantity');
   speakSuccessCue();
   pendingFood=null;
   showLogScreen('listening');
@@ -3020,10 +3052,13 @@ function askQuantity(item){
     usualBtn.textContent=usual?'Use usual '+usual.name:'Use usual';
   }
   document.getElementById('qty-input').value='';
-  voiceDebugTrace('quantity_prompt_shown',{item:voiceDebugResultSummary([item])[0],prompt:'How much '+item.name+'?'});
+  const prompt='How much '+item.name+'?';
+  const itemSummary=voiceDebugResultSummary([item])[0];
+  setVoicePromptOwner('quantity',{prompt,item:itemSummary});
+  voiceDebugTrace('quantity_prompt_shown',{item:itemSummary,prompt});
   showLogScreen('quantity');
   pauseAlwaysOn();
-  speakThenListen('How much '+item.name+'?',voiceAnswer=>{
+  speakThenListen(prompt,voiceAnswer=>{
     if(document.querySelector('.log-screen.active')?.id!=='ls-quantity') return;
     const quantityCancel=quantityPromptCancelCommand(voiceAnswer);
     if(quantityCancel&&cancelPendingQuantityFromVoice(quantityCancel,activeVoiceTranscriptTurn||null)) return;
