@@ -587,6 +587,8 @@ app.post('/api/interpret-action', async (req, res) => {
     'You are not a nutrition source. Never return calories, macros, nutrients, or saved-meal claims.',
     'Use only action intent and references. The app will resolve foods and nutrition locally.',
     'Prefer refs from context when relevant. Use clarify when the source/target is ambiguous.',
+    'Never invent a meal reference. If the requested source or target is missing from context, return clarify or none with low confidence.',
+    'Do not use add_food to create nutrition facts. New food words are only intent; the app resolves nutrition locally.',
     'Allowed action types: add_food, replace_food, remove_food, change_quantity, repeat_meal, modify_meal_copy, add_usual_meal, clarify, none.',
     'Allowed change ops for modify_meal_copy: replace, remove, scale, set_quantity, add.',
     'For "that" or "last", target the current meal last item.',

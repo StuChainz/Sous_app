@@ -988,6 +988,76 @@ test('C simulated SpeechRecognition interim then final transcript follows turn i
   expect(result.visibleText.toLowerCase()).not.toContain('"oa"\ndidn\'t catch');
 });
 
+test('AI memory intent guardrails require confidence and local refs', async ({ page }) => {
+  await page.route('**/favicon.ico', route => route.fulfill({ status: 204, body: '' }));
+  await page.addInitScript(() => {
+    localStorage.clear();
+    localStorage.setItem('userPlan', 'pro');
+    localStorage.setItem('sous_voice_feedback', '0');
+    localStorage.setItem('sous_voice_test_harness', '1');
+  });
+  await page.goto('/?sousVoiceTest=1');
+  await page.waitForFunction(() => typeof window.__sousStartVoiceTestSession === 'function');
+  await page.evaluate(({ date, ingredient }) => {
+    localStorage.setItem('sous_log', JSON.stringify({
+      [date]: {
+        meals: [{
+          id: 'history_lunch_guard',
+          name: 'Lunch',
+          section: 'lunch',
+          time: `${date}T12:30:00.000Z`,
+          ingredients: [ingredient]
+        }]
+      }
+    }));
+    window.__sousStartVoiceTestSession('lunch');
+  }, { date: dateOffset(-1), ingredient: testIngredient('White rice', 150) });
+  await page.waitForFunction(() => window.__sousVoiceState().state === 'listening');
+
+  await page.evaluate(() => {
+    window.interpretMealActionWithAI = async () => ({
+      type: 'modify_meal_copy',
+      confidence: 'low',
+      source: { kind: 'history_meal', dateOffset: -1, section: 'lunch' },
+      changes: [{ op: 'replace', from: 'White rice', to: 'Potato' }]
+    });
+  });
+  await sendAndSettle(page, 'replace yesterday rice with potato', { quantity: 'none', review: 'none' });
+  await expect.poll(
+    () => page.evaluate(() => window.sousVoiceDebug().some(event => event.event === 'ai_action_rejected' && event.reason === 'low_confidence')),
+    { timeout: 3000, intervals: [50, 100, 200] }
+  ).toBe(true);
+  expect(await page.evaluate(() => window.__sousVoiceState().meal.length)).toBe(0);
+
+  await page.evaluate(() => {
+    window.interpretMealActionWithAI = async () => ({
+      type: 'modify_meal_copy',
+      confidence: 'high',
+      source: null,
+      changes: [{ op: 'replace', from: 'White rice', to: 'Potato' }]
+    });
+  });
+  await sendAndSettle(page, 'swap yesterday rice for potato', { quantity: 'none', review: 'none' });
+  await expect.poll(
+    () => page.evaluate(() => window.sousVoiceDebug().some(event => event.event === 'ai_action_rejected' && event.reason === 'missing_source')),
+    { timeout: 3000, intervals: [50, 100, 200] }
+  ).toBe(true);
+  expect(await page.evaluate(() => window.__sousVoiceState().meal.length)).toBe(0);
+
+  await page.evaluate(() => {
+    window.interpretMealActionWithAI = async () => ({
+      type: 'modify_meal_copy',
+      confidence: 'high',
+      source: { kind: 'history_meal', dateOffset: -1, section: 'lunch' },
+      changes: [{ op: 'replace', from: 'White rice', to: 'Potato' }]
+    });
+  });
+  await sendAndSettle(page, 'change yesterday rice to potato', { quantity: 'none', review: 'none' });
+  const names = await page.evaluate(() => window.__sousVoiceState().meal.map(item => item.name));
+  expect(names).toContain('Potato');
+  expect(names).not.toContain('White rice');
+});
+
 test.fail('warning: direct transcript helper bypasses browser SpeechRecognition lifecycle', async ({ page }) => {
   await page.route('**/favicon.ico', route => route.fulfill({ status: 204, body: '' }));
   await page.addInitScript(() => {

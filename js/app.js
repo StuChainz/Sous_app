@@ -539,8 +539,10 @@ function parseDeterministicMemoryCommand(transcript){
   const asksUsual=/\b(?:usual|regular)\b/.test(normalized);
   const asksYesterday=/\byesterday(?:'s)?\b/.test(normalized);
   const asksRepeat=/^(?:same|repeat|copy|last)\b/.test(normalized)||/\b(?:same|repeat|copy)\s+(?:meal|breakfast|lunch|dinner|tea|supper|snacks?|supplements?)\b/.test(normalized);
+  const asksMemoryEdit=/\b(?:replace|change|swap|instead|remove|delete|half|halve|double|thing|something)\b/.test(normalized);
+  const asksPlainYesterdayCopy=asksYesterday&&!asksMemoryEdit&&(/^(?:same(?:\s+as)?|repeat|copy|use|log)?\s*yesterday(?:'s)?(?:\s+(?:meal|breakfast|lunch|dinner|tea|supper|snacks?|supplements?))?$/.test(normalized)||/^(?:same(?:\s+as)?|repeat|copy|use|log)\s+(?:the\s+)?(?:breakfast|lunch|dinner|tea|supper|snacks?|supplements?)\s+from\s+yesterday$/.test(normalized));
   if(asksUsual) return {type:'usual',section,query};
-  if(asksYesterday||asksRepeat){
+  if(asksRepeat||asksPlainYesterdayCopy){
     if(!asksYesterday&&!section&&!/\bmeal\b/.test(normalized)) return null;
     return {type:'history',section,query,when:asksYesterday?'yesterday':'latest'};
   }
@@ -588,6 +590,47 @@ function handleDeterministicMemoryCommand(command,transcript){
   const applied=addAIClonedItemsToCurrent(sourceMeal.ingredients||[],sourceMeal,source);
   if(!applied.ok&&applied.message) showToast(applied.message,2600);
   return true;
+}
+
+function aiActionHasSourceRef(action){
+  const source=action?.source||{};
+  return !!(action?.usualRef||source.ref||source.kind==='history_meal'||source.kind==='usual_meal'||source.date||source.dateOffset!=null||source.when||source.section||source.query);
+}
+function aiActionHasTarget(action,change=null){
+  const target=action?.target||{};
+  return !!(change?.targetRef||change?.from||change?.food||action?.targetFood||action?.food||target.ref||target.food||target.scope==='last_item'||target.scope==='current_meal');
+}
+function aiActionGuard(action){
+  if(!action||!action.type||action.type==='none') return {ok:false,reason:'empty'};
+  if(action.type==='clarify') return {ok:true};
+  if(action.confidence==='low') return {ok:false,reason:'low_confidence'};
+  if(action.type==='repeat_meal'){
+    if(!aiActionHasSourceRef(action)) return {ok:false,reason:'missing_source'};
+    return {ok:true};
+  }
+  if(action.type==='add_usual_meal'){
+    if(!(action.usualRef||action.source?.ref||action.section||action.source?.section||action.source?.query||action.food||action.targetFood)) return {ok:false,reason:'missing_usual_ref'};
+    return {ok:true};
+  }
+  if(action.type==='modify_meal_copy'){
+    if(!aiActionHasSourceRef(action)) return {ok:false,reason:'missing_source'};
+    if(!Array.isArray(action.changes)||!action.changes.length) return {ok:false,reason:'missing_changes'};
+    const invalid=action.changes.find(change=>{
+      if(change.op==='add') return !(change.food||change.to);
+      if(change.op==='scale'||change.op==='set_quantity') return !aiActionHasTarget(action,change)||!(change.quantityText||Number.isFinite(Number(change.factor)));
+      if(change.op==='replace') return !aiActionHasTarget(action,change)||!(change.to||change.food);
+      return !aiActionHasTarget(action,change);
+    });
+    if(invalid) return {ok:false,reason:'invalid_change'};
+    return {ok:true};
+  }
+  if(['replace_food','remove_food','change_quantity'].includes(action.type)){
+    if(!aiActionHasTarget(action)) return {ok:false,reason:'missing_target'};
+    if(action.type==='replace_food'&&!(action.replacementFood||action.food)) return {ok:false,reason:'missing_replacement'};
+    if(action.type==='change_quantity'&&!(action.quantityText||Number.isFinite(Number(action.factor)))) return {ok:false,reason:'missing_quantity'};
+    return {ok:true};
+  }
+  return {ok:false,reason:'unsupported_action'};
 }
 
 // Words that carry no food meaning and are safe to ignore when scanning
@@ -749,9 +792,23 @@ async function handleTranscript(transcript,rawText){
       }
       if(action&&['replace_food','remove_food','change_quantity','repeat_meal','add_usual_meal','modify_meal_copy'].includes(action.type)){
         if(typeof voiceDebugTrace==='function') voiceDebugTrace('ai_action_result',{transcript:cleanTranscript,action});
-        const applied=applyAIActionToCurrentMeal(action);
-        if(applied.ok) return;
-        if(applied.message) showToast(applied.message,2600);
+        const guard=aiActionGuard(action);
+        if(!guard.ok){
+          if(typeof voiceDebugTrace==='function') voiceDebugTrace('ai_action_rejected',{transcript:cleanTranscript,action,reason:guard.reason});
+          if(guard.reason==='low_confidence'){
+            showToast("I need one more detail.",2600);
+            if(typeof speakCachedResponse==='function') speakCachedResponse('clarification_needed',{},()=>typeof maybeResumeVoiceSession==='function'&&maybeResumeVoiceSession(320));
+            return;
+          }
+        } else {
+          const applied=applyAIActionToCurrentMeal(action);
+          if(applied.ok) return;
+          if(applied.message) showToast(applied.message,2600);
+        }
+      } else if(action&&typeof voiceDebugTrace==='function'){
+        voiceDebugTrace('ai_action_rejected',{transcript:cleanTranscript,action,reason:action.type==='none'?'none':'unsupported_action'});
+      } else if(typeof voiceDebugTrace==='function'){
+        voiceDebugTrace('ai_action_result',{transcript:cleanTranscript,action:null,reason:'empty_or_unavailable'});
       }
     }catch(e){
       console.warn('[Sous] AI action error:',e);
