@@ -1,4 +1,4 @@
-const CACHE_VERSION = 'sous-v2';
+const CACHE_VERSION = 'sous-v3';
 const APP_SHELL_CACHE = CACHE_VERSION;
 const APP_SHELL_ASSETS = [
   './',
@@ -15,7 +15,8 @@ const APP_SHELL_ASSETS = [
   './js/profile.js',
   './js/recipes.js',
   './js/app.js',
-  './js/ai-interpreter.js'
+  './js/ai-interpreter.js',
+  './js/barcode.js'
 ];
 
 self.addEventListener('install', event => {

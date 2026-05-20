@@ -1674,7 +1674,7 @@ function updateHome(){ if(currentTab==='home') renderHome(); }
 // ═══════════════════════════════════════════
 // PWA — MANIFEST + SERVICE WORKER
 // ═══════════════════════════════════════════
-const SOUS_CACHE_VERSION='sous-v2';
+const SOUS_CACHE_VERSION='sous-v3';
 
 window.__sousClearCachesAndReload=async function(){
   if('serviceWorker' in navigator){

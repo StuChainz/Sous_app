@@ -402,6 +402,16 @@ html,body{height:100%;height:var(--app-height);min-height:-webkit-fill-available
 .fri-custom-badge{font-size:10px;background:var(--accent-soft);color:var(--accent);border-radius:4px;padding:1px 5px;margin-left:5px;font-weight:500;white-space:nowrap;}
 .create-custom-food-btn{width:100%;padding:12px 14px;border-radius:12px;border:1px dashed var(--border);background:var(--bg);font-size:13px;font-weight:500;color:var(--accent);cursor:pointer;text-align:left;font-family:'Geist',sans-serif;transition:background .15s;}
 .create-custom-food-btn:hover{background:var(--accent-soft);}
+.barcode-sheet{gap:0;}
+.barcode-video-wrap{position:relative;background:#000;border-radius:14px;overflow:hidden;aspect-ratio:4/3;margin-bottom:12px;border:.5px solid var(--border);}
+.barcode-video-wrap video{width:100%;height:100%;object-fit:cover;display:block;}
+.barcode-frame{position:absolute;left:12%;right:12%;top:34%;height:32%;border:2px solid rgba(255,255,255,.82);border-radius:12px;box-shadow:0 0 0 999px rgba(0,0,0,.22);pointer-events:none;}
+.barcode-status{font-size:12px;color:var(--text-muted);line-height:1.45;margin-bottom:12px;}
+.barcode-status[data-tone="warn"]{color:var(--amber);}
+.barcode-product-top{display:flex;gap:12px;align-items:flex-start;margin-bottom:12px;}
+.barcode-product-image{width:58px;height:58px;border-radius:10px;object-fit:cover;background:var(--bg);border:.5px solid var(--border);flex-shrink:0;}
+.barcode-product-title{font-size:15px;font-weight:600;color:var(--text);line-height:1.25;margin-bottom:3px;}
+.barcode-product-meta{font-size:11px;color:var(--text-muted);line-height:1.35;}
 .rs-screen{position:absolute;inset:0;display:none;flex-direction:column;overflow-y:auto;-webkit-overflow-scrolling:touch;padding-bottom:calc(var(--tab-h)+16px);}
 .rs-screen.active{display:flex;}
 .recipe-item{background:var(--card);border:.5px solid var(--border);border-radius:var(--radius-sm);padding:14px 16px;display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;cursor:pointer;transition:background .15s;}
@@ -575,6 +585,7 @@ html,body{height:100%;height:var(--app-height);min-height:-webkit-fill-available
           <div class="cta-sub">Tap mic to start voice logging</div>
         </div>
         <button class="btn-secondary" type="button" onclick="openPhotoEstimatePicker()" style="margin-top:10px;width:100%;"><i class="ti ti-camera" style="margin-right:6px;"></i>Estimate from photo</button>
+        <button class="btn-secondary" type="button" onclick="openBarcodeScannerFromHome()" style="margin-top:10px;width:100%;"><i class="ti ti-barcode" style="margin-right:6px;"></i>Scan barcode</button>
         <input id="photo-estimate-input" type="file" accept="image/*" capture="environment" style="position:absolute;width:1px;height:1px;opacity:0;pointer-events:none;overflow:hidden;">
       </div>
 
@@ -645,6 +656,7 @@ html,body{height:100%;height:var(--app-height);min-height:-webkit-fill-available
           <input class="voice-text-input" id="text-input" type="text" placeholder='e.g. "150g chicken and 80g rice" or "casserole 600 cal 45g protein"'>
           <button class="send-btn" id="send-btn"><i class="ti ti-send"></i></button>
         </div>
+        <button class="btn-secondary" type="button" onclick="openBarcodeScanner()" style="margin:10px 20px 0;width:calc(100% - 40px);"><i class="ti ti-barcode" style="margin-right:6px;"></i>Scan barcode</button>
         <div id="current-meal-list" style="display:none;margin:12px 20px 0;background:var(--card);border:.5px solid var(--border);border-radius:var(--radius-sm);overflow:visible;"></div>
         <div style="display:none;justify-content:flex-end;margin:6px 20px 0;" id="undo-row">
           <button id="undo-btn" style="background:none;border:none;padding:4px 8px;cursor:pointer;color:var(--text-muted);font-size:12px;display:inline-flex;align-items:center;gap:4px;"><i class="ti ti-arrow-back-up" style="font-size:14px;"></i> Undo</button>
@@ -1160,6 +1172,62 @@ html,body{height:100%;height:var(--app-height);min-height:-webkit-fill-available
   </div>
 </div>
 
+<!-- BARCODE SCANNER MODAL -->
+<div id="barcode-modal" class="modal-overlay" style="display:none">
+  <div class="modal-sheet barcode-sheet">
+    <div class="modal-header">
+      <span class="modal-title">Scan barcode</span>
+      <button class="modal-close" id="barcode-modal-close">x</button>
+    </div>
+    <div class="modal-panel">
+      <div id="barcode-status" class="barcode-status"></div>
+      <div id="barcode-scan-panel">
+        <div class="barcode-video-wrap">
+          <video id="barcode-video" muted playsinline></video>
+          <div class="barcode-frame"></div>
+        </div>
+        <button class="btn-secondary" type="button" id="barcode-manual-btn" style="width:100%;flex:none;">Enter barcode instead</button>
+      </div>
+      <div id="barcode-manual-panel" style="display:none;">
+        <div class="custom-field-group" style="margin-bottom:12px;">
+          <div class="custom-field-label">Barcode</div>
+          <input type="text" inputmode="numeric" pattern="[0-9]*" class="custom-input" id="barcode-manual-input" placeholder="e.g. 3017620422003">
+        </div>
+        <button class="btn-primary" type="button" id="barcode-manual-lookup-btn">Look up product</button>
+        <button class="btn-secondary" type="button" id="barcode-rescan-btn" style="width:100%;margin-top:8px;flex:none;">Try camera again</button>
+      </div>
+      <div id="barcode-review-panel" style="display:none;">
+        <div class="barcode-product-top">
+          <img id="barcode-product-image" class="barcode-product-image" alt="" style="display:none;">
+          <div style="min-width:0;flex:1;">
+            <div class="barcode-product-title" id="barcode-review-title"></div>
+            <div class="barcode-product-meta" id="barcode-review-meta"></div>
+          </div>
+        </div>
+        <div class="custom-field-group" style="margin-bottom:10px;">
+          <div class="custom-field-label">Product name</div>
+          <input type="text" class="custom-input" id="barcode-product-name">
+        </div>
+        <div class="custom-field-group" style="margin-bottom:12px;">
+          <div class="custom-field-label">Amount eaten (g/ml)</div>
+          <input type="number" class="custom-input" id="barcode-serving-grams" min="1" step="1">
+        </div>
+        <div class="preview-macro-grid" style="margin-bottom:12px;">
+          <div class="pmg-cell kcal"><div class="pmg-val" id="barcode-kcal">0</div><div class="pmg-lbl">kcal</div></div>
+          <div class="pmg-cell"><div class="pmg-val" id="barcode-protein">0</div><div class="pmg-lbl">protein</div></div>
+          <div class="pmg-cell"><div class="pmg-val" id="barcode-carbs">0</div><div class="pmg-lbl">carbs</div></div>
+          <div class="pmg-cell"><div class="pmg-val" id="barcode-fat">0</div><div class="pmg-lbl">fat</div></div>
+        </div>
+        <div style="font-size:12px;color:var(--text-muted);line-height:1.45;">Barcode data comes from Open Food Facts. Check the serving before adding.</div>
+      </div>
+    </div>
+    <div class="btn-row" style="margin-top:14px;">
+      <button class="btn-secondary" id="barcode-cancel-btn">Cancel</button>
+      <button class="btn-primary" id="barcode-add-btn" style="flex:2;">Add to meal</button>
+    </div>
+  </div>
+</div>
+
 <!-- PHOTO ESTIMATE REVIEW MODAL -->
 <div id="photo-estimate-modal" class="modal-overlay" style="display:none">
   <div class="modal-sheet">
@@ -1469,6 +1537,7 @@ window.sousApiUrl=path=>`${window.SOUS_API_BASE}${path}`;
 <script src="js/recipes.js?v=8"></script>
 <script src="js/app.js?v=16"></script>
 <script src="js/ai-interpreter.js?v=3"></script>
+<script src="js/barcode.js?v=1"></script>
 
 </body>
 </html>
