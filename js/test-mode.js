@@ -62,8 +62,14 @@
     catch(e){return false;}
   }
 
+  function storageDisablesTestMode(){
+    try{return localStorage.getItem(TEST_MODE_KEY)==='0';}
+    catch(e){return false;}
+  }
+
   function testModeEnabled(){
-    return urlEnablesTestMode()||storageEnablesTestMode();
+    if(urlEnablesTestMode()||storageEnablesTestMode()) return true;
+    return !storageDisablesTestMode();
   }
 
   function syncButton(){
@@ -280,7 +286,7 @@
   }
 
   function disableTestMode(){
-    try{localStorage.removeItem(TEST_MODE_KEY);}catch(e){}
+    try{localStorage.setItem(TEST_MODE_KEY,'0');}catch(e){}
     syncButton();
     return true;
   }

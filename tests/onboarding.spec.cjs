@@ -57,9 +57,9 @@ test('onboarding remains usable on a small mobile viewport', async ({ page }) =>
   await expect(page.getByRole('button', { name: 'Next onboarding card' })).toBeVisible();
 
   for (const title of [
-    'Speak normally',
-    'Everything is editable',
-    'Corrections are expected',
+    'Set up Profile',
+    'Tap once, speak normally',
+    'Review and correct',
     'Sous gets faster over time'
   ]) {
     await page.getByRole('button', { name: /Next onboarding card|Start logging/ }).click();

@@ -8,10 +8,10 @@ async function boot(page, path = '/') {
   await page.goto(path);
 }
 
-test('bug button is hidden for normal users', async ({ page }) => {
+test('bug button is visible by default in the friend-testing build', async ({ page }) => {
   await boot(page);
 
-  await expect(page.getByTestId('bug-report-button')).toBeHidden();
+  await expect(page.getByTestId('bug-report-button')).toBeVisible();
 });
 
 test('test query shows bug button and opens report modal', async ({ page }) => {
@@ -46,14 +46,14 @@ test('bug button stays inside the app shell on wide screens', async ({ page }) =
 test('helpers enable and disable test mode', async ({ page }) => {
   await boot(page);
 
-  await expect(page.getByTestId('bug-report-button')).toBeHidden();
+  await expect(page.getByTestId('bug-report-button')).toBeVisible();
   await page.evaluate(() => window.__sousEnableTestMode());
   await expect(page.getByTestId('bug-report-button')).toBeVisible();
   await expect.poll(() => page.evaluate(() => localStorage.getItem('sous_test_mode'))).toBe('1');
 
   await page.evaluate(() => window.__sousDisableTestMode());
   await expect(page.getByTestId('bug-report-button')).toBeHidden();
-  await expect.poll(() => page.evaluate(() => localStorage.getItem('sous_test_mode'))).toBe(null);
+  await expect.poll(() => page.evaluate(() => localStorage.getItem('sous_test_mode'))).toBe('0');
 });
 
 test('bug report includes note, app state, voice traces, and console errors', async ({ page }) => {
