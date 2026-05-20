@@ -6,6 +6,7 @@
     "start": "node server.js",
     "test:voice": "playwright test tests/voice-simulation.spec.cjs",
     "test:voice:mass": "playwright test tests/voice-mass-regression.spec.js",
+    "test:voice:fake-mic": "playwright test tests/voice-fake-mic.spec.js",
     "test:voice:real-audio": "playwright test --project=real-audio-chrome tests/voice-real-audio.spec.cjs"
   },
   "dependencies": {

@@ -9,6 +9,8 @@ let voiceSessionState='idle', tapRecStarting=false, tapRecStopping=false, sousRe
 let voiceRestartCount=0, voiceSuccessCueCount=0, voiceFlowCueCooldownUntil=0, voiceDebugOverlayEl=null, voiceDebugOverlayTimer=null, voiceDebugOverlayDismissed=false, voiceDebugOverlayUpdateQueued=false;
 let voiceListenStartedAt=0;
 let voiceTestEvents=[];
+let voiceTranscriptTurn=0, activeVoiceTranscriptTurn=0, lastAcceptedTranscript='', lastAcceptedTranscriptAt=0;
+let voiceOutcomeTurns=new Set();
 let _voiceMode=false;
 let nextIngId=1;
 let modalSelectedFood=null, modalActiveTab='search';
@@ -91,7 +93,8 @@ function voiceDebugContextSnapshot(){
   };
 }
 function recordVoiceTestEvent(type,entry){
-  if(!voiceTestSessionActive&&!['transcript received','session paused'].includes(type)) return;
+  const harnessAllowed=typeof sousVoiceTestHarnessAllowed==='function'&&sousVoiceTestHarnessAllowed();
+  if(!voiceTestSessionActive&&!harnessAllowed&&!['transcript received','session paused'].includes(type)) return;
   const item={
     t:new Date().toISOString(),
     type,
@@ -104,6 +107,10 @@ function recordVoiceTestEvent(type,entry){
     action:entry?.action||null,
     key:entry?.key||null,
     reason:entry?.reason||entry?.issue||null,
+    turnId:entry?.turnId??null,
+    outcome:entry?.outcome||null,
+    screen:entry?.screen||null,
+    routeDetail:entry?.routeDetail||null,
     results:entry?.results||entry?.items||null,
     item:entry?.item||null
   };
@@ -112,6 +119,22 @@ function recordVoiceTestEvent(type,entry){
 }
 function recordVoiceTestEventFromTrace(entry){
   if(!entry) return;
+  const directEvents=new Set([
+    'transcript_turn_started',
+    'transcript_accepted',
+    'outcome_decided',
+    'ui_updated',
+    'voice_feedback_requested',
+    'voice_feedback_played',
+    'voice_feedback_blocked',
+    'silent_mode_skipped_feedback',
+    'fallback_timer_started',
+    'fallback_timer_cancelled',
+    'fallback_timer_ignored_stale_turn',
+    'session_restart_requested',
+    'session_restart_completed'
+  ]);
+  if(directEvents.has(entry.event)) recordVoiceTestEvent(entry.event,entry);
   if(entry.event==='transcript_heard') recordVoiceTestEvent('transcript received',entry);
   if(entry.event==='parser_result') recordVoiceTestEvent('parser result',entry);
   if(entry.event==='clarification_prompt'||entry.event==='clarification_started') recordVoiceTestEvent('clarification shown',entry);
@@ -130,6 +153,7 @@ function voiceDebugTrace(event,data={}){
     voiceState:voiceSessionState,
     context:voiceDebugContextSnapshot(),
     clarification:voiceDebugClarificationSnapshot(),
+    turnId:data.turnId??(activeVoiceTranscriptTurn||null),
     ...data
   };
   try{
@@ -445,6 +469,23 @@ function startVoiceListeningWatchdog(source='tap'){
 function resetVoiceRecovery(){
   voiceRecoveryState={issue:null,attempts:0};
 }
+function beginVoiceTranscriptTurn(transcript){
+  const turnId=++voiceTranscriptTurn;
+  activeVoiceTranscriptTurn=turnId;
+  lastAcceptedTranscript=String(transcript||'').trim();
+  lastAcceptedTranscriptAt=Date.now();
+  voiceDebugTrace('transcript_turn_started',{turnId,transcript:lastAcceptedTranscript});
+  return turnId;
+}
+function isCurrentVoiceTranscriptTurn(turnId){
+  return !!turnId&&turnId===activeVoiceTranscriptTurn;
+}
+function markVoiceOutcome(turnId,outcome,data={}){
+  if(!turnId||voiceOutcomeTurns.has(turnId)) return false;
+  voiceOutcomeTurns.add(turnId);
+  voiceDebugTrace('outcome_decided',{turnId,outcome,...data});
+  return true;
+}
 function voiceRecoveryPrompt(issue){
   if(issue==='partial') return 'Say that again';
   return "Didn't catch that";
@@ -461,8 +502,12 @@ function transcriptRecoveryIssue(transcript,isLowConfidence){
   if(reason==='partial') return 'partial';
   return null;
 }
-function maybeRecoverVoiceTranscript(issue,transcript){
+function maybeRecoverVoiceTranscript(issue,transcript,turnId=null){
   if(!issue||!voiceSessionActive) return false;
+  if(turnId&&!isCurrentVoiceTranscriptTurn(turnId)){
+    voiceDebugTrace('fallback_timer_ignored_stale_turn',{turnId,currentTurnId:activeVoiceTranscriptTurn,issue,transcript});
+    return false;
+  }
   if(voiceRecoveryState.issue===issue) voiceRecoveryState.attempts++;
   else voiceRecoveryState={issue,attempts:1};
   voiceDebugTrace('voice_recovery',{
@@ -474,8 +519,10 @@ function maybeRecoverVoiceTranscript(issue,transcript){
   const prompt=voiceRecoveryPrompt(issue);
   const el=document.getElementById('transcript-text');
   if(el) el.textContent=prompt;
+  voiceDebugTrace('ui_updated',{turnId,screen:document.querySelector('.log-screen.active')?.id||null,reason:'voice_recovery',prompt});
   showToast(prompt);
-  speakRecoveryCue(()=>scheduleVoiceSessionRestart(300));
+  markVoiceOutcome(turnId,'voice_recovery',{issue,prompt});
+  speakRecoveryCue(()=>scheduleVoiceSessionRestart(300),{force:true});
   return true;
 }
 function logRestartBlocked(reason){
@@ -583,6 +630,7 @@ function scheduleVoiceSessionRestart(delay=VOICE_RESTART_DEFAULT_MS){
   clearVoiceRestartTimer();
   const safeDelay=Math.max(VOICE_RESTART_MIN_MS,Math.min(700,Number(delay)||VOICE_RESTART_DEFAULT_MS));
   logVoiceState('restart scheduled',{delay:safeDelay});
+  voiceDebugTrace('session_restart_requested',{delay:safeDelay,turnId:activeVoiceTranscriptTurn||null});
   if(!isSpeaking&&!processingTranscript) setVoiceSessionState('restarting','restart scheduled',{delay:safeDelay});
   voiceRestartTimer=setTimeout(()=>{
     voiceRestartTimer=null;
@@ -603,6 +651,7 @@ function scheduleVoiceSessionRestart(delay=VOICE_RESTART_DEFAULT_MS){
       isRecording=false;
       setVoiceSessionState('listening','test session restart');
       setMicState('recording');
+      voiceDebugTrace('session_restart_completed',{route:'test_session',restartCount:voiceRestartCount,turnId:activeVoiceTranscriptTurn||null});
       voiceDebugTrace('test_session_listening',{restartCount:voiceRestartCount});
       return;
     }
@@ -616,6 +665,12 @@ function maybeResumeVoiceSession(delay=VOICE_RESTART_DEFAULT_MS){
 }
 async function warmUpVoiceInput(){
   if(!navigator.mediaDevices?.getUserMedia) return false;
+  try{
+    if(localStorage.getItem('sous_voice_fake_mic_test')==='1'&&sousVoiceTestHarnessAllowed()){
+      voiceDebugTrace('voice_mic_warmup',{status:'skipped',reason:'fake_mic_test'});
+      return true;
+    }
+  }catch(e){}
   if(voiceMicWarmupActive) return false;
   voiceMicWarmupActive=true;
   setMicState('arming');
@@ -652,6 +707,7 @@ async function beginVoiceSession(){
   voiceRestartCount=0;
   voiceSuccessCueCount=0;
   voiceFlowCueCooldownUntil=0;
+  voiceOutcomeTurns=new Set();
   voiceSessionActive=true;
   voiceSessionStoppedManually=false;
   voicePausedForVisibility=false;
@@ -659,11 +715,13 @@ async function beginVoiceSession(){
   setVoiceSessionState('restarting','session started',{useRealtime:voiceSessionUseRealtime});
   console.log('[Sous Voice] session started');
   logVoiceState('session started',{useRealtime:voiceSessionUseRealtime});
-  if(voiceSessionUseRealtime) startSousRealtimeVoice();
-  else {
+  const startVoiceInput=async()=>{
+    if(!voiceSessionActive||voiceSessionStoppedManually) return;
+    if(voiceSessionUseRealtime){ startSousRealtimeVoice(); return; }
     await warmUpVoiceInput();
     if(voiceSessionActive&&!voiceSessionStoppedManually) startTapRec();
-  }
+  };
+  speakCachedResponse('session_ready',{},startVoiceInput,{force:true});
 }
 function endVoiceSession(label='Voice logging stopped'){
   if(!voiceSessionActive&&!isRecording&&!voiceCurrentlyListening&&!sousRealtime) return;
@@ -843,8 +901,10 @@ async function routeFinalVoiceTranscript(transcript,{source='tap',confidence=nul
     return false;
   }
   voiceNoSpeechRetries=0;
+  const turnId=beginVoiceTranscriptTurn(clean);
   logVoiceState('speech result received',{source,transcript:clean,originalTranscript:selected.original,confidence});
-  voiceDebugTrace('transcript_heard',{source,transcript:clean,originalTranscript:selected.original,confidence,corrected:selected.changed});
+  voiceDebugTrace('transcript_heard',{source,transcript:clean,originalTranscript:selected.original,confidence,corrected:selected.changed,turnId});
+  voiceDebugTrace('transcript_accepted',{source,transcript:clean,originalTranscript:selected.original,confidence,corrected:selected.changed,turnId});
   const isLow=lowConfidence==null
     ?(!selected.forceHighConfidence&&typeof confidence==='number'&&confidence>0&&confidence<0.75)
     :!!lowConfidence;
@@ -871,26 +931,47 @@ async function routeFinalVoiceTranscript(transcript,{source='tap',confidence=nul
   try{
     if(document.querySelector('.log-screen.active')?.id==='ls-multi-confirm'){
       voiceDebugTrace('transcript_routed',{route:'multi_confirm_fill',source,transcript:clean});
+      markVoiceOutcome(turnId,'multi_confirm_fill',{source,transcript:clean});
       try{handleMultiConfirmVoiceFill(clean);}catch(e){console.warn('[Sous Voice] multi-confirm fill error',e);}
+      return done({restart:false});
+    }
+    if(document.querySelector('.log-screen.active')?.id==='ls-quantity'){
+      voiceDebugTrace('transcript_routed',{route:'quantity_answer',source,transcript:clean});
+      markVoiceOutcome(turnId,'quantity_answer',{source,transcript:clean});
+      const grams=typeof parseGramsFromText==='function'?parseGramsFromText(clean):null;
+      if(grams&&grams>0){
+        commitQuantity(grams);
+      } else if(pendingFood&&typeof normaliseLogText==='function'&&normaliseLogText(clean)===normaliseLogText(pendingFood.name||'')){
+        voiceDebugTrace('ui_updated',{turnId,screen:'ls-quantity',reason:'quantity_repeat_prompt',prompt:'How much '+pendingFood.name+'?'});
+        askQuantity(pendingFood);
+      } else {
+        const el=document.getElementById('transcript-text');
+        if(el) el.textContent="Didn't catch that";
+        voiceDebugTrace('ui_updated',{turnId,screen:'ls-quantity',reason:'quantity_answer_recovery',prompt:"Didn't catch that"});
+        speakRecoveryCue(null,{force:true});
+      }
       return done({restart:false});
     }
     if(clarificationState?.active){
       voiceDebugTrace('transcript_routed',{route:'clarification',source,transcript:clean});
+      markVoiceOutcome(turnId,'clarification_answer',{source,transcript:clean});
       await Promise.resolve(handleClarification(clean));
       return done({restart:false});
     }
     const recoveryIssue=transcriptRecoveryIssue(clean,isLow);
-    if(maybeRecoverVoiceTranscript(recoveryIssue,clean)){
-      voiceDebugTrace('transcript_routed',{route:'voice_recovery',source,issue:recoveryIssue,transcript:clean});
+    if(maybeRecoverVoiceTranscript(recoveryIssue,clean,turnId)){
+      voiceDebugTrace('transcript_routed',{route:'voice_recovery',source,issue:recoveryIssue,transcript:clean,turnId});
       return done({restart:false});
     }
     if(isLow){
       voiceDebugTrace('transcript_routed',{route:'low_confidence_review',source,transcript:clean});
+      markVoiceOutcome(turnId,'low_confidence_review',{source,transcript:clean});
       showVoiceCorrection(clean);
       return done();
     }
     voiceDebugTrace('transcript_routed',{route:'normal_parser',source,transcript:clean});
     await Promise.resolve(handleTranscript(clean,clean));
+    markVoiceOutcome(turnId,'normal_parser',{source,transcript:clean});
     return done();
   }catch(e){
     console.warn('[Sous Voice] transcript error',e);
@@ -952,6 +1033,7 @@ function exposeSousVoiceTestHarness(){
     voiceRestartCount=0;
     voiceSuccessCueCount=0;
     voiceFlowCueCooldownUntil=0;
+    voiceOutcomeTurns=new Set();
     voiceSessionActive=true;
     voiceTestSessionActive=true;
     voiceSessionStoppedManually=false;
@@ -976,6 +1058,7 @@ function exposeSousVoiceTestHarness(){
   window.__sousTestVoiceTranscript=async input=>{
     const payload=typeof input==='object'&&input?input:{transcript:input};
     const clean=String(payload.transcript||payload.text||'').trim();
+    voiceDebugTrace('test_helper_bypasses_recognizer',{helper:'__sousTestVoiceTranscript',transcript:clean,routeDetail:'routes directly into final transcript handler'});
     clearVoiceListeningWatchdog();
     clearVoiceRestartTimer();
     voiceCurrentlyListening=false;
@@ -1196,6 +1279,7 @@ function addIngredientToMeal(item, options = {}) {
   console.log('[Sous Meal] ingredient added via shared pathway');
   console.log('[Sous Meal] source:', source);
   voiceDebugTrace('final_action',{action:'ingredient_added',source,item:voiceDebugResultSummary([item])[0]});
+  voiceDebugTrace('ui_updated',{screen:document.querySelector('.log-screen.active')?.id||null,reason:'ingredient_row_added',item:voiceDebugResultSummary([item])[0]});
 
   // Persist draft (skip for batch callers that persist once after the loop)
   if (!skipPersist) _persistDraft();
@@ -1505,7 +1589,7 @@ function promptIngredientClarification(){
   voiceDebugTrace('clarification_prompt',{prompt:prompt.text,cacheKey:prompt.cacheKey,missingFields:clarificationState.missingFields||[]});
   const el=document.getElementById('transcript-text');
   if(el) el.textContent=prompt.text;
-  speakThenListen(prompt.text,handleClarification,prompt.cacheKey,prompt.data);
+  speakThenListen(prompt.text,handleClarification,prompt.cacheKey,prompt.data,{force:true});
 }
 function beginIngredientClarification(baseItem,fallback,context={}){
   const base=String(baseItem||'ingredient').trim()||'ingredient';
@@ -1579,6 +1663,12 @@ function quantityFirstClarificationInput(text){
   if(!m) return input;
   return `${m[2]} ${m[3]} ${m[1]}`.replace(/\s+/g,' ').trim();
 }
+function clarificationInputWithoutQuantity(text){
+  return normaliseClarificationInput(text)
+    .replace(/\b(?:\d+(?:[.,]\d+)?|a|an|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|couple)\s*(?:g|kg|ml|l|oz|tbsp|tsp|cups?|slices?|pieces?|servings?|portions?|pots?)\b/gi,' ')
+    .replace(/\s+/g,' ')
+    .trim();
+}
 function clarificationAnswerQuantityInfo(answer,state){
   const food=state?.candidateFood||state?.defaultFood||null;
   return extractClarificationQuantityInfo(answer,food);
@@ -1634,12 +1724,15 @@ function parseClarificationInput(baseItem,answer,state=clarificationState){
     ?clarificationQuantityText(state.knownQuantity,state.knownUnit)
     :'';
   const answerQtyText=answerQty.known?clarificationQuantityText(answerQty.grams,answerQty.unit):'';
+  const answerWithoutQty=answerQty.known?clarificationInputWithoutQuantity(answer):'';
   const fullInput=normaliseClarificationInput(`${carryQty} ${answer} ${baseItem}`);
   const candidates=[
     normaliseClarificationInput(`${carryQty} ${answer}`),
     quantityFirstClarificationInput(`${carryQty} ${answer}`),
     normaliseClarificationInput(answer),
     quantityFirstClarificationInput(answer),
+    normaliseClarificationInput(`${answerQtyText} ${answerWithoutQty} ${baseItem}`),
+    normaliseClarificationInput(`${answerWithoutQty} ${baseItem} ${answerQtyText}`),
     fullInput,
     quantityFirstClarificationInput(fullInput),
     normaliseClarificationInput(`${carryQty} ${baseItem} ${answer}`),
@@ -2209,6 +2302,7 @@ function renderCurrentMeal(){
       container.appendChild(row);
     }
   });
+  voiceDebugTrace('ui_updated',{screen:document.querySelector('.log-screen.active')?.id||null,reason:'render_current_meal',mealCount:meal.length});
 }
 
 function renderRecentIngredients(){
@@ -2270,6 +2364,7 @@ function showLogScreen(id){
   document.getElementById('ls-'+id).classList.add('active');
   if(id==='listening'){renderCurrentMeal();renderRecentIngredients();}
   else stopSousRealtimeVoice(false);
+  voiceDebugTrace('ui_updated',{screen:'ls-'+id,reason:'show_log_screen'});
 }
 
 // ═══════════════════════════════════════════
@@ -2292,24 +2387,34 @@ function speak(text,onEnd,opts={}){
   if(!text){finishSkippedVoiceFeedback(onEnd);return;}
   const cachedKey=!opts.skipCache?cachedFeedbackKeyForSpokenText(text):null;
   if(cachedKey&&typeof speakCachedResponse==='function'){
-    speakCachedResponse(cachedKey,{},onEnd);
+    speakCachedResponse(cachedKey,{},onEnd,opts);
     return;
   }
   if(isVoiceSilentMode()){
     console.log('[Sous Voice] silent mode enabled');
-    if(!opts.skipCache) voiceDebugTrace('feedback_audio',{key:null,route:'silent'});
+    if(!opts.skipCache){
+      voiceDebugTrace('feedback_audio',{key:null,route:'silent'});
+      voiceDebugTrace('silent_mode_skipped_feedback',{key:null,route:'silent',text});
+    }
     finishSkippedVoiceFeedback(onEnd);
     return;
   }
   const now=Date.now();
-  if(now-_lastSpeakAt<500){
+  if(!opts.force&&now-_lastSpeakAt<500){
     console.log('[Sous Voice] skipped (debounce)');
-    if(!opts.skipCache) voiceDebugTrace('feedback_audio',{key:null,route:'skipped_debounce'});
+    if(!opts.skipCache){
+      voiceDebugTrace('feedback_audio',{key:null,route:'skipped_debounce'});
+      voiceDebugTrace('voice_feedback_blocked',{key:null,route:'skipped_debounce',text});
+    }
     finishSkippedVoiceFeedback(onEnd);
     return;
   }
   _lastSpeakAt=now;
-  if(!window.speechSynthesis){finishSkippedVoiceFeedback(onEnd);return;}
+  if(!window.speechSynthesis){
+    voiceDebugTrace('voice_feedback_blocked',{key:null,route:'speech_synthesis_unavailable',text});
+    finishSkippedVoiceFeedback(onEnd);
+    return;
+  }
   window.speechSynthesis.cancel();
   let finished=false;
   let started=false;
@@ -2322,7 +2427,10 @@ function speak(text,onEnd,opts={}){
     if(onEnd) setTimeout(onEnd,VOICE_POST_SPEECH_QUIET_MS);
   };
   setVoiceSpeaking(true,'speech synthesis',()=>finish('speech timeout'));
-  if(!opts.skipCache) voiceDebugTrace('feedback_audio',{key:null,route:'browser_tts'});
+  if(!opts.skipCache){
+    voiceDebugTrace('feedback_audio',{key:null,route:'browser_tts'});
+    voiceDebugTrace('voice_feedback_requested',{key:null,route:'browser_tts',text});
+  }
   const u=new SpeechSynthesisUtterance(text);
   u.rate=0.96; u.pitch=1.05; u.volume=1;
   const voices=window.speechSynthesis.getVoices();
@@ -2341,7 +2449,7 @@ function speak(text,onEnd,opts={}){
   };
   const pref=voices.slice().sort((a,b)=>score(b)-score(a))[0];
   if(pref) u.voice=pref;
-  u.onstart=()=>{started=true;if(startTimer){clearTimeout(startTimer);startTimer=null;}voiceDebugTrace('feedback_audio_started',{route:'browser_tts'});};
+  u.onstart=()=>{started=true;if(startTimer){clearTimeout(startTimer);startTimer=null;}voiceDebugTrace('feedback_audio_started',{route:'browser_tts'});voiceDebugTrace('voice_feedback_played',{key:null,route:'browser_tts',text});};
   u.onend=()=>finish('speech ended');
   u.onerror=()=>{voiceDebugTrace('voice_error',{source:'speech',error:'speech_error'});finish('speech error');};
   setTimeout(()=>{
@@ -2360,11 +2468,11 @@ function speak(text,onEnd,opts={}){
     catch(e){finish('speech failed');}
   },30);
 }
-function speakThenListen(text,onResult,cacheKey=null,data={}){
+function speakThenListen(text,onResult,cacheKey=null,data={},opts={}){
   pauseAlwaysOn();
   const done=()=>resumeListeningAfterPrompt(onResult);
-  if(cacheKey) speakCachedResponse(cacheKey,data,done);
-  else speak(text,done);
+  if(cacheKey) speakCachedResponse(cacheKey,data,done,opts);
+  else speak(text,done,opts);
 }
 function resumeListeningAfterPrompt(onResult,delay=260){
   if(onResult===handleClarification&&voiceSessionActive){
@@ -2376,28 +2484,31 @@ function resumeListeningAfterPrompt(onResult,delay=260){
 }
 function speakRecoveryThenListen(onResult){
   pauseAlwaysOn();
-  speakRecoveryCue(()=>resumeListeningAfterPrompt(onResult));
+  speakRecoveryCue(()=>resumeListeningAfterPrompt(onResult),{force:true});
 }
 
-function speakCachedResponse(key,data={},onEnd){
+function speakCachedResponse(key,data={},onEnd,opts={}){
   if(isVoiceSilentMode()){
     voiceDebugTrace('feedback_audio',{key,route:'silent'});
+    voiceDebugTrace('silent_mode_skipped_feedback',{key,route:'silent'});
     finishSkippedVoiceFeedback(onEnd);
     return;
   }
   const now=Date.now();
-  if(now-_lastSpeakAt<500){
+  if(!opts.force&&now-_lastSpeakAt<500){
     console.log('[Sous Voice] skipped (debounce)');
     voiceDebugTrace('feedback_audio',{key,route:'skipped_debounce'});
+    voiceDebugTrace('voice_feedback_blocked',{key,route:'skipped_debounce'});
     finishSkippedVoiceFeedback(onEnd);
     return;
   }
   const fallbackTTS=text=>{
-    if(!text){ voiceDebugTrace('feedback_audio',{key,route:'none'}); finishSkippedVoiceFeedback(onEnd); return; }
+    if(!text){ voiceDebugTrace('feedback_audio',{key,route:'none'}); voiceDebugTrace('voice_feedback_blocked',{key,route:'no_feedback_text'}); finishSkippedVoiceFeedback(onEnd); return; }
     console.log('[Sous Voice] speaking:',key);
     voiceDebugTrace('feedback_audio',{key,route:'browser_tts'});
+    voiceDebugTrace('voice_feedback_requested',{key,route:'browser_tts',text});
     _lastSpeakAt=0;
-    speak(text,onEnd,{skipCache:true});
+    speak(text,onEnd,{skipCache:true,force:!!opts.force});
   };
   const tryAudio=(audioUrl,text)=>{
     const audio=new Audio(audioUrl);
@@ -2416,22 +2527,26 @@ function speakCachedResponse(key,data={},onEnd){
       started=true;
       if(audioStartTimer){clearTimeout(audioStartTimer);audioStartTimer=null;}
       voiceDebugTrace('feedback_audio_started',{key,route:'cached_audio',reason});
+      voiceDebugTrace('voice_feedback_played',{key,route:'cached_audio',reason});
     };
     audio.onended=()=>finish('cached speech ended');
     audio.onplaying=()=>markStarted('playing');
     audio.onerror=()=>{
       if(audioStartTimer){clearTimeout(audioStartTimer);audioStartTimer=null;}
       voiceDebugTrace('voice_error',{source:'cached_speech',error:'audio_error',key});
+      voiceDebugTrace('voice_feedback_blocked',{key,route:'cached_audio_error'});
       setVoiceSpeaking(false,'cached speech error');
       fallbackTTS(text);
     };
     _lastSpeakAt=Date.now();
     console.log('[Sous Voice] speaking:',key);
     voiceDebugTrace('feedback_audio',{key,route:'cached_audio',audioUrl});
+    voiceDebugTrace('voice_feedback_requested',{key,route:'cached_audio',audioUrl});
     setVoiceSpeaking(true,'cached speech '+key,()=>finish('cached speech timeout'));
     audioStartTimer=setTimeout(()=>{
       if(finished||started) return;
       voiceDebugTrace('voice_error',{source:'cached_speech',error:'audio_start_timeout',key});
+      voiceDebugTrace('voice_feedback_blocked',{key,route:'cached_audio_start_timeout'});
       try{audio.pause();audio.src='';}catch(e){}
       setVoiceSpeaking(false,'cached speech start timeout');
       fallbackTTS(text);
@@ -2439,6 +2554,7 @@ function speakCachedResponse(key,data={},onEnd){
     audio.play().then(()=>markStarted('play_resolved')).catch(()=>{
       if(audioStartTimer){clearTimeout(audioStartTimer);audioStartTimer=null;}
       voiceDebugTrace('voice_error',{source:'cached_speech',error:'play_failed',key});
+      voiceDebugTrace('voice_feedback_blocked',{key,route:'cached_audio_play_failed'});
       setVoiceSpeaking(false,'cached speech failed');
       fallbackTTS(text);
     });
@@ -2480,8 +2596,8 @@ function speakSuccessCue(onEnd){
     }
   });
 }
-function speakRecoveryCue(onEnd){
-  speakCachedResponse('recovery',{},onEnd);
+function speakRecoveryCue(onEnd,opts={}){
+  speakCachedResponse('recovery',{},onEnd,opts);
 }
 
 // ═══════════════════════════════════════════
@@ -2738,7 +2854,7 @@ function askQuantity(item){
     } else {
       showToast('Didn\'t catch that — type it or use default');
     }
-  },'clarify_quantity');
+  },'clarify_quantity',{}, {force:true});
 }
 
 // ═══════════════════════════════════════════
@@ -2769,7 +2885,7 @@ function showAmbiguous(matches,amount,label,question){
     }
     if(resolved) resolveAmbig(resolved,amount);
     else{document.getElementById('ambig-listen-text').textContent='Didn\'t catch that — tap to choose';showToast('Tap your choice or say the name again');}
-  },'clarify_type');
+  },'clarify_type',{}, {force:true});
 }
 function resolveAmbig(food,amount){
   const r=amount?amount/food.w:1;
@@ -2902,7 +3018,7 @@ function promptMultiConfirmQuantityFill(){
   if(!(voiceSessionActive||voiceCurrentlyListening||isRecording)) return;
   const transcript=document.getElementById('transcript-text');
   if(transcript) transcript.textContent='How much?';
-  speakThenListen('How much?',handleMultiConfirmVoiceFill,'clarify_amount',{});
+  speakThenListen('How much?',handleMultiConfirmVoiceFill,'clarify_amount',{}, {force:true});
 }
 function _updateEntryMacros(entry){
   if(entry.manualMacros) return;
@@ -2944,7 +3060,8 @@ function showMultiConfirm(results){
   });
   renderMultiConfirm();
   showLogScreen('multi-confirm');
-  setTimeout(promptMultiConfirmQuantityFill,120);
+  if(pendingBatch.some(entry=>!entry.weightSpecified)) setTimeout(promptMultiConfirmQuantityFill,120);
+  else if(voiceSessionActive||voiceCurrentlyListening||isRecording) speakCachedResponse('got_it',{},null,{force:true});
 }
 function renderMultiConfirm(){
   const list=document.getElementById('mc-list');
@@ -3614,7 +3731,10 @@ function buildTapRec(){
     pendingAlternatives=[];
     pendingConfidence=null;
     utteranceStartTime=null;
-    if(finalizeTimer) clearTimeout(finalizeTimer);
+    if(finalizeTimer){
+      clearTimeout(finalizeTimer);
+      voiceDebugTrace('fallback_timer_cancelled',{route:'speech_finalize',transcript,reason:'finalizing_transcript'});
+    }
     finalizeTimer=null;
 
     requestTapStop('finalizing transcript');
@@ -3673,7 +3793,7 @@ function buildTapRec(){
     });
     return uniqVoiceCandidates(merged).slice(0,10);
   }
-  r.onstart=()=>{tapRecStarting=false;tapRecStopping=false;isRecording=true;voiceCurrentlyListening=true;voiceListenStartedAt=Date.now();setVoiceSessionState('listening','recognition started');console.log('[Sous Voice] listening');logVoiceState('recognition actually started');setMicState('recording');startVoiceListeningWatchdog('tap');};
+  r.onstart=()=>{tapRecStarting=false;tapRecStopping=false;isRecording=true;voiceCurrentlyListening=true;voiceListenStartedAt=Date.now();setVoiceSessionState('listening','recognition started');voiceDebugTrace('session_restart_completed',{route:'tap_recognition',restartCount:voiceRestartCount,turnId:activeVoiceTranscriptTurn||null});console.log('[Sous Voice] listening');logVoiceState('recognition actually started');setMicState('recording');startVoiceListeningWatchdog('tap');};
   r.onresult=e=>{
     startVoiceListeningWatchdog('tap');
     let interim='',final='',finalConf=null;
@@ -3703,9 +3823,11 @@ function buildTapRec(){
       });
 
       if(finalizeTimer) clearTimeout(finalizeTimer);
+      if(finalizeTimer) voiceDebugTrace('fallback_timer_cancelled',{route:'speech_finalize',transcript:pendingTranscript,reason:'new_final_segment'});
 
       const delay=getAdaptiveDelay(pendingTranscript);
 
+      voiceDebugTrace('fallback_timer_started',{route:'speech_finalize',transcript:pendingTranscript,delay});
       finalizeTimer=setTimeout(finalizeTranscript,delay);
 
       if(Date.now()-utteranceStartTime>MAX_UTTERANCE_MS){
@@ -3715,15 +3837,41 @@ function buildTapRec(){
   };
   r.onerror=e=>{
     clearVoiceListeningWatchdog();
-    if(finalizeTimer) clearTimeout(finalizeTimer);
+    const err=e.error||'unknown';
+    logVoiceState('recognition error',{error:err});
+    voiceDebugTrace('voice_error',{source:'tap',error:err});
+    if(err==='no-speech'&&pendingTranscript.trim()){
+      voiceDebugTrace('voice_recovery',{issue:'no_speech_after_transcript',transcript:pendingTranscript.trim()});
+      finalizeTranscript();
+      return;
+    }
+    if(err==='no-speech'&&(processingTranscript||voiceSessionState==='processing'||Date.now()-lastAcceptedTranscriptAt<1500)){
+      voiceDebugTrace('voice_recovery',{issue:'stale_no_speech_ignored',transcript:lastAcceptedTranscript||null,turnId:activeVoiceTranscriptTurn||null});
+      voiceDebugTrace('fallback_timer_ignored_stale_turn',{route:'speech_error',issue:'stale_no_speech_ignored',transcript:lastAcceptedTranscript||null,turnId:activeVoiceTranscriptTurn||null});
+      if(finalizeTimer){
+        clearTimeout(finalizeTimer);
+        voiceDebugTrace('fallback_timer_cancelled',{route:'speech_finalize',transcript:pendingTranscript,reason:'stale_no_speech_ignored'});
+      }
+      finalizeTimer=null;
+      pendingTranscript="";
+      pendingAlternatives=[];
+      pendingConfidence=null;
+      utteranceStartTime=null;
+      tapRecStarting=false;
+      tapRecStopping=false;
+      stopTapRec();
+      if(voiceSessionActive&&!processingTranscript&&!isSpeaking) scheduleVoiceSessionRestart(VOICE_RESTART_DEFAULT_MS);
+      return;
+    }
+    if(finalizeTimer){
+      clearTimeout(finalizeTimer);
+      voiceDebugTrace('fallback_timer_cancelled',{route:'speech_finalize',transcript:pendingTranscript,reason:'recognition_error_'+err});
+    }
     finalizeTimer=null;
     pendingTranscript="";
     pendingAlternatives=[];
     pendingConfidence=null;
     utteranceStartTime=null;
-    const err=e.error||'unknown';
-    logVoiceState('recognition error',{error:err});
-    voiceDebugTrace('voice_error',{source:'tap',error:err});
     tapRecStarting=false;
     tapRecStopping=false;
     stopTapRec();
@@ -3737,7 +3885,7 @@ function buildTapRec(){
       resetVoiceRecovery();
       voiceDebugTrace('voice_recovery',{issue:'no_speech',attempt:voiceNoSpeechRetries});
       showToast("Didn't catch that");
-      speakRecoveryCue(()=>scheduleVoiceSessionRestart(300));
+      speakRecoveryCue(()=>scheduleVoiceSessionRestart(300),{force:true});
     } else if(err==='no-speech') showVoiceRetry("Didn't catch that — try again");
     else if(err==='network'||err==='service-not-allowed'){
       showVoiceRetry("Voice service is unavailable — try again");

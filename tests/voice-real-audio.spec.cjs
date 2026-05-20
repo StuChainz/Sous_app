@@ -61,6 +61,7 @@ test('fake microphone audio can drive the real SpeechRecognition voice path', as
     localStorage.setItem('sous_realtime_voice', '0');
     localStorage.setItem('sous_voice_debug_overlay', 'true');
     localStorage.setItem('sous_voice_test_harness', '1');
+    localStorage.setItem('sous_voice_fake_mic_test', '1');
   });
 
   await page.goto('/?sousVoiceTest=1');
