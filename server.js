@@ -469,6 +469,7 @@ app.post('/api/interpret-action', async (req, res) => {
     'For "that" or "last", target the current meal last item.',
     'For "same breakfast", repeat the latest breakfast from history unless another date is specified.',
     'For "yesterday\'s lunch", use source dateOffset -1 and section lunch.',
+    'For "half the rice from yesterday\'s lunch", copy only the rice item with a scale change. Do not copy the whole meal.',
     'For usual meals, use add_usual_meal with a usualRef when possible.',
     `Current section: ${section || ''}`,
     `Transcript: ${cleanTranscript}`,

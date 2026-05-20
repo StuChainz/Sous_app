@@ -251,6 +251,27 @@ function applyAIRemoveFood(action,change=null){
 
 function applyAIChangeQuantity(action,change=null){
   const idx=aiActionTargetIndex(action,change);
+  if(idx<0&&action.source){
+    const sourceMeal=action.source.kind==='usual_meal'?findAIUsualMeal(action):findAIHistoryMeal(action.source);
+    if(sourceMeal){
+      const sourceItems=(sourceMeal.ingredients||[]).map(cloneMealIngredientForAIAction);
+      const targetIndex=findAIItemIndex(sourceItems,{targetRef:action.target?.ref,from:action.targetFood||action.target?.food||action.food});
+      if(targetIndex>=0){
+        const item=sourceItems[targetIndex];
+        const result=applyAIChangeToClonedItems(sourceItems,[{
+          op:Number.isFinite(Number(action.factor))?'scale':'set_quantity',
+          targetRef:null,
+          from:item.name,
+          to:null,
+          food:item.name,
+          quantityText:action.quantityText,
+          factor:action.factor
+        }][0]);
+        if(!result.ok) return result;
+        return addAIClonedItemsToCurrent([sourceItems[targetIndex]],sourceMeal,'history-item-ai');
+      }
+    }
+  }
   if(idx<0) return {ok:false,message:"Couldn't find that item."};
   const item=meal[idx];
   const food=item.rawFood||(typeof findFoodByText==='function'?findFoodByText(item.name):null);
@@ -276,7 +297,196 @@ function applyAIActionToCurrentMeal(action){
   if(action.type==='replace_food') return applyAIReplaceFood(action);
   if(action.type==='remove_food') return applyAIRemoveFood(action);
   if(action.type==='change_quantity') return applyAIChangeQuantity(action);
+  if(action.type==='repeat_meal'||action.type==='add_usual_meal') return applyAIRepeatMeal(action);
+  if(action.type==='modify_meal_copy') return applyAIModifyMealCopy(action);
   return {ok:false,unsupported:true};
+}
+
+function cloneMealIngredientForAIAction(item,index=0){
+  const copy={...(item||{})};
+  delete copy.id;
+  if(!copy.name) copy.name='Item '+(index+1);
+  return copy;
+}
+
+function localDateOffset(days){
+  const d=new Date();
+  d.setDate(d.getDate()+days);
+  return d.toISOString().slice(0,10);
+}
+
+function aiHistoryMealFromRef(ref){
+  const match=String(ref||'').match(/^history:(\d{4}-\d{2}-\d{2}):(\d+)$/);
+  if(!match||typeof getLog!=='function') return null;
+  const log=getLog();
+  const date=match[1],index=Number(match[2]);
+  const mealObj=log[date]?.meals?.[index];
+  return mealObj?{...mealObj,_historyDate:date,_historyIndex:index}:null;
+}
+
+function aiUsualMealFromRef(ref){
+  const match=String(ref||'').match(/^usual:([^:]+):(\d+)$/);
+  if(!match||typeof getUsualMeals!=='function') return null;
+  const section=match[1],index=Number(match[2]);
+  const mealObj=getUsualMeals()?.[section]?.[index];
+  return mealObj?{...mealObj,section:mealObj.section||section,_usualIndex:index}:null;
+}
+
+function aiMealSearchScore(mealObj,query){
+  const q=normalizeAIActionText(query);
+  if(!q) return 0;
+  const haystack=normalizeAIActionText([
+    mealObj?.name,
+    mealObj?.section,
+    ...(mealObj?.ingredients||[]).map(i=>i.name)
+  ].filter(Boolean).join(' '));
+  if(!haystack) return 0;
+  if(haystack.includes(q)) return 600+q.length;
+  return q.split(/\s+/).filter(t=>t.length>2).reduce((score,token)=>score+(haystack.includes(token)?token.length:0),0);
+}
+
+function findAIHistoryMeal(source={}){
+  const byRef=aiHistoryMealFromRef(source?.ref);
+  if(byRef) return byRef;
+  if(typeof getLog!=='function') return null;
+  const log=getLog();
+  const section=String(source?.section||'').toLowerCase().trim();
+  const date=source?.date||(
+    Number.isFinite(Number(source?.dateOffset))?localDateOffset(Number(source.dateOffset)):
+    source?.when==='yesterday'?localDateOffset(-1):null
+  );
+  const dates=(date?[date]:Object.keys(log||{}).sort().reverse()).filter(Boolean);
+  let best=null,bestScore=-1;
+  dates.forEach(day=>{
+    const meals=Array.isArray(log[day]?.meals)?log[day].meals:[];
+    meals.forEach((mealObj,index)=>{
+      if(section&&String(mealObj.section||'').toLowerCase()!==section) return;
+      let score=source?.when==='latest'||date?1000-index:10-index;
+      if(source?.query) score+=aiMealSearchScore(mealObj,source.query);
+      if(score>bestScore){best={...mealObj,_historyDate:day,_historyIndex:index};bestScore=score;}
+    });
+  });
+  return best;
+}
+
+function findAIUsualMeal(action={}){
+  const byRef=aiUsualMealFromRef(action.usualRef||action.source?.ref);
+  if(byRef) return byRef;
+  if(typeof findUsualMealByCommand==='function'){
+    const usual=findUsualMealByCommand({
+      command:'addUsualMeal',
+      section:action.section||action.source?.section||null,
+      query:action.source?.query||action.food||action.targetFood||''
+    });
+    if(usual) return usual;
+  }
+  if(typeof getUsualMeals!=='function') return null;
+  const usuals=getUsualMeals()||{};
+  let best=null,bestScore=0;
+  Object.keys(usuals).forEach(section=>{
+    (usuals[section]||[]).forEach((mealObj,index)=>{
+      const score=aiMealSearchScore(mealObj,action.source?.query||action.food||action.targetFood||action.replacementFood);
+      if(score>bestScore){best={...mealObj,section:mealObj.section||section,_usualIndex:index};bestScore=score;}
+    });
+  });
+  return best;
+}
+
+function aiItemIndexFromAnyRef(ref){
+  const match=String(ref||'').match(/:item:(\d+)$/);
+  if(!match) return -1;
+  const index=Number(match[1]);
+  return Number.isInteger(index)&&index>=0?index:-1;
+}
+
+function findAIItemIndex(items,change={}){
+  const refIndex=aiItemIndexFromAnyRef(change.targetRef);
+  if(refIndex>=0&&refIndex<items.length) return refIndex;
+  const target=change.from||change.food;
+  if(!target) return items.length===1?0:-1;
+  let best=-1,bestScore=0;
+  items.forEach((item,index)=>{
+    const haystack=normalizeAIActionText([item.name,item.rawFood?.name].filter(Boolean).join(' '));
+    const q=normalizeAIActionText(target);
+    let score=0;
+    if(haystack===q) score=1000;
+    else if(haystack.includes(q)) score=700+q.length;
+    else q.split(/\s+/).filter(t=>t.length>2).forEach(token=>{if(haystack.includes(token)) score+=token.length;});
+    if(score>bestScore){best=index;bestScore=score;}
+  });
+  return bestScore>0?best:-1;
+}
+
+function applyAIChangeToClonedItems(items,change){
+  if(!change||!change.op) return {ok:true};
+  if(change.op==='add'){
+    const resolved=aiActionResolveFood(change.food||change.to);
+    if(!resolved.food) return {ok:false,message:"Couldn't match the food to add."};
+    const grams=typeof gramsFromQuantityText==='function'?gramsFromQuantityText(change.quantityText,resolved.food):null;
+    items.push({...foodScale(resolved.food,grams||resolved.food.w),rawFood:resolved.food,weightSpecified:!!grams});
+    return {ok:true};
+  }
+  const idx=findAIItemIndex(items,change);
+  if(idx<0) return {ok:false,message:"Couldn't find that item."};
+  if(change.op==='remove'){
+    items.splice(idx,1);
+    return {ok:true};
+  }
+  if(change.op==='replace'){
+    const resolved=aiActionResolveFood(change.to||change.food);
+    if(!resolved.food) return {ok:false,message:"Couldn't match the replacement food."};
+    const grams=items[idx].weight||resolved.food.w;
+    items[idx]={...foodScale(resolved.food,grams),rawFood:resolved.food,weightSpecified:!!items[idx].weight};
+    return {ok:true};
+  }
+  if(change.op==='scale'||change.op==='set_quantity'){
+    const item=items[idx];
+    const food=item.rawFood||(typeof findFoodByText==='function'?findFoodByText(item.name):null);
+    let grams=null;
+    if(change.op==='scale'&&Number.isFinite(Number(change.factor))&&Number(change.factor)>0){
+      grams=Math.round((item.weight||food?.w||100)*Number(change.factor));
+    } else {
+      grams=typeof gramsFromQuantityText==='function'?gramsFromQuantityText(change.quantityText,food):null;
+    }
+    if(!grams||grams<=0) return {ok:false,message:"I couldn't catch the amount."};
+    if(food&&typeof foodScale==='function') items[idx]={...item,...foodScale(food,grams),rawFood:food,weightSpecified:true};
+    else items[idx]={...item,weight:Math.round(grams),weightSpecified:true};
+    return {ok:true};
+  }
+  return {ok:true};
+}
+
+function addAIClonedItemsToCurrent(items,sourceMeal,source='ai-memory'){
+  const clean=(items||[]).filter(Boolean);
+  if(!clean.length) return {ok:false,message:"That meal doesn't have ingredients yet."};
+  snapshotMeal();
+  clean.forEach((item,index)=>{
+    addIngredientToMeal(cloneMealIngredientForAIAction(item,index),{source,skipSnapshot:true,skipPersist:true});
+  });
+  currentMealSection=sourceMeal?.section||currentMealSection||defaultSectionFromTime();
+  if(typeof _persistDraft==='function') _persistDraft();
+  if(typeof renderCurrentMeal==='function') renderCurrentMeal();
+  if(typeof updateHome==='function') updateHome();
+  showToast('Added '+(sourceMeal?.name||'meal'),2600);
+  if(typeof speakSuccessCue==='function') speakSuccessCue(()=>typeof maybeResumeVoiceSession==='function'&&maybeResumeVoiceSession(320));
+  return {ok:true};
+}
+
+function applyAIRepeatMeal(action){
+  const sourceMeal=action.type==='add_usual_meal'?findAIUsualMeal(action):findAIHistoryMeal(action.source||{section:action.section,when:'latest'});
+  if(!sourceMeal) return {ok:false,message:"Couldn't find that meal."};
+  return addAIClonedItemsToCurrent(sourceMeal.ingredients||[],sourceMeal,action.type==='add_usual_meal'?'usual-ai':'history-ai');
+}
+
+function applyAIModifyMealCopy(action){
+  const sourceMeal=action.source?.kind==='usual_meal'?findAIUsualMeal(action):findAIHistoryMeal(action.source||{});
+  if(!sourceMeal) return {ok:false,message:"Couldn't find that meal."};
+  let items=(sourceMeal.ingredients||[]).map(cloneMealIngredientForAIAction);
+  for(const change of action.changes||[]){
+    const result=applyAIChangeToClonedItems(items,change);
+    if(!result.ok) return result;
+  }
+  return addAIClonedItemsToCurrent(items,sourceMeal,'modified-history-ai');
 }
 
 // Words that carry no food meaning and are safe to ignore when scanning
@@ -428,7 +638,7 @@ async function handleTranscript(transcript,rawText){
         section:typeof currentMealSection!=='undefined'?currentMealSection:null,
         countryCode:typeof currentCountry!=='undefined'?currentCountry:null
       });
-      if(action&&['replace_food','remove_food','change_quantity'].includes(action.type)){
+      if(action&&['replace_food','remove_food','change_quantity','repeat_meal','add_usual_meal','modify_meal_copy'].includes(action.type)){
         if(typeof voiceDebugTrace==='function') voiceDebugTrace('ai_action_result',{transcript:cleanTranscript,action});
         const applied=applyAIActionToCurrentMeal(action);
         if(applied.ok) return;
