@@ -52,6 +52,11 @@
     catch(e){return false;}
   }
 
+  function persistUrlTestMode(){
+    if(!urlEnablesTestMode()) return;
+    try{localStorage.setItem(TEST_MODE_KEY,'1');}catch(e){}
+  }
+
   function storageEnablesTestMode(){
     try{return localStorage.getItem(TEST_MODE_KEY)==='1';}
     catch(e){return false;}
@@ -281,6 +286,7 @@
   }
 
   function wireBugReport(){
+    persistUrlTestMode();
     bugButton=document.getElementById('bug-report-button');
     modal=document.getElementById('bug-report-modal');
     noteInput=document.getElementById('bug-report-note');

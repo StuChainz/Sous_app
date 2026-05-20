@@ -166,7 +166,7 @@ html,body{height:100%;height:var(--app-height);min-height:-webkit-fill-available
 .onboarding-actions{display:flex;gap:10px;flex-shrink:0;}
 .onboarding-actions .btn-secondary,.onboarding-actions .btn-primary{min-height:48px;display:flex;align-items:center;justify-content:center;}
 .onboarding-actions .btn-secondary:disabled{opacity:.35;cursor:default;background:var(--card);}
-.bug-report-button{position:fixed;right:calc(14px + env(safe-area-inset-right));bottom:calc(var(--bottom-nav-space) + 12px);z-index:90;display:none;align-items:center;gap:6px;background:var(--raised);color:var(--accent);border:.5px solid var(--border-strong);border-radius:999px;padding:9px 12px;font-family:'Geist',sans-serif;font-size:12px;font-weight:700;box-shadow:0 8px 24px rgba(0,0,0,.18);cursor:pointer;}
+.bug-report-button{position:absolute;right:calc(14px + env(safe-area-inset-right));bottom:calc(var(--bottom-nav-space) + 12px);z-index:90;display:none;align-items:center;gap:6px;background:var(--raised);color:var(--accent);border:.5px solid var(--border-strong);border-radius:999px;padding:9px 12px;font-family:'Geist',sans-serif;font-size:12px;font-weight:700;box-shadow:0 8px 24px rgba(0,0,0,.18);cursor:pointer;}
 .bug-report-button.show{display:flex;}
 .bug-report-button i{font-size:16px;}
 .bug-report-sheet{max-width:390px;}
@@ -1191,11 +1191,11 @@ html,body{height:100%;height:var(--app-height);min-height:-webkit-fill-available
     <div class="tab" data-tab="history" onclick="switchTab('history')"><i class="ti ti-chart-line"></i><span>History</span></div>
     <div class="tab" data-tab="profile" onclick="switchTab('profile')"><i class="ti ti-user"></i><span>Profile</span></div>
   </div>
-</div>
 
 <button class="bug-report-button" type="button" id="bug-report-button" aria-label="Open bug report form" data-testid="bug-report-button">
   <i class="ti ti-bug"></i><span>Bug</span>
 </button>
+</div>
 
 <!-- TESTER BUG REPORT MODAL -->
 <div class="modal-overlay" id="bug-report-modal" aria-hidden="true" data-testid="bug-report-modal">

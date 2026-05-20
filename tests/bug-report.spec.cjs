@@ -18,9 +18,29 @@ test('test query shows bug button and opens report modal', async ({ page }) => {
   await boot(page, '/?test=1');
 
   await expect(page.getByTestId('bug-report-button')).toBeVisible();
+  await expect.poll(() => page.evaluate(() => localStorage.getItem('sous_test_mode'))).toBe('1');
   await page.getByTestId('bug-report-button').click();
   await expect(page.getByTestId('bug-report-modal')).toBeVisible();
   await expect(page.getByText('What went wrong?')).toBeVisible();
+});
+
+test('bug button stays inside the app shell on wide screens', async ({ page }) => {
+  await page.setViewportSize({ width: 1200, height: 800 });
+  await boot(page, '/?test=1');
+
+  const boxes = await page.evaluate(() => {
+    const app = document.querySelector('.app').getBoundingClientRect();
+    const button = document.querySelector('#bug-report-button').getBoundingClientRect();
+    return {
+      appRight: app.right,
+      buttonRight: button.right,
+      appLeft: app.left,
+      buttonLeft: button.left
+    };
+  });
+
+  expect(boxes.buttonRight).toBeLessThanOrEqual(boxes.appRight);
+  expect(boxes.buttonLeft).toBeGreaterThanOrEqual(boxes.appLeft);
 });
 
 test('helpers enable and disable test mode', async ({ page }) => {
