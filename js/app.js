@@ -1666,7 +1666,23 @@ function updateHome(){ if(currentTab==='home') renderHome(); }
 // ═══════════════════════════════════════════
 // PWA — MANIFEST + SERVICE WORKER
 // ═══════════════════════════════════════════
+const SOUS_CACHE_VERSION='sous-v2';
+
+window.__sousClearCachesAndReload=async function(){
+  if('serviceWorker' in navigator){
+    const registrations=await navigator.serviceWorker.getRegistrations();
+    await Promise.all(registrations.map(registration=>registration.unregister()));
+  }
+  if('caches' in window){
+    const keys=await caches.keys();
+    await Promise.all(keys.map(key=>caches.delete(key)));
+  }
+  location.reload();
+};
+
 function initPWA(){
+  console.log(`[Sous] active cache version: ${SOUS_CACHE_VERSION}`);
+
   // Inject inline manifest via blob URL (enables Add to Home Screen / install prompt)
   const icon=`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><rect width="512" height="512" rx="112" fill="%23533ab7"/><text x="256" y="360" font-size="300" text-anchor="middle" fill="%23fff" font-family="sans-serif">🍴</text></svg>`;
   const manifest={
@@ -1692,39 +1708,13 @@ function initPWA(){
     document.head.appendChild(link);
   }catch(e){}
 
-  // Service worker — caches this page for offline use
+  // Service worker — keeps the installed PWA fresh while preserving offline fallback.
   if('serviceWorker' in navigator){
-    const swSrc=`
-const CACHE='sous-v1';
-const PAGE='${location.href}';
-self.addEventListener('install',e=>{
-  e.waitUntil(caches.open(CACHE).then(c=>c.addAll([PAGE])).catch(()=>{}));
-  self.skipWaiting();
-});
-self.addEventListener('activate',e=>{
-  e.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(k=>k!==CACHE).map(k=>caches.delete(k)))));
-  self.clients.claim();
-});
-self.addEventListener('fetch',e=>{
-  if(e.request.mode==='navigate'){
-    e.respondWith(caches.match(PAGE).then(r=>r||fetch(e.request)).catch(()=>caches.match(PAGE)));
-    return;
-  }
-  e.respondWith(caches.match(e.request).then(r=>r||fetch(e.request).then(res=>{
-    if(res&&res.status===200&&e.request.method==='GET'){
-      const clone=res.clone();
-      caches.open(CACHE).then(c=>c.put(e.request,clone));
-    }
-    return res;
-  })));
-});`;
     try{
-      const swBlob=new Blob([swSrc],{type:'text/javascript'});
-      const swUrl=URL.createObjectURL(swBlob);
-      navigator.serviceWorker.register(swUrl,{scope:'/'}).catch(()=>{
-        // blob-URL SW scope fallback — still registers, limited scope
-        navigator.serviceWorker.register(swUrl).catch(()=>{});
-      });
+      const swUrl=new URL('sw.js',location.href);
+      navigator.serviceWorker.register(swUrl,{scope:'./'})
+        .then(registration=>registration.update().catch(()=>{}))
+        .catch(()=>{});
     }catch(e){}
   }
 }
