@@ -498,8 +498,16 @@ function transcriptRecoveryIssue(transcript,isLowConfidence){
   const reason=typeof aiEscalationReason==='function'
     ?aiEscalationReason(transcript,results)
     :(!results||!results.length?'empty':'none');
-  if(reason==='empty') return 'empty';
-  if(reason==='partial') return 'partial';
+  if(reason==='empty'){
+    const text=String(transcript||'').trim();
+    if(/[a-z]{2,}/i.test(text)&&text.split(/\s+/).filter(Boolean).length>1) return null;
+    return 'empty';
+  }
+  if(reason==='partial'){
+    const foods=Array.isArray(results)?results.filter(r=>r&&!r.command):[];
+    if(foods.length&&/\b(?:and|with|plus)\b|[,;]/i.test(String(transcript||''))) return null;
+    return 'partial';
+  }
   return null;
 }
 function maybeRecoverVoiceTranscript(issue,transcript,turnId=null){
@@ -523,6 +531,58 @@ function maybeRecoverVoiceTranscript(issue,transcript,turnId=null){
   showToast(prompt);
   markVoiceOutcome(turnId,'voice_recovery',{issue,prompt});
   speakRecoveryCue(()=>scheduleVoiceSessionRestart(300),{force:true});
+  return true;
+}
+function quantityPromptCancelCommand(transcript){
+  const text=typeof normaliseLogText==='function'
+    ?normaliseLogText(transcript)
+    :String(transcript||'').toLowerCase().trim();
+  if(/^(cancel|cancel that|actually no|no|nope|never mind|nevermind|forget it|remove that|delete that|undo that)$/.test(text)){
+    return {command:'cancelPendingQuantity'};
+  }
+  const command=typeof parseText==='function'?(parseText(text)||[]).find(r=>r&&r.command):null;
+  if(!command||!pendingFood) return null;
+  const pendingName=typeof normaliseLogText==='function'
+    ?normaliseLogText(pendingFood.name||'')
+    :String(pendingFood.name||'').toLowerCase().trim();
+  const target=typeof normaliseLogText==='function'
+    ?normaliseLogText(command.target||'')
+    :String(command.target||'').toLowerCase().trim();
+  if(command.command==='remove'&&target&&pendingName&&(target.includes(pendingName)||pendingName.includes(target))){
+    return {command:'cancelPendingQuantity', target:command.target};
+  }
+  if(command.command==='undo') return {command:'cancelPendingQuantity'};
+  return null;
+}
+function cancelPendingQuantityFromVoice(command,turnId){
+  if(!pendingFood) return false;
+  const name=pendingFood.name||command?.target||'item';
+  pendingFood=null;
+  voiceDebugTrace('final_action',{action:'command',command:'remove',handled:true,reason:'pending_quantity_cancelled',target:name,turnId});
+  showToast('Removed '+name);
+  showLogScreen('listening');
+  speakCachedResponse('deleted',{},()=>maybeResumeVoiceSession(250),{force:true});
+  return true;
+}
+function handleVoiceMealFlowCommand(transcript,turnId){
+  const text=typeof normaliseLogText==='function'
+    ?normaliseLogText(transcript)
+    :String(transcript||'').toLowerCase().trim();
+  if(!/^(?:save|save this|save the|finish|finish this|finish the)\s+meal$/.test(text)) return false;
+  if(!meal.length){
+    const message='Add ingredients first';
+    const el=document.getElementById('transcript-text');
+    if(el) el.textContent=message;
+    showToast(message);
+    voiceDebugTrace('final_action',{action:'save_meal_empty',command:'save_meal',handled:true,turnId});
+    markVoiceOutcome(turnId,'save_meal_empty',{transcript});
+    speak('Try again',()=>scheduleVoiceSessionRestart(300),{force:true});
+    return true;
+  }
+  voiceDebugTrace('final_action',{action:'summary',command:'save_meal',handled:true,turnId});
+  markVoiceOutcome(turnId,'summary',{transcript});
+  stopAllRec();
+  showSummary();
   return true;
 }
 function logRestartBlocked(reason){
@@ -938,6 +998,10 @@ async function routeFinalVoiceTranscript(transcript,{source='tap',confidence=nul
     if(document.querySelector('.log-screen.active')?.id==='ls-quantity'){
       voiceDebugTrace('transcript_routed',{route:'quantity_answer',source,transcript:clean});
       markVoiceOutcome(turnId,'quantity_answer',{source,transcript:clean});
+      const quantityCancel=quantityPromptCancelCommand(clean);
+      if(quantityCancel&&cancelPendingQuantityFromVoice(quantityCancel,turnId)){
+        return done({restart:false});
+      }
       const grams=typeof parseGramsFromText==='function'?parseGramsFromText(clean):null;
       if(grams&&grams>0){
         commitQuantity(grams);
@@ -956,6 +1020,10 @@ async function routeFinalVoiceTranscript(transcript,{source='tap',confidence=nul
       voiceDebugTrace('transcript_routed',{route:'clarification',source,transcript:clean});
       markVoiceOutcome(turnId,'clarification_answer',{source,transcript:clean});
       await Promise.resolve(handleClarification(clean));
+      return done({restart:false});
+    }
+    if(handleVoiceMealFlowCommand(clean,turnId)){
+      voiceDebugTrace('transcript_routed',{route:'meal_flow_command',source,transcript:clean,turnId});
       return done({restart:false});
     }
     const recoveryIssue=transcriptRecoveryIssue(clean,isLow);
@@ -2096,6 +2164,9 @@ function handleParsed(results,rawText=''){
           after:[]
         });
       }
+      if(voiceSessionActive||voiceCurrentlyListening||isRecording){
+        speakCachedResponse('clarification_needed',{},null,{force:true});
+      }
     } else {
       if(_voiceMode){
         showVoiceRetry("Didn't catch that — try again");
@@ -2848,6 +2919,8 @@ function askQuantity(item){
   pauseAlwaysOn();
   speakThenListen('How much '+item.name+'?',voiceAnswer=>{
     if(document.querySelector('.log-screen.active')?.id!=='ls-quantity') return;
+    const quantityCancel=quantityPromptCancelCommand(voiceAnswer);
+    if(quantityCancel&&cancelPendingQuantityFromVoice(quantityCancel,activeVoiceTranscriptTurn||null)) return;
     const grams=parseGramsFromText(voiceAnswer);
     if(grams&&grams>0){
       commitQuantity(grams);
@@ -3845,7 +3918,7 @@ function buildTapRec(){
       finalizeTranscript();
       return;
     }
-    if(err==='no-speech'&&(processingTranscript||voiceSessionState==='processing'||Date.now()-lastAcceptedTranscriptAt<1500)){
+    if(err==='no-speech'&&(processingTranscript||voiceSessionState==='processing'||(lastAcceptedTranscriptAt&&Date.now()-lastAcceptedTranscriptAt<10000))){
       voiceDebugTrace('voice_recovery',{issue:'stale_no_speech_ignored',transcript:lastAcceptedTranscript||null,turnId:activeVoiceTranscriptTurn||null});
       voiceDebugTrace('fallback_timer_ignored_stale_turn',{route:'speech_error',issue:'stale_no_speech_ignored',transcript:lastAcceptedTranscript||null,turnId:activeVoiceTranscriptTurn||null});
       if(finalizeTimer){

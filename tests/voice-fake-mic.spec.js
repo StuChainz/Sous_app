@@ -10,6 +10,8 @@ const strictFakeMic = process.env.SOUS_FAKE_MIC_STRICT === '1';
 const recognitionModeSetting = process.env.SOUS_FAKE_MIC_RECOGNITION || 'auto';
 let fakeMicUnsupported = false;
 let nativeFakeSpeechWorks = null;
+const scenarioResults = [];
+const scenarioMetaByName = new Map();
 
 class ScenarioFailure extends Error {
   constructor(scenario, invariant, message, snapshot) {
@@ -233,7 +235,517 @@ const multiTurnScenarios = [
   }
 ];
 
-for (const scenario of [...singleTurnScenarios, ...multiTurnScenarios]) {
+const additionalScenarioGroups = [
+  {
+    group: 'single ingredient',
+    scenarios: [
+      {
+        name: 'single ingredient cheddar',
+        fixture: 'wav/cheddar.wav',
+        utterances: ['cheddar'],
+        done: s => hasFood(s, /cheddar/i) || hasQuantityPrompt(s),
+        expected: {
+          forbiddenUiText: ["didn't catch that"],
+          maxFoodCount: { pattern: /cheddar/i, count: 1 },
+          finalStates: ['listening', 'restarting', 'speaking']
+        }
+      },
+      {
+        name: 'single ingredient cheese asks for clarification',
+        fixture: 'wav/cheese.wav',
+        utterances: ['cheese'],
+        done: s => acceptedCount(s) >= 1 && hasPrompt(s),
+        expected: {
+          traceEvents: ['clarification_prompt'],
+          forbiddenUiText: ["didn't catch that"],
+          finalStates: ['listening', 'restarting', 'speaking']
+        }
+      },
+      {
+        name: 'single ingredient two eggs',
+        fixture: 'wav/two-eggs.wav',
+        utterances: ['two eggs'],
+        done: s => hasFood(s, /egg/i) || hasReviewRows(s),
+        expected: {
+          forbiddenUiText: ["didn't catch that"],
+          maxFoodCount: { pattern: /egg/i, count: 1 },
+          finalStates: ['listening', 'restarting', 'speaking']
+        }
+      }
+    ]
+  },
+  {
+    group: 'quantity parsing',
+    scenarios: [
+      {
+        name: 'quantity oats 100 grams',
+        fixture: 'wav/oats-100-grams.wav',
+        utterances: ['oats 100 grams'],
+        done: s => hasFood(s, /oats/i, 100),
+        expected: {
+          forbiddenUiText: ["didn't catch that", 'how much oats'],
+          maxFoodCount: { pattern: /oats/i, count: 1 },
+          finalStates: ['listening', 'restarting', 'speaking']
+        }
+      },
+      {
+        name: 'quantity porridge oats 50 grams',
+        fixture: 'wav/porridge-oats-50-grams.wav',
+        utterances: ['porridge oats 50 grams'],
+        done: s => hasFood(s, /oats/i, 50) || hasFood(s, /porridge/i, 50),
+        expected: {
+          forbiddenUiText: ["didn't catch that", 'how much oats'],
+          maxFoodCount: { pattern: /oats|porridge/i, count: 1 },
+          finalStates: ['listening', 'restarting', 'speaking']
+        }
+      },
+      {
+        name: 'quantity rice 100 grams',
+        fixture: 'wav/rice-100-grams.wav',
+        utterances: ['rice 100 grams'],
+        done: s => acceptedCount(s) >= 1 && (hasFood(s, /rice/i, 100) || hasPrompt(s) || hasReviewRows(s)),
+        expected: {
+          forbiddenUiText: ["didn't catch that"],
+          maxFoodCount: { pattern: /rice/i, count: 1 },
+          finalStates: ['listening', 'restarting', 'speaking']
+        }
+      },
+      {
+        name: 'quantity chicken breast 200 grams',
+        fixture: 'wav/chicken-breast-200-grams.wav',
+        utterances: ['chicken breast 200 grams'],
+        done: s => hasFood(s, /chicken breast/i, 200) || hasFood(s, /chicken/i, 200) || hasPrompt(s),
+        expected: {
+          forbiddenUiText: ["didn't catch that"],
+          maxFoodCount: { pattern: /chicken/i, count: 1 },
+          finalStates: ['listening', 'restarting', 'speaking']
+        }
+      },
+      {
+        name: 'quantity chicken thighs 200 grams',
+        fixture: 'wav/chicken-thighs-200-grams.wav',
+        utterances: ['chicken thighs 200 grams'],
+        done: s => hasFood(s, /chicken thigh|chicken/i, 200) || hasPrompt(s),
+        expected: {
+          forbiddenUiText: ["didn't catch that"],
+          maxFoodCount: { pattern: /chicken/i, count: 1 },
+          finalStates: ['listening', 'restarting', 'speaking']
+        }
+      },
+      {
+        name: 'quantity greek yoghurt 50 grams',
+        fixture: 'wav/greek-yoghurt-50-grams.wav',
+        utterances: ['greek yoghurt 50 grams'],
+        done: s => hasFood(s, /greek yoghurt|greek yogurt|yoghurt|yogurt/i, 50) || hasPrompt(s),
+        expected: {
+          forbiddenUiText: ["didn't catch that"],
+          maxCombinedFoodCount: { patterns: [/greek yoghurt/i, /greek yogurt/i, /yoghurt/i, /yogurt/i], count: 1 },
+          finalStates: ['listening', 'restarting', 'speaking']
+        }
+      },
+      {
+        name: 'quantity full fat greek yoghurt 50 grams',
+        fixture: 'wav/full-fat-greek-yoghurt-50-grams.wav',
+        utterances: ['full fat greek yoghurt 50 grams'],
+        done: s => hasFood(s, /full fat greek yoghurt|full fat greek yogurt|greek yoghurt|greek yogurt/i, 50),
+        expected: {
+          forbiddenUiText: ["didn't catch that"],
+          maxCombinedFoodCount: { patterns: [/full fat greek/i, /greek yoghurt/i, /greek yogurt/i], count: 1 },
+          finalStates: ['listening', 'restarting', 'speaking']
+        }
+      },
+      {
+        name: 'quantity skimmed milk 200 millilitres',
+        fixture: 'wav/skimmed-milk-200-millilitres.wav',
+        utterances: ['skimmed milk 200 millilitres'],
+        done: s => hasFood(s, /skimmed milk|milk/i, 200) || hasPrompt(s),
+        expected: {
+          forbiddenUiText: ["didn't catch that"],
+          maxFoodCount: { pattern: /milk/i, count: 1 },
+          finalStates: ['listening', 'restarting', 'speaking']
+        }
+      },
+      {
+        name: 'quantity olive oil one tablespoon',
+        fixture: 'wav/olive-oil-one-tablespoon.wav',
+        utterances: ['olive oil one tablespoon'],
+        done: s => hasFood(s, /olive oil/i, 15) || hasFood(s, /olive oil/i),
+        validate: s => {
+          const oil = findFood(s, /olive oil/i);
+          if (oil && Number(oil.weight) !== 15) {
+            fail(s, 'Tablespoon quantity converts to ml/grams', `expected 15, got ${oil.weight || 'no weight'}`);
+          }
+        },
+        expected: {
+          forbiddenUiText: ["didn't catch that"],
+          maxFoodCount: { pattern: /olive oil/i, count: 1 },
+          finalStates: ['listening', 'restarting', 'speaking']
+        }
+      },
+      {
+        name: 'quantity peanut butter 20 grams',
+        fixture: 'wav/peanut-butter-20-grams.wav',
+        utterances: ['peanut butter 20 grams'],
+        done: s => hasFood(s, /peanut butter/i, 20),
+        expected: {
+          forbiddenUiText: ["didn't catch that"],
+          maxFoodCount: { pattern: /peanut butter/i, count: 1 },
+          finalStates: ['listening', 'restarting', 'speaking']
+        }
+      }
+    ]
+  },
+  {
+    group: 'multi-ingredient',
+    scenarios: [
+      {
+        name: 'multi ingredient banana and whey',
+        fixture: 'wav/banana-and-whey.wav',
+        utterances: ['banana and whey'],
+        done: s => acceptedCount(s) >= 1 && hasOutcome(s),
+        validate: s => {
+          const text = allRowsText(s).join('\n');
+          if (!/banana/i.test(text) || !/whey|protein/i.test(text)) {
+            fail(s, 'Banana and whey preserve both items', 'missing banana or whey/protein signal');
+          }
+        },
+        expected: {
+          forbiddenUiText: ["didn't catch that"],
+          finalStates: ['listening', 'restarting', 'speaking']
+        }
+      },
+      {
+        name: 'multi ingredient two eggs and toast',
+        fixture: 'wav/two-eggs-and-toast.wav',
+        utterances: ['two eggs and toast'],
+        done: s => acceptedCount(s) >= 1 && hasOutcome(s),
+        validate: s => {
+          const text = allRowsText(s).join('\n');
+          if (!/egg/i.test(text) || !/toast|bread/i.test(text)) {
+            fail(s, 'Eggs and toast preserve both items', 'missing egg or toast/bread signal');
+          }
+        },
+        expected: {
+          forbiddenUiText: ["didn't catch that"],
+          finalStates: ['listening', 'restarting', 'speaking']
+        }
+      },
+      {
+        name: 'multi ingredient oats banana whey',
+        fixture: 'wav/oats-banana-whey.wav',
+        utterances: ['oats banana whey'],
+        done: s => acceptedCount(s) >= 1 && hasOutcome(s),
+        validate: s => {
+          const text = allRowsText(s).join('\n');
+          for (const pattern of [/oats/i, /banana/i, /whey|protein/i]) {
+            if (!pattern.test(text)) fail(s, 'Oats banana whey preserve all items', `missing ${pattern}`);
+          }
+        },
+        expected: {
+          forbiddenUiText: ["didn't catch that"],
+          finalStates: ['listening', 'restarting', 'speaking']
+        }
+      },
+      {
+        name: 'multi ingredient bread yoghurt',
+        fixture: 'wav/bread-yoghurt.wav',
+        utterances: ['bread yoghurt'],
+        done: s => acceptedCount(s) >= 1 && hasOutcome(s),
+        validate: s => {
+          const text = allRowsText(s).join('\n');
+          if (!/bread/i.test(text) || !/yoghurt|yogurt/i.test(text)) {
+            fail(s, 'Bread yoghurt keeps both intended foods visible', 'missing bread or yoghurt signal');
+          }
+        },
+        expected: {
+          forbiddenUiText: ["didn't catch that"],
+          finalStates: ['listening', 'restarting', 'speaking']
+        }
+      },
+      {
+        name: 'multi ingredient chicken and unknown sauce',
+        fixture: 'wav/chicken-and-unknown-sauce.wav',
+        utterances: ['chicken and unknown sauce'],
+        done: s => acceptedCount(s) >= 1 && hasOutcome(s),
+        validate: s => {
+          const text = allRowsText(s).join('\n');
+          if (!/chicken/i.test(text) && !hasPrompt(s) && !hasReviewRows(s)) {
+            fail(s, 'Chicken and unknown sauce keeps a recoverable path', 'missing chicken, review, or clarification');
+          }
+        },
+        expected: {
+          forbiddenUiText: ["didn't catch that"],
+          finalStates: ['listening', 'restarting', 'speaking']
+        }
+      }
+    ]
+  },
+  {
+    group: 'clarification',
+    scenarios: [
+      {
+        name: 'clarification chicken sauce then soy sauce',
+        fixture: 'sequences/chicken-and-unknown-sauce-then-soy-sauce.wav',
+        utterances: ['chicken and unknown sauce', 'soy sauce'],
+        done: s => acceptedCount(s) >= 1 && (hasFood(s, /soy sauce/i) || hasReviewRows(s) || hasPrompt(s)),
+        validate: s => {
+          const text = allRowsText(s).join('\n');
+          if (/unknown sauce/i.test(text) && !/soy sauce/i.test(text) && !hasReviewRows(s)) {
+            fail(s, 'Sauce follow-up should resolve or stay reviewable', 'unknown sauce remained without soy sauce/review');
+          }
+        },
+        expected: {
+          forbiddenUiText: ["didn't catch that"],
+          finalStates: ['listening', 'restarting', 'speaking']
+        }
+      },
+      {
+        name: 'clarification black beans soy sauce selection safe',
+        fixture: 'wav/black-beans-and-soy-sauce.wav',
+        utterances: ['black beans and soy sauce'],
+        done: s => acceptedCount(s) >= 1 && hasOutcome(s),
+        validate: s => {
+          const text = allRowsText(s).join('\n');
+          const beanMatches = (text.match(/black beans?/gi) || []).length;
+          const soyMatches = (text.match(/soy sauce/gi) || []).length;
+          if (!hasReviewRows(s) && (beanMatches > 1 || soyMatches > 1)) {
+            fail(s, 'Selection does not duplicate intended items', `black beans ${beanMatches}, soy sauce ${soyMatches}`);
+          }
+        },
+        expected: {
+          forbiddenUiText: ["didn't catch that"],
+          finalStates: ['listening', 'restarting', 'speaking']
+        }
+      }
+    ]
+  },
+  {
+    group: 'quantity follow-up',
+    scenarios: [
+      {
+        name: 'quantity follow-up oats then 50 grams then banana',
+        fixture: 'sequences/oats-then-50-grams-then-banana.wav',
+        utterances: ['oats', '50 grams', 'banana'],
+        done: s => hasFood(s, /oats/i, 50) && (hasFood(s, /banana/i) || hasQuantityPrompt(s)),
+        expected: {
+          forbiddenUiText: ["didn't catch that"],
+          maxFoodCount: { pattern: /oats/i, count: 1 },
+          quantityOnlyMustNotBeFood: true,
+          finalStates: ['listening', 'restarting', 'speaking']
+        }
+      }
+    ]
+  },
+  {
+    group: 'correction/edit',
+    scenarios: [
+      {
+        name: 'correction change oats to 150 grams',
+        fixture: 'sequences/oats-100-then-change-oats-to-150-grams.wav',
+        utterances: ['oats 100 grams', 'change oats to 150 grams'],
+        done: s => hasFood(s, /oats/i, 150),
+        expected: {
+          traceEvents: ['final_action'],
+          forbiddenUiText: ["didn't catch that"],
+          maxFoodCount: { pattern: /oats/i, count: 1 },
+          finalStates: ['listening', 'restarting', 'speaking']
+        }
+      }
+    ]
+  },
+  {
+    group: 'delete/remove',
+    scenarios: [
+      {
+        name: 'delete remove banana',
+        fixture: 'sequences/banana-then-remove-banana.wav',
+        utterances: ['banana', 'remove banana'],
+        done: s => hasTrace(s, 'final_action', entry => entry.command === 'remove') && !hasFood(s, /banana/i),
+        expected: {
+          traceEvents: ['final_action'],
+          forbiddenUiText: ["didn't catch that", 'how much banana'],
+          noStalePrompt: true,
+          finalStates: ['listening', 'restarting', 'speaking']
+        }
+      }
+    ]
+  },
+  {
+    group: 'finish/save meal',
+    scenarios: [
+      {
+        name: 'finish meal command opens summary',
+        fixture: 'sequences/oats-100-then-finish-meal.wav',
+        utterances: ['oats 100 grams', 'finish meal'],
+        done: s => hasFood(s, /oats/i, 100) && s.state.activeScreen === 'ls-summary',
+        expected: {
+          traceEvents: ['final_action'],
+          forbiddenUiText: ["didn't catch that"],
+          finalStates: ['idle', 'listening', 'restarting', 'speaking']
+        }
+      },
+      {
+        name: 'save meal phrase is contained without API',
+        fixture: 'wav/save-meal.wav',
+        utterances: ['save meal'],
+        done: s => acceptedCount(s) >= 1 && hasOutcome(s),
+        expected: {
+          forbiddenUiText: ["didn't catch that"],
+          finalStates: ['listening', 'restarting', 'speaking']
+        }
+      }
+    ]
+  },
+  {
+    group: 'bad/unclear input',
+    scenarios: [
+      {
+        name: 'unclear red something safe fallback',
+        fixture: 'wav/red-something.wav',
+        utterances: ['red something'],
+        done: s => acceptedCount(s) >= 1 && hasOutcome(s),
+        expected: {
+          forbiddenUiText: ["didn't catch that"],
+          finalStates: ['listening', 'restarting', 'speaking']
+        }
+      },
+      {
+        name: 'standalone actually no does not mutate meal',
+        fixture: 'wav/actually-no.wav',
+        utterances: ['actually no'],
+        done: s => acceptedCount(s) >= 1 && hasOutcome(s),
+        validate: s => {
+          if ((s.state.meal || []).length) fail(s, 'Standalone cancel does not add food', 'meal was mutated');
+        },
+        expected: {
+          forbiddenUiText: ["didn't catch that"],
+          noStalePrompt: true,
+          finalStates: ['listening', 'restarting', 'speaking']
+        }
+      },
+      {
+        name: 'standalone cancel that does not mutate meal',
+        fixture: 'wav/cancel-that.wav',
+        utterances: ['cancel that'],
+        done: s => acceptedCount(s) >= 1 && hasOutcome(s),
+        validate: s => {
+          if ((s.state.meal || []).length) fail(s, 'Standalone cancel does not add food', 'meal was mutated');
+        },
+        expected: {
+          forbiddenUiText: ["didn't catch that"],
+          noStalePrompt: true,
+          finalStates: ['listening', 'restarting', 'speaking']
+        }
+      },
+      {
+        name: 'cancel after quantity clears pending prompt',
+        fixture: 'sequences/oats-50-then-cancel-that.wav',
+        utterances: ['oats 50 grams', 'cancel that'],
+        done: s => acceptedCount(s) >= 2 && !s.state.processing,
+        validate: s => {
+          if (hasFood(s, /cancel/i)) fail(s, 'Cancel command is not food', 'cancel appeared as a food row');
+        },
+        expected: {
+          forbiddenUiText: ["didn't catch that", 'how much oats'],
+          noStalePrompt: true,
+          finalStates: ['listening', 'restarting', 'speaking']
+        }
+      },
+      {
+        name: 'actually no after quantity does not create food',
+        fixture: 'sequences/oats-50-then-actually-no.wav',
+        utterances: ['oats 50 grams', 'actually no'],
+        done: s => acceptedCount(s) >= 2 && !s.state.processing,
+        validate: s => {
+          if (hasFood(s, /actually|no/i)) fail(s, 'Actually no is not food', 'actually/no appeared as a food row');
+        },
+        expected: {
+          forbiddenUiText: ["didn't catch that", 'how much oats'],
+          noStalePrompt: true,
+          finalStates: ['listening', 'restarting', 'speaking']
+        }
+      }
+    ]
+  },
+  {
+    group: 'repeated/fast input',
+    scenarios: [
+      {
+        name: 'repeated same utterance twice creates two deliberate rows',
+        fixture: 'sequences/oats-100-then-oats-100.wav',
+        utterances: ['oats 100 grams', 'oats 100 grams'],
+        done: s => foodMatches(s, /oats/i).length === 2,
+        expected: {
+          forbiddenUiText: ["didn't catch that"],
+          finalStates: ['listening', 'restarting', 'speaking']
+        }
+      },
+      {
+        name: 'add another banana creates a second banana only after second turn',
+        fixture: 'sequences/banana-120-then-add-another-banana.wav',
+        utterances: ['banana 120 grams', 'add another banana'],
+        done: s => foodMatches(s, /banana/i).length >= 2 || (foodMatches(s, /banana/i).length === 1 && hasQuantityPrompt(s)),
+        validate: s => {
+          const count = foodMatches(s, /banana/i).length;
+          if (count > 2) fail(s, 'Add another banana has no extra duplicates', `got ${count} banana rows`);
+        },
+        expected: {
+          forbiddenUiText: ["didn't catch that"],
+          finalStates: ['listening', 'restarting', 'speaking']
+        }
+      }
+    ]
+  },
+  {
+    group: 'session lifecycle',
+    scenarios: [
+      {
+        name: 'session start stop start again',
+        fixture: 'sequences/oats-100-then-oats-100.wav',
+        utterances: ['oats 100 grams', 'oats 100 grams'],
+        beforeWait: async page => {
+          await page.evaluate(() => {
+            stopAllVoiceActivity('fake-mic lifecycle stop');
+            beginVoiceSession();
+          });
+          await expect.poll(
+            () => page.evaluate(() => window.__sousVoiceState().state),
+            { timeout: 12000, intervals: [100, 200, 500] }
+          ).toBe('listening');
+        },
+        done: s => hasFood(s, /oats/i, 100),
+        expected: {
+          forbiddenUiText: ["didn't catch that"],
+          maxFoodCount: { pattern: /oats/i, count: 1 },
+          finalStates: ['listening', 'restarting', 'speaking']
+        }
+      },
+      {
+        name: 'no speech after valid transcript stays quiet',
+        fixture: 'wav/oats-100-grams.wav',
+        utterances: ['oats 100 grams'],
+        done: s => hasFood(s, /oats/i, 100) && hasNoSpeech(s),
+        expected: {
+          forbiddenUiText: ["didn't catch that"],
+          maxFoodCount: { pattern: /oats/i, count: 1 },
+          finalStates: ['listening', 'restarting', 'speaking']
+        }
+      }
+    ]
+  }
+];
+
+const fakeMicScenarios = [
+  ...singleTurnScenarios.map(scenario => ({ group: 'current single-turn', ...scenario })),
+  ...multiTurnScenarios.map(scenario => ({ group: 'current multi-turn', ...scenario })),
+  ...additionalScenarioGroups.flatMap(group =>
+    group.scenarios.map(scenario => ({ group: group.group, ...scenario }))
+  )
+];
+
+for (const scenario of fakeMicScenarios) {
+  scenarioMetaByName.set(scenario.name, scenario);
+
   test(scenario.name, async () => {
     if (fakeMicUnsupported && !strictFakeMic) {
       test.skip(true, 'Previous fake-mic scenario showed this Chrome speech environment does not accept fake microphone audio.');
@@ -243,6 +755,22 @@ for (const scenario of [...singleTurnScenarios, ...multiTurnScenarios]) {
     validateScenario(scenario, snapshot);
   });
 }
+
+test.afterEach(async ({}, testInfo) => {
+  const scenario = scenarioMetaByName.get(testInfo.title);
+  if (!scenario) return;
+  scenarioResults.push({
+    name: testInfo.title,
+    group: scenario.group || 'ungrouped',
+    status: testInfo.status,
+    durationMs: testInfo.duration,
+    failureExcerpt: testInfo.error ? failureExcerpt(testInfo.error) : ''
+  });
+});
+
+test.afterAll(async () => {
+  console.log(formatScenarioSummary(scenarioResults));
+});
 
 async function runScenario(scenario) {
   const fixturePath = path.resolve(fixtureRoot, scenario.fixture);
@@ -384,6 +912,10 @@ async function runScenario(scenario) {
       { timeout: 12000, intervals: [100, 200, 500] }
     ).toBe('listening');
 
+    if (scenario.beforeWait) {
+      await scenario.beforeWait(page);
+    }
+
     const snapshot = await waitForScenario(page, scenario, consoleErrors, apiCalls);
     snapshot.consoleErrors = consoleErrors;
     snapshot.apiCalls = apiCalls;
@@ -512,6 +1044,8 @@ function validateScenario(scenario, s) {
   assertExpectedEvents(scenario, s);
   assertForbiddenTextAndEvents(scenario, s);
   assertExpectedFoods(scenario, s);
+  assertNoStalePendingPrompt(scenario, s);
+  assertQuantityOnlyDidNotBecomeFood(scenario, s);
   assertFinalState(scenario, s);
   if (scenario.validate) scenario.validate(s);
 }
@@ -564,6 +1098,33 @@ function assertExpectedFoods(scenario, s) {
     if (count > maxCombined.count) {
       fail(s, 'No duplicate clarification rows', `expected <= ${maxCombined.count}, got ${count}`);
     }
+  }
+}
+
+function assertNoStalePendingPrompt(scenario, s) {
+  if (!scenario.expected?.noStalePrompt) return;
+  if (s.state.activeScreen === 'ls-quantity') {
+    fail(s, 'No stale pending prompt', 'quantity screen remained active');
+  }
+  if (s.state.clarificationActive || s.state.clarification?.active) {
+    fail(s, 'No stale pending prompt', 'clarification remained active');
+  }
+  const visible = normalize(s.visibleText);
+  if (/how much|what type|what kind/.test(visible)) {
+    fail(s, 'No stale pending prompt', 'prompt text remained visible');
+  }
+}
+
+function assertQuantityOnlyDidNotBecomeFood(scenario, s) {
+  const quantityOnlyUtterance = (scenario.utterances || []).some(utterance =>
+    /^(?:\d+(?:\.\d+)?|one|two|three|four|five|six|seven|eight|nine|ten|half|quarter)\s*(?:g|grams?|kg|ml|millilitres?|milliliters?|tbsp|tablespoons?|tsp|teaspoons?|cups?)$/i.test(String(utterance || '').trim())
+  );
+  if (!quantityOnlyUtterance && !scenario.expected?.quantityOnlyMustNotBeFood) return;
+  const badRows = (s.state.meal || []).filter(item =>
+    /^(?:\d+(?:\.\d+)?\s*(?:g|grams?|kg|ml|millilitres?|milliliters?|tbsp|tablespoons?|tsp|teaspoons?|cups?)?|grams?|millilitres?|milliliters?)$/i.test(String(item.name || '').trim())
+  );
+  if (badRows.length) {
+    fail(s, 'Quantity-only utterance is not standalone food', badRows.map(item => item.name).join(', '));
   }
 }
 
@@ -650,8 +1211,15 @@ function assertVoiceInvariants(scenario, s) {
   for (let i = 1; i < completed.length; i++) {
     const prev = completed[i - 1];
     const current = completed[i];
-    if (prev.turnId === current.turnId && Math.abs(new Date(current.t || 0) - new Date(prev.t || 0)) < 20) {
+    if (prev.turnId && current.turnId && prev.turnId === current.turnId && Math.abs(new Date(current.t || 0) - new Date(prev.t || 0)) < 20) {
       fail(s, 'No duplicate recogniser/session states', `duplicate restart for turn ${current.turnId || 'unknown'}`);
+    }
+  }
+
+  if (accepted.length && !scenario.expected?.allowGenericCatchAfterAccepted) {
+    const visible = normalize(s.visibleText);
+    if (/didn'?t catch that/.test(visible)) {
+      fail(s, 'No generic fallback after accepted transcript', 'generic fallback was visible after a transcript was accepted');
     }
   }
 }
@@ -694,6 +1262,46 @@ function compactTraceEvent(event) {
     screen: event.screen,
     item: event.item
   };
+}
+
+function formatScenarioSummary(results) {
+  const total = results.length;
+  const passed = results.filter(result => result.status === 'passed').length;
+  const failed = results.filter(result => result.status === 'failed').length;
+  const skipped = results.filter(result => result.status === 'skipped').length;
+  const averageDuration = total
+    ? `${(results.reduce((sum, result) => sum + (result.durationMs || 0), 0) / total / 1000).toFixed(1)}s`
+    : '0.0s';
+  const lines = [
+    '',
+    'Voice fake-mic scenario summary',
+    '',
+    '| total scenarios | passed | failed | skipped | average duration |',
+    '| ---: | ---: | ---: | ---: | ---: |',
+    `| ${total} | ${passed} | ${failed} | ${skipped} | ${averageDuration} |`,
+    '',
+    '| group | scenarios | passed | failed | skipped |',
+    '| --- | ---: | ---: | ---: | ---: |'
+  ];
+  for (const group of [...new Set(results.map(result => result.group))]) {
+    const groupRows = results.filter(result => result.group === group);
+    lines.push(`| ${group} | ${groupRows.length} | ${groupRows.filter(result => result.status === 'passed').length} | ${groupRows.filter(result => result.status === 'failed').length} | ${groupRows.filter(result => result.status === 'skipped').length} |`);
+  }
+  const failures = results.filter(result => result.status === 'failed');
+  lines.push('', 'Failures with trace excerpts:');
+  if (!failures.length) {
+    lines.push('- none');
+  } else {
+    for (const failure of failures) {
+      lines.push(`- ${failure.name}: ${failure.failureExcerpt || 'no excerpt available'}`);
+    }
+  }
+  return lines.join('\n');
+}
+
+function failureExcerpt(error) {
+  const text = String(error?.message || error || '').replace(/\s+/g, ' ').trim();
+  return text.length > 600 ? `${text.slice(0, 600)}...` : text;
 }
 
 function acceptedTranscripts(s) {

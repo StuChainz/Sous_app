@@ -47,6 +47,39 @@ SOUS_FAKE_MIC_RECOGNITION=shim npm run test:voice:fake-mic
 
 `SOUS_FAKE_MIC_RECOGNITION=auto` is the default. In auto mode the suite first probes native Chrome `SpeechRecognition` with the fake WAV input. If native Web Speech returns a transcript that matches the fixture phrase, the scenarios use native recognition. If Chrome reports `no-speech`, times out, or returns unrelated text, the suite keeps the fake-mic browser launch but installs a deterministic dev-only `SpeechRecognition` shim that emits the fixture utterances through the recognizer start/result/end callbacks.
 
+## Current Coverage
+
+The fake-mic suite currently has 48 scenarios, grouped in the test summary:
+
+| Group | Coverage |
+| --- | --- |
+| current single-turn | Existing baseline single-turn phrases, including oats, banana, Greek yoghurt, chicken/sauce, and black beans/soy sauce. |
+| current multi-turn | Existing baseline clarification, quantity follow-up, correction, delete, and fast input flows. |
+| single ingredient | Cheddar, cheese clarification, and two eggs. |
+| quantity parsing | Oats, porridge oats, rice, chicken breast/thighs, Greek yoghurt variants, skimmed milk, olive oil tablespoon, and peanut butter. |
+| multi-ingredient | Banana and whey, two eggs and toast, oats/banana/whey, bread/yoghurt, and chicken with unknown sauce. |
+| clarification | Chicken sauce resolved with soy sauce, plus black beans/soy sauce selection safety. |
+| quantity follow-up | Oats -> 50 grams -> banana. |
+| correction/edit | Oats 100 grams -> change oats to 150 grams. |
+| delete/remove | Banana pending quantity -> remove banana. |
+| finish/save meal | Finish meal opens summary; save meal is handled without API/fallback. |
+| bad/unclear input | Red something, actually no, cancel that, and cancel/no after an added item. |
+| repeated/fast input | Repeated same utterance twice and add another banana. |
+| session lifecycle | Start/stop/start and no-speech after a valid transcript. |
+
+The suite also asserts voice invariants:
+
+- no real `/api/**` calls
+- no console/page errors
+- no generic "didn't catch that" after an accepted transcript
+- no duplicate ingredient rows from one transcript turn
+- no stale pending prompt after delete/cancel
+- quantity-only follow-ups do not become standalone foods
+- correction updates an existing row instead of adding a duplicate
+- prompts/fallbacks/clarifications record a voice feedback or silent-skip path
+- listening restarts only after the feedback path completes
+- final state is not both processing and listening
+
 ## Browser Requirements
 
 - Google Chrome is the default launch channel.
