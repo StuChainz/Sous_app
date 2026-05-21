@@ -568,6 +568,143 @@ app.post('/api/interpret', async (req, res) => {
   }
 });
 
+app.post('/api/repair-transcript', async (req, res) => {
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) {
+    return res.status(500).json({ error: 'OPENAI_API_KEY is not set on the server.' });
+  }
+
+  const {
+    transcript,
+    alternatives = [],
+    recentIngredients = [],
+    foodHints = [],
+    screenContext = 'normal_logging'
+  } = req.body || {};
+  const cleanTranscript = String(transcript || '').trim();
+  if (!cleanTranscript) {
+    return res.status(400).json({ error: 'transcript is required.' });
+  }
+
+  const cleanList = (items, max) => Array.isArray(items)
+    ? items.map(item => {
+      if (typeof item === 'string') return item;
+      return item && (item.text || item.transcript || item.name) || '';
+    }).map(item => String(item || '').trim()).filter(Boolean).slice(0, max)
+    : [];
+  const compactAlternatives = cleanList(alternatives, 8);
+  const compactRecent = cleanList(recentIngredients, 16);
+  const compactHints = cleanList(foodHints, 80);
+
+  const prompt = [
+    'You are Sous, repairing likely speech-to-text errors for food logging.',
+    'Return JSON only. No prose, no markdown.',
+    'You may ONLY suggest repaired transcript text candidates.',
+    'Never return nutrition, calories, macros, ingredients, food objects, actions, commands, or saved-meal claims.',
+    'Do not interpret the meal. Do not decide what should be logged. Only repair likely misheard words.',
+    'Use food hints only as vocabulary hints. If unsure, return an empty candidates array.',
+    'Keep quantities and word order unless a speech mishear is obvious.',
+    'Do not add extra foods that were not plausibly spoken.',
+    'Max 3 candidates.',
+    `Screen context: ${String(screenContext || '').slice(0, 80)}`,
+    `Transcript: ${cleanTranscript}`,
+    `Alternatives JSON: ${JSON.stringify(compactAlternatives)}`,
+    `Recent ingredients JSON: ${JSON.stringify(compactRecent)}`,
+    `Food hints JSON: ${JSON.stringify(compactHints)}`
+  ].join('\n');
+
+  const repairSchema = {
+    type: 'object',
+    additionalProperties: false,
+    properties: {
+      candidates: {
+        type: 'array',
+        maxItems: 3,
+        items: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            transcript: { type: 'string' },
+            score: { type: 'number' },
+            reason: { type: 'string' }
+          },
+          required: ['transcript', 'score', 'reason']
+        }
+      }
+    },
+    required: ['candidates']
+  };
+
+  try {
+    const upstream = await fetch('https://api.openai.com/v1/responses', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`
+      },
+      body: JSON.stringify({
+        model: 'gpt-4.1-mini',
+        input: prompt,
+        text: {
+          format: {
+            type: 'json_schema',
+            name: 'transcript_repair_candidates',
+            strict: true,
+            schema: repairSchema
+          }
+        }
+      })
+    });
+
+    if (!upstream.ok) {
+      const text = await upstream.text();
+      return res.status(upstream.status).json({ error: `OpenAI error: ${upstream.status}`, detail: text });
+    }
+
+    const data = await upstream.json();
+    let rawText = '';
+    if (typeof data.output_text === 'string') rawText = data.output_text;
+    else if (Array.isArray(data.output)) {
+      rawText = data.output
+        .flatMap(item => Array.isArray(item.content) ? item.content : [])
+        .map(part => part.text || part.output_text || '')
+        .filter(Boolean)
+        .join('\n');
+    }
+
+    let parsed;
+    try { parsed = JSON.parse(rawText); }
+    catch {
+      return res.status(502).json({ error: 'Invalid JSON returned by OpenAI.', raw: rawText });
+    }
+
+    const seen = new Set();
+    const candidates = (Array.isArray(parsed.candidates) ? parsed.candidates : [])
+      .map(candidate => ({
+        transcript: String(candidate && candidate.transcript || '').replace(/\s+/g, ' ').trim(),
+        score: Number(candidate && candidate.score),
+        reason: String(candidate && candidate.reason || '').slice(0, 160)
+      }))
+      .filter(candidate => {
+        if (!candidate.transcript) return false;
+        const key = candidate.transcript.toLowerCase();
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      })
+      .slice(0, 3)
+      .map(candidate => ({
+        transcript: candidate.transcript,
+        score: Number.isFinite(candidate.score) ? Math.max(0, Math.min(1, candidate.score)) : 0,
+        reason: candidate.reason
+      }));
+
+    res.json({ candidates });
+  } catch (err) {
+    res.status(500).json({ error: 'Transcript repair request failed.', detail: err.message });
+  }
+});
+
 app.post('/api/interpret-action', async (req, res) => {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) {

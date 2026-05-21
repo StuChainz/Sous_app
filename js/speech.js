@@ -1066,6 +1066,9 @@ function stopAllVoiceActivity(reason){
 }
 
 const VOICE_PHRASE_REPAIRS=[
+  {label:'initial oats',pattern:/^\s*oops\b/gi,to:'oats'},
+  {label:'oat milk',pattern:/\ball\s+milk\b/gi,to:'oat milk'},
+  {label:'whey protein',pattern:/\b(?:way|weigh|whey)\s+protein\b/gi,to:'whey'},
   {label:'semi skim milk',pattern:/\bsemi\s+skim\s+milk\b/gi,to:'semi skimmed milk'},
   {label:'semi skimmed',pattern:/\bsemi\s+skimmed\b(?!\s+milk)/gi,to:'semi skimmed milk'},
   {label:'semi skim',pattern:/\bsemi\s+skim\b(?!\s+milk)/gi,to:'semi skimmed milk'},
@@ -1102,6 +1105,9 @@ const VOICE_COMMON_FOOD_REPAIRS=[
   {from:'peace',to:['peas']},
   {from:'piece',to:['peas']}
 ];
+const AI_TRANSCRIPT_REPAIR_TIMEOUT_MS=1100;
+const AI_TRANSCRIPT_REPAIR_THRESHOLD=70;
+const AI_TRANSCRIPT_EMPTY_REPAIR_THRESHOLD=20;
 
 function normalizeVoiceTranscriptText(text){
   return String(text||'').replace(/\s+/g,' ').trim();
@@ -1164,6 +1170,12 @@ function voiceQuantitySignalScore(clean){
 function voiceRecognitionConfidenceScore(confidence){
   return typeof confidence==='number'&&confidence>0?Math.round(Math.max(0,Math.min(confidence,1))*18):0;
 }
+function voiceParsedFoods(parsed){
+  return (parsed?.results||[]).filter(r=>r&&!r.command);
+}
+function voiceParsedCommands(parsed){
+  return (parsed?.results||[]).filter(r=>r&&r.command);
+}
 function voiceParsedScore(text){
   const clean=normalizeVoiceTranscriptText(text);
   if(!clean||typeof parseText!=='function') return {score:-100,results:[],reason:'empty'};
@@ -1189,6 +1201,55 @@ function voiceParsedScore(text){
   if(reason==='low-confidence') score-=20;
   if(reason==='empty') score-=90;
   return {score,results,reason};
+}
+function voiceRepairPreferenceScore(candidate,parsed){
+  if(candidate?.source!=='phrase_repair'||!candidate?.repair||parsed?.reason!=='none') return 0;
+  return 45;
+}
+function voiceTranscriptTokens(text){
+  const norm=typeof normaliseLogText==='function'?normaliseLogText(text):String(text||'').toLowerCase();
+  return norm.split(/\s+/).map(token=>token.replace(/[^a-z0-9]/g,'')).filter(Boolean);
+}
+function voiceIgnorableUnknownToken(token){
+  return !token||
+    /^(?:and|with|plus|on|in|of|a|an|the|some|add|log|track|please|about|approximately|approx|g|gram|grams|kg|ml|millilitre|milliliter|millilitres|milliliters|l|oz|tbsp|tsp|cup|cups|slice|slices|scoop|scoops|serving|servings|piece|pieces|one|two|three|four|five|six|seven|eight|nine|ten|half|quarter)$/.test(token)||
+    /^\d+(?:[.,]\d+)?$/.test(token);
+}
+function voiceFoodKnownTokens(item){
+  const texts=[item?.name,item?.heardName,item?.label,item?.rawFood?.name,...(Array.isArray(item?.rawFood?.kw)?item.rawFood.kw:[])];
+  return new Set(texts.flatMap(voiceTranscriptTokens));
+}
+function voiceUnknownTokenCount(text,parsed){
+  const known=new Set(voiceParsedFoods(parsed).flatMap(item=>Array.from(voiceFoodKnownTokens(item))));
+  return voiceTranscriptTokens(text).filter(token=>!voiceIgnorableUnknownToken(token)&&!known.has(token)).length;
+}
+function voiceEstimatedFoodSlots(text){
+  const parts=String(text||'').split(/\b(?:and|with|plus|on)\b|[,;]/i).map(part=>part.trim()).filter(Boolean);
+  return Math.max(1,Math.min(4,parts.length||1));
+}
+function voiceScreenAllowsAIRepair(){
+  return document.querySelector('.log-screen.active')?.id==='ls-listening'&&!clarificationState?.active;
+}
+function voiceAIRepairFoodHints(){
+  const hints=[];
+  const add=name=>{
+    const clean=String(name||'').trim();
+    if(clean&&!hints.some(item=>item.toLowerCase()===clean.toLowerCase())) hints.push(clean);
+  };
+  try{
+    if(typeof getRecentIngredients==='function') getRecentIngredients().slice(0,16).forEach(item=>add(item.name));
+  }catch(e){}
+  try{
+    const db=typeof getFoodDatabase==='function'?getFoodDatabase():(typeof FOODS!=='undefined'?FOODS:[]);
+    db.slice(0,80).forEach(food=>add(food.name));
+  }catch(e){}
+  return hints.slice(0,80);
+}
+function voiceAIRepairRecentIngredients(){
+  try{
+    if(typeof getRecentIngredients!=='function') return [];
+    return getRecentIngredients().slice(0,16).map(item=>String(item?.name||'').trim()).filter(Boolean);
+  }catch(e){return [];}
 }
 function voicePhraseRepairVariants(text,base={}){
   const clean=normalizeVoiceTranscriptText(text);
@@ -1236,7 +1297,7 @@ function chooseVoiceTranscript(transcript,{alternatives=[],confidence=null,sourc
     return {
       ...candidate,
       ...parsed,
-      score:parsed.score+voiceRecognitionConfidenceScore(candidate.confidence)
+      score:parsed.score+voiceRecognitionConfidenceScore(candidate.confidence)+voiceRepairPreferenceScore(candidate,parsed)
     };
   }).sort((a,b)=>b.score-a.score);
   const originalScore=voiceParsedScore(original);
@@ -1274,8 +1335,124 @@ function chooseVoiceTranscript(transcript,{alternatives=[],confidence=null,sourc
   };
 }
 
+function shouldTryAITranscriptRepair(selected,{confidence=null,lowConfidence=null}={}){
+  if(typeof repairTranscriptWithAI!=='function') return false;
+  if(!voiceScreenAllowsAIRepair()) return false;
+  const parsed=voiceParsedScore(selected.transcript);
+  if(voiceParsedCommands(parsed).length) return false;
+  const isLow=lowConfidence==null
+    ?(!selected.forceHighConfidence&&typeof confidence==='number'&&confidence>0&&confidence<0.75)
+    :!!lowConfidence;
+  if(isLow) return true;
+  if(['empty','partial','low-confidence'].includes(parsed.reason)) return true;
+  return !!transcriptRecoveryIssue(selected.transcript,isLow);
+}
+function validateAITranscriptRepairCandidate(candidate,selected){
+  const text=normalizeVoiceTranscriptText(candidate?.transcript||candidate?.text||'');
+  const original=normalizeVoiceTranscriptText(selected.transcript);
+  if(!text||text.toLowerCase()===original.toLowerCase()) return {ok:false,reason:'same_transcript'};
+  const originalParsed=voiceParsedScore(original);
+  const candidateParsed=voiceParsedScore(text);
+  const originalCommands=voiceParsedCommands(originalParsed);
+  const candidateCommands=voiceParsedCommands(candidateParsed);
+  if(candidateCommands.length&&!originalCommands.length) return {ok:false,reason:'command_intent_change',text,parsed:candidateParsed};
+  const candidateFoods=voiceParsedFoods(candidateParsed);
+  const originalFoods=voiceParsedFoods(originalParsed);
+  if(!candidateFoods.length) return {ok:false,reason:'no_local_food_match',text,parsed:candidateParsed};
+  if(['empty','partial','low-confidence'].includes(candidateParsed.reason)) return {ok:false,reason:'weak_local_parse',text,parsed:candidateParsed};
+  const maxFoods=Math.max(originalFoods.length,voiceEstimatedFoodSlots(original));
+  if(candidateFoods.length>maxFoods) return {ok:false,reason:'unexpected_food_expansion',text,parsed:candidateParsed};
+  const originalUnknown=voiceUnknownTokenCount(original,originalParsed);
+  const candidateUnknown=voiceUnknownTokenCount(text,candidateParsed);
+  if(candidateUnknown>originalUnknown) return {ok:false,reason:'more_unknown_tokens',text,parsed:candidateParsed,originalUnknown,candidateUnknown};
+  const improved=candidateParsed.score>=originalParsed.score+AI_TRANSCRIPT_REPAIR_THRESHOLD;
+  const recoveredEmpty=originalParsed.reason==='empty'&&candidateParsed.reason==='none'&&candidateParsed.score>=AI_TRANSCRIPT_EMPTY_REPAIR_THRESHOLD;
+  if(!improved&&!recoveredEmpty) return {ok:false,reason:'score_improvement_too_small',text,parsed:candidateParsed,scoreBefore:originalParsed.score,scoreAfter:candidateParsed.score};
+  return {ok:true,text,parsed:candidateParsed,scoreBefore:originalParsed.score,scoreAfter:candidateParsed.score,candidateUnknown,originalUnknown};
+}
+async function callAITranscriptRepair(payload){
+  let timeoutId=null;
+  const timeout=new Promise(resolve=>{
+    timeoutId=setTimeout(()=>resolve({timedOut:true,candidates:[]}),AI_TRANSCRIPT_REPAIR_TIMEOUT_MS);
+  });
+  try{
+    const request=Promise.resolve(repairTranscriptWithAI(payload)).then(candidates=>({timedOut:false,candidates}));
+    return await Promise.race([request,timeout]);
+  }finally{
+    if(timeoutId) clearTimeout(timeoutId);
+  }
+}
+async function chooseVoiceTranscriptWithAIRerank(transcript,opts={}){
+  const selected=chooseVoiceTranscript(transcript,opts);
+  if(!shouldTryAITranscriptRepair(selected,opts)) return selected;
+  const payload={
+    transcript:selected.transcript,
+    alternatives:selected.alternatives||[],
+    recentIngredients:voiceAIRepairRecentIngredients(),
+    foodHints:voiceAIRepairFoodHints(),
+    screenContext:'normal_logging'
+  };
+  voiceDebugTrace('ai_repair_requested',{
+    source:opts.source||'tap',
+    transcript:selected.transcript,
+    reason:selected.reason,
+    score:Math.round(selected.score||0)
+  });
+  let result;
+  try{
+    result=await callAITranscriptRepair(payload);
+  }catch(e){
+    voiceDebugTrace('ai_repair_rejected',{transcript:selected.transcript,reason:'request_failed',error:e?.message||String(e)});
+    return selected;
+  }
+  if(result?.timedOut){
+    voiceDebugTrace('ai_repair_timeout',{transcript:selected.transcript,timeoutMs:AI_TRANSCRIPT_REPAIR_TIMEOUT_MS});
+    return selected;
+  }
+  const candidates=uniqVoiceCandidates((Array.isArray(result?.candidates)?result.candidates:[]).map(candidate=>({
+    text:candidate.transcript||candidate.text,
+    confidence:typeof candidate.score==='number'?candidate.score:null,
+    source:'ai_repair',
+    repair:{from:'ai',to:candidate.reason||'repair'}
+  }))).slice(0,3);
+  voiceDebugTrace('ai_repair_candidates',{
+    transcript:selected.transcript,
+    candidates:candidates.map(candidate=>({text:candidate.text,score:candidate.confidence,reason:candidate.repair?.to||''}))
+  });
+  const validations=candidates.map(candidate=>({candidate,validation:validateAITranscriptRepairCandidate(candidate,selected)}));
+  const accepted=validations.filter(item=>item.validation.ok).sort((a,b)=>b.validation.scoreAfter-a.validation.scoreAfter)[0];
+  if(!accepted){
+    voiceDebugTrace('ai_repair_rejected',{
+      transcript:selected.transcript,
+      candidates:validations.map(item=>({
+        text:item.candidate.text,
+        reason:item.validation.reason,
+        score:item.validation.parsed?Math.round(item.validation.parsed.score):null
+      }))
+    });
+    return selected;
+  }
+  voiceDebugTrace('ai_repair_accepted',{
+    from:selected.transcript,
+    to:accepted.validation.text,
+    scoreBefore:Math.round(accepted.validation.scoreBefore),
+    scoreAfter:Math.round(accepted.validation.scoreAfter),
+    reason:accepted.candidate.repair?.to||''
+  });
+  return {
+    transcript:accepted.validation.text,
+    original:selected.original,
+    changed:true,
+    score:accepted.validation.scoreAfter,
+    reason:accepted.validation.parsed.reason,
+    forceHighConfidence:accepted.validation.parsed.reason==='none'||accepted.validation.scoreAfter>=selected.score+AI_TRANSCRIPT_REPAIR_THRESHOLD,
+    alternatives:selected.alternatives,
+    aiRepaired:true
+  };
+}
+
 async function routeFinalVoiceTranscript(transcript,{source='tap',confidence=null,lowConfidence=null,alternatives=[],timing={}}={}){
-  const selected=chooseVoiceTranscript(transcript,{alternatives,confidence,source});
+  const selected=await chooseVoiceTranscriptWithAIRerank(transcript,{alternatives,confidence,source,lowConfidence});
   const clean=String(selected.transcript||'').trim();
   if(!clean) return false;
   if(processingTranscript){
@@ -3479,6 +3656,7 @@ function _selectEntryFood(entry,item){
 function handleMultiConfirmVoiceFill(transcript){
   const active=document.querySelector('.log-screen.active')?.id;
   if(active!=='ls-multi-confirm'||!pendingBatch.length) return false;
+  const hadNeedsType=pendingBatch.some(_multiConfirmNeedsType);
   const results=typeof parseText==='function'?parseText(transcript).filter(r=>r&&!r.command):[];
   if(!results.length){
     showToast("Didn't catch that");
@@ -3513,6 +3691,11 @@ function handleMultiConfirmVoiceFill(transcript){
     voiceDebugTrace('multi_confirm_voice_fill',{transcript,updated});
     const el=document.getElementById('transcript-text');
     if(el) el.textContent=stillUnresolved?'Review updated':'Review ready';
+    if(!hadNeedsType&&!stillUnresolved&&(voiceSessionActive||voiceCurrentlyListening||isRecording)){
+      voiceDebugTrace('multi_confirm_voice_auto_commit',{transcript,updated});
+      commitMultiConfirm();
+      return false;
+    }
   } else {
     showToast("Didn't match that");
     voiceDebugTrace('multi_confirm_voice_fill_miss',{transcript,results:voiceDebugResultSummary(results)});

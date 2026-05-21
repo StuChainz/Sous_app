@@ -13,6 +13,9 @@ const DEFAULT_AI_ENDPOINT=typeof window!=='undefined'&&typeof window.sousApiUrl=
 const DEFAULT_AI_ACTION_ENDPOINT=typeof window!=='undefined'&&typeof window.sousApiUrl==='function'
   ? window.sousApiUrl('/api/interpret-action')
   : '/api/interpret-action';
+const DEFAULT_AI_REPAIR_ENDPOINT=typeof window!=='undefined'&&typeof window.sousApiUrl==='function'
+  ? window.sousApiUrl('/api/repair-transcript')
+  : '/api/repair-transcript';
 const DEFAULT_AI_MODEL='gpt-4.1-mini';
 const AI_ACTION_TYPES=new Set(['add_food','replace_food','remove_food','change_quantity','repeat_meal','modify_meal_copy','add_usual_meal','clarify','none']);
 const AI_ACTION_CHANGE_OPS=new Set(['replace','remove','scale','set_quantity','add']);
@@ -47,9 +50,62 @@ function getAIInterpreterConfig(){
   return {
     endpoint:globalConfig.endpoint||stored.endpoint||DEFAULT_AI_ENDPOINT,
     actionEndpoint:globalConfig.actionEndpoint||stored.actionEndpoint||DEFAULT_AI_ACTION_ENDPOINT,
+    repairEndpoint:globalConfig.repairEndpoint||stored.repairEndpoint||DEFAULT_AI_REPAIR_ENDPOINT,
     apiKey:globalConfig.apiKey||stored.apiKey||globalKey||null,
     model:globalConfig.model||stored.model||DEFAULT_AI_MODEL
   };
+}
+
+function sanitizeTranscriptRepairCandidates(input){
+  const raw=Array.isArray(input?.candidates)?input.candidates:[];
+  const seen=new Set();
+  return raw.map(candidate=>({
+    transcript:String(candidate?.transcript||'').replace(/\s+/g,' ').trim(),
+    score:Number(candidate?.score),
+    reason:String(candidate?.reason||'').slice(0,160)
+  })).filter(candidate=>{
+    if(!candidate.transcript) return false;
+    const key=candidate.transcript.toLowerCase();
+    if(seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  }).slice(0,3).map(candidate=>({
+    transcript:candidate.transcript,
+    score:Number.isFinite(candidate.score)?Math.max(0,Math.min(1,candidate.score)):0,
+    reason:candidate.reason
+  }));
+}
+
+async function repairTranscriptWithAI({transcript='',alternatives=[],recentIngredients=[],foodHints=[],screenContext='normal_logging'}={}){
+  const cleanTranscript=String(transcript||'').trim();
+  if(!cleanTranscript) return [];
+  const config=getAIInterpreterConfig();
+  const endpoint=config.repairEndpoint||DEFAULT_AI_REPAIR_ENDPOINT;
+  const isProxy=endpoint.startsWith('/')||endpoint.includes('/api/repair-transcript');
+  if(!isProxy&&!config.apiKey) return [];
+  try{
+    const hasExplicitRepairEndpoint=typeof window!=='undefined'&&!!window.SOUS_AI_CONFIG?.repairEndpoint;
+    if(isProxy&&typeof localStorage!=='undefined'&&localStorage.getItem('sous_voice_test_harness')==='1'&&!hasExplicitRepairEndpoint) return [];
+  }catch(e){}
+
+  const controller=new AbortController();
+  const timeout=setTimeout(()=>controller.abort(),1000);
+  try{
+    const headers={'Content-Type':'application/json'};
+    if(!isProxy&&config.apiKey) headers.Authorization=`Bearer ${config.apiKey}`;
+    const res=await fetch(endpoint,{
+      method:'POST',
+      signal:controller.signal,
+      headers,
+      body:JSON.stringify({transcript:cleanTranscript,alternatives,recentIngredients,foodHints,screenContext})
+    });
+    if(!res.ok) return [];
+    return sanitizeTranscriptRepairCandidates(await res.json());
+  }catch(e){
+    return [];
+  }finally{
+    clearTimeout(timeout);
+  }
 }
 
 function aiActionReferenceTrigger(transcript){
@@ -295,9 +351,10 @@ async function interpretMealWithAI({transcript='',section=null,countryCode=null,
 }
 
 if(typeof window!=='undefined'){
+  window.repairTranscriptWithAI=repairTranscriptWithAI;
   window.interpretMealWithAI=interpretMealWithAI;
   window.interpretMealActionWithAI=interpretMealActionWithAI;
   window.buildAIActionContext=buildAIActionContext;
   window.aiActionReferenceTrigger=aiActionReferenceTrigger;
 }
-if(typeof module!=='undefined') module.exports={interpretMealWithAI,interpretMealActionWithAI,buildAIActionContext,aiActionReferenceTrigger,sanitizeAIAction};
+if(typeof module!=='undefined') module.exports={repairTranscriptWithAI,interpretMealWithAI,interpretMealActionWithAI,buildAIActionContext,aiActionReferenceTrigger,sanitizeAIAction};
