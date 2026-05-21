@@ -155,9 +155,20 @@ window.draftToMeal=draftToMeal;
 
 let _lastAITranscript=null;
 
+function hasExplicitAIDevOverride(){
+  try{
+    if(localStorage.getItem('sous_voice_test_harness')==='1') return true;
+    const globalConfig=window.SOUS_AI_CONFIG||{};
+    if(globalConfig.dev===true||globalConfig.allowAI===true) return true;
+    const stored=safeJsonParse(localStorage.getItem('sous_ai_config'),{});
+    return stored.dev===true||stored.allowAI===true;
+  }catch(e){
+    return false;
+  }
+}
 function canUseAIInterpretation(){
-  const plan=(localStorage.getItem('userPlan')||'pro').trim().toLowerCase();
-  return plan==='pro';
+  const plan=(localStorage.getItem('userPlan')||'').trim().toLowerCase();
+  return plan==='pro'||hasExplicitAIDevOverride();
 }
 
 function normalizeAIActionText(text){
