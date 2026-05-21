@@ -10,6 +10,7 @@ let voiceRestartCount=0, voiceSuccessCueCount=0, voiceFlowCueCooldownUntil=0, vo
 let voiceListenStartedAt=0;
 let voiceTestEvents=[];
 let voiceTranscriptTurn=0, activeVoiceTranscriptTurn=0, lastAcceptedTranscript='', lastAcceptedTranscriptAt=0;
+let voiceSessionId=0, voiceRecognizerRunId=0;
 let voiceOutcomeTurns=new Set();
 let voicePromptOwner=null;
 let _voiceMode=false;
@@ -43,6 +44,42 @@ const VOICE_DEBUG_OVERLAY_KEY='sous_voice_debug_overlay';
 const VOICE_DEBUG_LIMIT=200;
 let voiceDebugEvents=[];
 let voiceDebugSeq=0;
+
+function voiceOwnerSnapshot(extra={}){
+  return {
+    sessionId:voiceSessionId,
+    recognizerRunId:voiceRecognizerRunId,
+    turnId:activeVoiceTranscriptTurn||null,
+    promptOwner:voicePromptOwner?{...voicePromptOwner}:null,
+    sessionActive:!!voiceSessionActive,
+    voiceState:voiceSessionState,
+    ...extra
+  };
+}
+function isCurrentVoiceOwner(owner={}){
+  if(owner.sessionId!=null&&owner.sessionId!==voiceSessionId) return false;
+  if(owner.recognizerRunId!=null&&owner.recognizerRunId!==voiceRecognizerRunId) return false;
+  if(owner.turnId!=null&&owner.turnId!==activeVoiceTranscriptTurn) return false;
+  return true;
+}
+function traceStaleVoiceCallback(source,owner={},data={}){
+  return voiceDebugTrace('stale_callback_ignored',{
+    source,
+    owner,
+    currentOwner:voiceOwnerSnapshot(),
+    ...data
+  });
+}
+function nextVoiceSessionId(reason){
+  voiceSessionId++;
+  voiceDebugTrace('voice_owner_changed',{ownerType:'session',sessionId:voiceSessionId,reason});
+  return voiceSessionId;
+}
+function nextVoiceRecognizerRunId(source,reason){
+  voiceRecognizerRunId++;
+  voiceDebugTrace('voice_owner_changed',{ownerType:'recognizer_run',source,recognizerRunId:voiceRecognizerRunId,reason});
+  return voiceRecognizerRunId;
+}
 
 function voiceDebugClarificationSnapshot(){
   return clarificationState?.active?{
@@ -174,6 +211,8 @@ function voiceDebugTrace(event,data={}){
     event,
     voiceState:voiceSessionState,
     sessionActive:!!voiceSessionActive,
+    sessionId:voiceSessionId,
+    recognizerRunId:voiceRecognizerRunId,
     recognizerActive:!!(voiceCurrentlyListening||isRecording||clarificationRec||(sousRealtime&&sousRealtime.active)),
     promptOwner:voicePromptOwner?{...voicePromptOwner}:null,
     screen,
@@ -238,6 +277,7 @@ function sousVoiceDebugExport(){
   return {
     createdAt:new Date().toISOString(),
     note:'Local debug export only. Sous does not upload this automatically.',
+    owner:voiceOwnerSnapshot(),
     trace:voiceDebugEvents.slice(),
     voiceState:sousVoiceStateSnapshot(),
     context:voiceDebugContextSnapshot(),
@@ -306,6 +346,9 @@ function voiceLifecycleSnapshot(opts={}){
   const includeAlwaysOn=!!opts.includeAlwaysOn;
   return {
     state:voiceSessionState,
+    sessionId:voiceSessionId,
+    recognizerRunId:voiceRecognizerRunId,
+    owner:voiceOwnerSnapshot(),
     sessionActive:!!voiceSessionActive,
     testSessionActive:!!voiceTestSessionActive,
     recognizerActive:!!(voiceCurrentlyListening||isRecording||(includeAlwaysOn&&alwaysOnActive)||clarificationRec||(sousRealtime&&sousRealtime.active)),
@@ -894,6 +937,7 @@ async function beginVoiceSession(){
   voiceFlowCueCooldownUntil=0;
   voiceOutcomeTurns=new Set();
   voiceSessionActive=true;
+  nextVoiceSessionId('session started');
   voiceSessionStoppedManually=false;
   voicePausedForVisibility=false;
   voiceSessionUseRealtime=realtimeVoiceEnabled();
@@ -924,6 +968,7 @@ function stopAllVoiceActivity(reason){
   if(voiceSessionActive||isRecording||voiceCurrentlyListening||sousRealtime||clarificationRec){
     voiceDebugTrace('session_stop',{reason});
   }
+  nextVoiceSessionId(reason);
   clearVoiceTimers();
   voiceSessionActive=false;
   voiceTestSessionActive=false;
@@ -1300,6 +1345,7 @@ function exposeSousVoiceTestHarness(){
     voiceFlowCueCooldownUntil=0;
     voiceOutcomeTurns=new Set();
     voiceSessionActive=true;
+    nextVoiceSessionId('test session started');
     voiceTestSessionActive=true;
     voiceSessionStoppedManually=false;
     voicePausedForVisibility=false;
@@ -4532,7 +4578,6 @@ function finishSousRealtimeVoice(){
 }
 async function startSousRealtimeVoice(){
   logVoiceState('recognition start requested',{source:'realtime'});
-  voiceDebugTrace('recognizer_start',{source:'realtime',phase:'requested'});
   if(sousRealtimeStarting){
     console.log('[Sous Voice] duplicate recognizer blocked');
     logVoiceState('duplicate recognizer blocked',{source:'realtime',reason:'starting'});
@@ -4551,6 +4596,8 @@ async function startSousRealtimeVoice(){
   requestTapStop('realtime starting');
   try{if(clarificationRec)clarificationRec.stop();}catch(e){}
   clarificationRec=null;
+  nextVoiceRecognizerRunId('realtime','recognition start requested');
+  voiceDebugTrace('recognizer_start',{source:'realtime',phase:'requested'});
   hideVoiceCorrectBar();
   pauseAlwaysOn();
   const el=document.getElementById('transcript-text'); if(el) el.textContent='—';
@@ -4686,6 +4733,7 @@ function startTapRec(opts={}){
   const el=document.getElementById('transcript-text'); if(el) el.textContent='—';
   const inp=document.getElementById('text-input'); if(inp) inp.value='';
   console.log('[Sous Voice] tap listen start');
+  nextVoiceRecognizerRunId('tap','recognition start requested');
   voiceDebugTrace('recognizer_start',{source:'tap',phase:'requested',sessionRestart:!!opts.sessionRestart});
   setVoiceSessionState('restarting','recognition start requested',{source:'tap'});
   tapRecStarting=true;
@@ -4714,8 +4762,6 @@ function startTapRec(opts={}){
   }
 }
 function startClarificationListen(onResult){
-  voiceDebugTrace('recognizer_start',{source:'clarification',phase:'requested'});
-  voiceDebugTrace('clarification_listen_start_requested',{route:'short_recognizer',active:!!clarificationState?.active});
   if(!SR){
     voiceDebugTrace('voice_error',{source:'clarification_start',error:'speech_recognition_unavailable'});
     return;
@@ -4728,6 +4774,9 @@ function startClarificationListen(onResult){
   if(isRecording||voiceCurrentlyListening||sousRealtime){console.log('[Sous Voice] recognizer conflict avoided');}
   requestTapStop('clarification listen starting');
   stopSousRealtimeVoice(false);
+  nextVoiceRecognizerRunId('clarification','clarification listen requested');
+  voiceDebugTrace('recognizer_start',{source:'clarification',phase:'requested'});
+  voiceDebugTrace('clarification_listen_start_requested',{route:'short_recognizer',active:!!clarificationState?.active});
   const r=new SR(); r.lang='en-GB'; r.interimResults=false; r.continuous=false; r.maxAlternatives=3;
   clarificationRec=r;
   r.onstart=()=>{voiceDebugTrace('recognizer_start',{source:'clarification',phase:'started'});voiceDebugTrace('clarification_listen_started',{route:'short_recognizer'});voiceCurrentlyListening=true;isRecording=true;setVoiceSessionState('listening','clarification recognition started');setMicState('recording');};
