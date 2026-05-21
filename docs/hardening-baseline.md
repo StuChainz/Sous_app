@@ -8,13 +8,13 @@ Branch: `hardening-foundation-pass-1`
 | Script | Command |
 | --- | --- |
 | `start` | `node server.js` |
-| `test:onboarding` | `playwright test tests/onboarding.spec.js` |
-| `test:bug-report` | `playwright test tests/bug-report.spec.js` |
-| `test:voice` | `playwright test tests/voice.spec.js` |
-| `test:voice:mishearing` | `playwright test tests/voice-mishearing.spec.js` |
+| `test:onboarding` | `playwright test tests/onboarding.spec.cjs` |
+| `test:bug-report` | `playwright test tests/bug-report.spec.cjs` |
+| `test:voice` | `playwright test tests/voice-simulation.spec.cjs` |
+| `test:voice:mishearing` | `playwright test tests/voice-mishearing-matrix.spec.cjs` |
 | `test:voice:mass` | `playwright test tests/voice-mass-regression.spec.js` |
 | `test:voice:fake-mic` | `playwright test tests/voice-fake-mic.spec.js` |
-| `test:voice:real-audio` | `playwright test --project=real-audio-chrome tests/voice-real-audio.spec.js` |
+| `test:voice:real-audio` | `playwright test --project=real-audio-chrome tests/voice-real-audio.spec.cjs` |
 
 `npm test` and `npm run test:e2e` are not currently defined.
 
