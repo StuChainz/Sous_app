@@ -2930,7 +2930,7 @@ function updateQueueDisplay(){
   const bar=document.getElementById('queue-bar'),chips=document.getElementById('queue-items'),rem=document.getElementById('queue-remaining');
   if(itemQueue.length){
     bar.classList.add('show');
-    chips.innerHTML=itemQueue.map(q=>`<span class="queue-chip">${q.name||q.label||'?'}</span>`).join('');
+    chips.innerHTML=itemQueue.map(q=>`<span class="queue-chip">${escapeHtml(q.name||q.label||'?')}</span>`).join('');
     if(rem){rem.className='queue-remaining show';rem.textContent=itemQueue.length+' more ingredient'+(itemQueue.length>1?'s':'')+' queued';}
   } else {
     bar.classList.remove('show');
@@ -3637,11 +3637,11 @@ function showAmbiguous(matches,amount,label,question){
   document.getElementById('ambig-listen-text').textContent='Say the name or tap to choose';
   const container=document.getElementById('ambig-options');
   container.innerHTML='';
-  matches.forEach((food,i)=>{
-    const r=amount?amount/food.w:1,kcal=Math.round(food.kcal*r);
-    const div=document.createElement('div');
-    div.className='ambig-opt'+(i===0?' selected':'');
-    div.innerHTML=`<div><div class="ambig-opt-name">${food.name}</div><div class="ambig-opt-macros">${Math.round(food.p*r)}g protein · ${Math.round(food.c*r)}g carbs · ${Math.round(food.f*r)}g fat</div></div><div class="ambig-opt-right"><div class="ambig-opt-kcal">${kcal} kcal</div><i class="ti ti-check ambig-check"></i></div>`;
+    matches.forEach((food,i)=>{
+      const r=amount?amount/food.w:1,kcal=Math.round(food.kcal*r);
+      const div=document.createElement('div');
+      div.className='ambig-opt'+(i===0?' selected':'');
+    div.innerHTML=`<div><div class="ambig-opt-name">${escapeHtml(food.name)}</div><div class="ambig-opt-macros">${Math.round(food.p*r)}g protein · ${Math.round(food.c*r)}g carbs · ${Math.round(food.f*r)}g fat</div></div><div class="ambig-opt-right"><div class="ambig-opt-kcal">${kcal} kcal</div><i class="ti ti-check ambig-check"></i></div>`;
     div.addEventListener('click',()=>{container.querySelectorAll('.ambig-opt').forEach(o=>o.classList.remove('selected'));div.classList.add('selected');selectedIdx=i;});
     container.appendChild(div);
   });
@@ -4121,7 +4121,7 @@ function showSummary(announce=true){
   meal.forEach(item=>{
     if(!item.id) item.id=nextIngId++;
     const d=document.createElement('div'); d.className='ing-item'; d.dataset.id=item.id;
-    d.innerHTML=`<div><div class="ing-name">${item.name}</div><div class="ing-weight">${itemWeightLabel(item)}</div></div><div style="display:flex;align-items:center;"><div class="ing-kcal">${item.kcal} kcal</div><i class="ti ti-pencil ing-edit-icon"></i></div>`;
+    d.innerHTML=`<div><div class="ing-name">${escapeHtml(item.name)}</div><div class="ing-weight">${escapeHtml(itemWeightLabel(item))}</div></div><div style="display:flex;align-items:center;"><div class="ing-kcal">${Math.round(Number(item.kcal)||0)} kcal</div><i class="ti ti-pencil ing-edit-icon"></i></div>`;
     d.addEventListener('click',()=>openEditModal(item.id));
     list.appendChild(d);
   });
@@ -4194,14 +4194,14 @@ function renderFoodResults(query){
   customMatches.forEach(food=>{
     const div=document.createElement('div');
     div.className='food-result-item'+(food===modalSelectedFood?' selected':'');
-    div.innerHTML=`<span class="fri-name">${food.name}</span><span class="fri-custom-badge">custom</span><span class="fri-kcal">${food.kcal} kcal/100g</span>`;
+    div.innerHTML=`<span class="fri-name">${escapeHtml(food.name)}</span><span class="fri-custom-badge">custom</span><span class="fri-kcal">${Math.round(Number(food.kcal)||0)} kcal/100g</span>`;
     div.addEventListener('click',()=>selectFood(food));
     container.appendChild(div);
   });
   dbMatches.forEach(food=>{
     const div=document.createElement('div');
     div.className='food-result-item'+(food===modalSelectedFood?' selected':'');
-    div.innerHTML=`<span class="fri-name">${food.name}</span><span class="fri-kcal">${food.kcal} kcal/100g</span>`;
+    div.innerHTML=`<span class="fri-name">${escapeHtml(food.name)}</span><span class="fri-kcal">${Math.round(Number(food.kcal)||0)} kcal/100g</span>`;
     div.addEventListener('click',()=>selectFood(food));
     container.appendChild(div);
   });

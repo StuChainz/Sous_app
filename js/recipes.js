@@ -21,7 +21,7 @@ function renderRecipeList(){
     const ing=r.ingredients?r.ingredients.length:0;
     return`<div class="recipe-item" onclick="openRecipeDetail(${i})">
       <div>
-        <div class="recipe-item-name">${r.name}</div>
+        <div class="recipe-item-name">${escapeHtml(r.name)}</div>
         <div class="recipe-item-detail">${ing} ingredient${ing!==1?'s':''} · ${t.protein||0}g protein</div>
       </div>
       <div class="recipe-item-kcal">${Math.round(t.kcal||0)}<br><span style="font-size:10px;color:var(--text-muted);font-family:'Geist',sans-serif;font-weight:400;">kcal</span></div>
@@ -52,8 +52,8 @@ function showRecipeDetail(r){
   ingList.innerHTML=ings.length?ings.map(ing=>`
     <div class="meal-item">
       <div class="meal-item-left">
-        <div class="meal-item-name"><i class="ti ${ing.icon||'ti-bowl-spoon'}" style="margin-right:5px;font-size:13px;vertical-align:-1px;"></i>${ing.name}</div>
-        <div class="meal-item-detail">${ing.weight}g · ${ing.protein}g prot · ${ing.carbs}g carbs · ${ing.fat}g fat</div>
+        <div class="meal-item-name"><i class="ti ${escapeHtml(ing.icon||'ti-bowl-spoon')}" style="margin-right:5px;font-size:13px;vertical-align:-1px;"></i>${escapeHtml(ing.name)}</div>
+        <div class="meal-item-detail">${Math.round(Number(ing.weight)||0)}g · ${Math.round(Number(ing.protein)||0)}g prot · ${Math.round(Number(ing.carbs)||0)}g carbs · ${Math.round(Number(ing.fat)||0)}g fat</div>
       </div>
       <div class="meal-item-kcal">${ing.kcal} kcal</div>
     </div>`).join(''):'<div class="empty-state" style="padding:12px 0;"><i class="ti ti-list"></i>No ingredients detected</div>';
@@ -65,7 +65,7 @@ function showRecipeDetail(r){
     stepsList.innerHTML=steps.map((s,i)=>`
       <div class="meal-item" style="align-items:flex-start;">
         <div style="width:24px;height:24px;background:var(--accent-soft);color:var(--accent);border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600;flex-shrink:0;margin-right:10px;margin-top:1px;">${i+1}</div>
-        <div style="font-size:14px;color:var(--text);line-height:1.5;">${s}</div>
+        <div style="font-size:14px;color:var(--text);line-height:1.5;">${escapeHtml(s)}</div>
       </div>`).join('');
   } else {
     stepsEl.style.display='none';
@@ -168,7 +168,7 @@ function showRecipeComplete(){
       <div style="width:64px;height:64px;border-radius:50%;background:var(--accent-soft);display:flex;align-items:center;justify-content:center;">
         <i class="ti ti-check" style="font-size:32px;color:var(--accent);"></i>
       </div>
-      <div style="font-family:'Instrument Serif',serif;font-size:30px;letter-spacing:-0.01em;color:var(--text);">${name}</div>
+      <div style="font-family:'Instrument Serif',serif;font-size:30px;letter-spacing:-0.01em;color:var(--text);">${escapeHtml(name)}</div>
       <div style="font-size:14px;color:var(--text-muted);">complete · enjoy!</div>
     </div>`;
   document.getElementById('cook-prev-btn').disabled=true;

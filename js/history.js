@@ -44,7 +44,7 @@ function renderHistoryDay(){
       const sectionOpts=[['breakfast','Breakfast'],['lunch','Lunch'],['dinner','Dinner'],['snacks','Snacks'],['supplements','Supplements']].map(([v,l])=>`<option value="${v}"${curSection===v?' selected':''}>${l}</option>`).join('');
       const ingHtml=ings.map((ing,iIdx)=>`
         <div style="font-size:12px;color:var(--text-muted);padding:6px 14px;border-top:.5px solid var(--border);display:flex;justify-content:space-between;align-items:center;">
-          <span>${ing.name}${ing.weight||ing.serving?' · '+(typeof itemWeightLabel==='function'?itemWeightLabel(ing):(ing.weight+'g')):''} · ${ing.kcal} kcal</span>
+          <span>${escapeHtml(ing.name)}${ing.weight||ing.serving?' · '+escapeHtml(typeof itemWeightLabel==='function'?itemWeightLabel(ing):(ing.weight+'g')):''} · ${Math.round(Number(ing.kcal)||0)} kcal</span>
           <div style="display:flex;gap:4px;">
             <button onclick="openHistoryIngredientEdit('${ds}',${mIdx},${iIdx})" style="background:none;border:none;cursor:pointer;color:var(--text-muted);font-size:14px;padding:2px 6px;opacity:.7;" title="Edit ingredient"><i class="ti ti-pencil"></i></button>
             <button onclick="deleteHistoryIngredient('${ds}',${mIdx},${iIdx})" style="background:none;border:none;cursor:pointer;color:var(--red);font-size:14px;padding:2px 6px;opacity:.7;" title="Remove ingredient"><i class="ti ti-trash"></i></button>
@@ -54,9 +54,9 @@ function renderHistoryDay(){
       wrap.style.cssText='background:var(--card);border:.5px solid var(--border);border-radius:var(--radius-sm);margin-bottom:8px;overflow:hidden;';
       wrap.innerHTML=`
         <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 14px;">
-          <div><div style="font-size:14px;font-weight:500;color:var(--text);">${m.name}</div><div style="font-size:11px;color:var(--text-muted);">${time} · ${ings.length} ingredient${ings.length!==1?'s':''} · <select onchange="changeHistoryMealSection('${ds}',${mIdx},this.value)" style="background:none;border:none;color:var(--text-muted);font-size:11px;font-family:inherit;cursor:pointer;padding:0;">${sectionOpts}</select></div></div>
+          <div><div style="font-size:14px;font-weight:500;color:var(--text);">${escapeHtml(m.name||'Meal')}</div><div style="font-size:11px;color:var(--text-muted);">${escapeHtml(time)} · ${ings.length} ingredient${ings.length!==1?'s':''} · <select onchange="changeHistoryMealSection('${ds}',${mIdx},this.value)" style="background:none;border:none;color:var(--text-muted);font-size:11px;font-family:inherit;cursor:pointer;padding:0;">${sectionOpts}</select></div></div>
           <div style="display:flex;align-items:center;gap:10px;">
-            <div style="font-size:15px;font-weight:500;color:var(--accent);font-family:'Geist Mono',monospace;">${Math.round(m.totals.kcal)} kcal</div>
+            <div style="font-size:15px;font-weight:500;color:var(--accent);font-family:'Geist Mono',monospace;">${Math.round(Number(m.totals?.kcal)||0)} kcal</div>
             <button onclick="deleteHistoryMeal('${ds}',${mIdx})" style="background:none;border:none;cursor:pointer;color:var(--red);font-size:16px;padding:2px 4px;opacity:.7;" title="Delete meal"><i class="ti ti-trash"></i></button>
           </div>
         </div>${ingHtml}`;

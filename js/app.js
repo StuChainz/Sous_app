@@ -1241,9 +1241,9 @@ function getDefaultQuickAddSection(forDateStr){
 function homeMealRowHtml(m){
   const time=new Date(m.time).toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'});
   const n=m.ingredients?m.ingredients.length:0;
-  const id=m.id;
+  const id=Number(m.id)||0;
   const source=m.source==='photo_estimate'?' · photo estimate':'';
-  return`<div class="meal-item" style="cursor:pointer;" onclick="startEditMeal(${id})"><div class="meal-item-left"><div class="meal-item-name">${m.name}</div><div class="meal-item-detail">${time} · ${n} ingredient${n!==1?'s':''}${source}</div></div><div class="meal-item-kcal">${Math.round(m.totals.kcal)} kcal</div><button class="meal-delete-btn" onclick="event.stopPropagation();deleteMealFromHome(${id})" aria-label="Delete meal" title="Delete">×</button></div>`;
+  return`<div class="meal-item" style="cursor:pointer;" onclick="startEditMeal(${id})"><div class="meal-item-left"><div class="meal-item-name">${escapeHtml(m.name||'Meal')}</div><div class="meal-item-detail">${escapeHtml(time)} · ${n} ingredient${n!==1?'s':''}${source}</div></div><div class="meal-item-kcal">${Math.round(Number(m.totals?.kcal)||0)} kcal</div><button class="meal-delete-btn" onclick="event.stopPropagation();deleteMealFromHome(${id})" aria-label="Delete meal" title="Delete">×</button></div>`;
 }
 function getRecentIngredientsForSection(section){
   const log=getLog();
@@ -1651,7 +1651,7 @@ function editCopyUsualMeal(section,idx){
 }
 
 function renderHomeMealSections(meals){
-  const esc=s=>String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  const esc=s=>escapeHtml(s);
   const jsEsc=s=>String(s).replace(/\\/g,'\\\\').replace(/'/g,"\\'");
   const ingLabel=i=>`${i.name}${i.weight||i.serving?' '+(typeof itemWeightLabel==='function'?itemWeightLabel(i):(i.weight+'g')):''}`;
   const buckets={breakfast:[],lunch:[],dinner:[],snacks:[],supplements:[]};
@@ -1696,7 +1696,7 @@ function renderHomeMealSections(meals){
       // 3. Per-section recent ingredient chips
       const sectionRecent=getRecentIngredientsForSection(key);
       if(sectionRecent.length){
-        const chips=sectionRecent.map(r=>`<button type="button" class="recent-chip" onclick="startLogWithRecentIngredientByName('${jsEsc(r.name)}','${key}')">${esc(r.name)}</button>`).join('');
+        const chips=sectionRecent.map(r=>`<button type="button" class="recent-chip" onclick="startLogWithRecentIngredientByName('${esc(jsEsc(r.name))}','${key}')">${esc(r.name)}</button>`).join('');
         quickBlocks+=`<div class="recent-chips">${chips}</div>`;
       }
     }
@@ -1730,7 +1730,7 @@ function renderHome(){
   const t=dayData.totals||{kcal:0,protein:0,carbs:0,fat:0,fibre:0};
   const h=new Date().getHours();
   document.getElementById('home-greeting').textContent=h<12?'Good morning':h<18?'Good afternoon':'Good evening';
-  document.getElementById('home-name').innerHTML='Hello, <em>'+(profile.name||'chef')+'</em>';
+  document.getElementById('home-name').innerHTML='Hello, <em>'+escapeHtml(profile.name||'chef')+'</em>';
   const hasProfile=!!(profile.targetKcal||profile.name);
   document.getElementById('no-profile-banner').style.display=hasProfile?'none':'block';
   const streak=calcStreak();
