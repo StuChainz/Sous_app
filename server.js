@@ -4,12 +4,14 @@
 
 const express = require('express');
 const cors = require('cors');
+const rateLimit = require('express-rate-limit');
 const fs = require('fs');
 const path = require('path');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
 const ROOT_DIR = __dirname;
+const IS_PRODUCTION = process.env.NODE_ENV === 'production';
 
 function loadLocalEnv() {
   const envPath = path.join(ROOT_DIR, '.env');
@@ -32,6 +34,7 @@ function loadLocalEnv() {
 
 loadLocalEnv();
 
+app.set('trust proxy', 1);
 app.use(express.json({ limit: '6mb' }));
 const allowedOrigins = [
   /^http:\/\/localhost(:\d+)?$/,
@@ -50,8 +53,45 @@ app.use(cors({
 // Serve the frontend from the project root without exposing local secrets.
 app.use(express.static(ROOT_DIR, { dotfiles: 'ignore' }));
 
+function rateLimitResponse(message) {
+  return { error: message || 'Too many requests. Please wait a moment and try again.' };
+}
+
+const apiLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: IS_PRODUCTION ? 180 : 1200,
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+  message: rateLimitResponse('Too many API requests. Please wait a moment and try again.')
+});
+
+const expensiveApiLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: IS_PRODUCTION ? 30 : 300,
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+  message: rateLimitResponse('Too many AI requests. Please wait a moment and try again.')
+});
+
+app.use('/api', apiLimiter);
+app.use([
+  '/api/photo-estimate',
+  '/api/realtime/session',
+  '/api/interpret',
+  '/api/repair-transcript',
+  '/api/interpret-action'
+], expensiveApiLimiter);
+
 const REALTIME_MODEL = 'gpt-realtime-mini';
 const REALTIME_VOICE = 'marin';
+
+function errorBody(error, detailKey, detailValue) {
+  const body = { error };
+  if (!IS_PRODUCTION && detailValue !== undefined && detailValue !== null && detailValue !== '') {
+    body[detailKey || 'detail'] = detailValue;
+  }
+  return body;
+}
 
 function clampConfidence(value) {
   const confidence = String(value || '').toLowerCase().trim();
@@ -263,10 +303,11 @@ app.post('/api/realtime/session', async (req, res) => {
     try { data = text ? JSON.parse(text) : null; } catch {}
 
     if (!upstream.ok) {
-      return res.status(upstream.status).json({
-        error: `OpenAI Realtime error: ${upstream.status}`,
-        detail: data && data.error ? data.error.message || data.error : text
-      });
+      return res.status(upstream.status).json(errorBody(
+        `OpenAI Realtime error: ${upstream.status}`,
+        'detail',
+        data && data.error ? data.error.message || data.error : text
+      ));
     }
 
     const clientSecret = data && (data.value || data.client_secret?.value);
@@ -288,7 +329,7 @@ app.post('/api/realtime/session', async (req, res) => {
     });
   } catch (err) {
     console.error('[Sous Realtime] error', err.message);
-    res.status(500).json({ error: 'Realtime session request failed.', detail: err.message });
+    res.status(500).json(errorBody('Realtime session request failed.', 'detail', err.message));
   }
 });
 
@@ -382,10 +423,11 @@ app.post('/api/photo-estimate', async (req, res) => {
     try { data = text ? JSON.parse(text) : null; } catch {}
 
     if (!upstream.ok) {
-      return res.status(upstream.status).json({
-        error: `OpenAI error: ${upstream.status}`,
-        detail: data && data.error ? data.error.message || data.error : text
-      });
+      return res.status(upstream.status).json(errorBody(
+        `OpenAI error: ${upstream.status}`,
+        'detail',
+        data && data.error ? data.error.message || data.error : text
+      ));
     }
 
     let rawText = '';
@@ -403,13 +445,13 @@ app.post('/api/photo-estimate', async (req, res) => {
     try {
       parsed = JSON.parse(rawText);
     } catch {
-      return res.status(502).json({ error: 'Invalid JSON returned by OpenAI.', raw: rawText });
+      return res.status(502).json(errorBody('Invalid JSON returned by OpenAI.', 'raw', rawText));
     }
 
     res.json(normalisePhotoEstimate(parsed));
   } catch (err) {
     console.error('[Sous Photo Estimate] error', err.message);
-    res.status(500).json({ error: 'Photo estimate request failed.', detail: err.message });
+    res.status(500).json(errorBody('Photo estimate request failed.', 'detail', err.message));
   }
 });
 
@@ -451,10 +493,11 @@ app.get('/api/barcode/:code', async (req, res) => {
       return res.status(404).json({ error: 'Product not found.', barcode: code });
     }
     if (!upstream.ok) {
-      return res.status(upstream.status).json({
-        error: `Open Food Facts error: ${upstream.status}`,
-        detail: data?.errors || data?.result || null
-      });
+      return res.status(upstream.status).json(errorBody(
+        `Open Food Facts error: ${upstream.status}`,
+        'detail',
+        data?.errors || data?.result || null
+      ));
     }
     if (!data || !data.product) {
       return res.status(404).json({ error: 'Product not found.', barcode: code });
@@ -463,7 +506,7 @@ app.get('/api/barcode/:code', async (req, res) => {
     res.json(normaliseBarcodeProduct(code, data.product));
   } catch (err) {
     console.error('[Sous Barcode] error', err.message);
-    res.status(500).json({ error: 'Barcode lookup failed.', detail: err.message });
+    res.status(500).json(errorBody('Barcode lookup failed.', 'detail', err.message));
   }
 });
 
@@ -530,7 +573,7 @@ app.post('/api/interpret', async (req, res) => {
 
     if (!upstream.ok) {
       const text = await upstream.text();
-      return res.status(upstream.status).json({ error: `OpenAI error: ${upstream.status}`, detail: text });
+      return res.status(upstream.status).json(errorBody(`OpenAI error: ${upstream.status}`, 'detail', text));
     }
 
     const data = await upstream.json();
@@ -551,11 +594,11 @@ app.post('/api/interpret', async (req, res) => {
     try {
       parsed = JSON.parse(rawText);
     } catch {
-      return res.status(502).json({ error: 'Invalid JSON returned by OpenAI.', raw: rawText });
+      return res.status(502).json(errorBody('Invalid JSON returned by OpenAI.', 'raw', rawText));
     }
 
     if (!Array.isArray(parsed.ingredients)) {
-      return res.status(502).json({ error: 'Unexpected response shape from OpenAI.', raw: rawText });
+      return res.status(502).json(errorBody('Unexpected response shape from OpenAI.', 'raw', rawText));
     }
 
     res.json({
@@ -564,7 +607,7 @@ app.post('/api/interpret', async (req, res) => {
     });
 
   } catch (err) {
-    res.status(500).json({ error: 'Proxy request failed.', detail: err.message });
+    res.status(500).json(errorBody('Proxy request failed.', 'detail', err.message));
   }
 });
 
@@ -658,7 +701,7 @@ app.post('/api/repair-transcript', async (req, res) => {
 
     if (!upstream.ok) {
       const text = await upstream.text();
-      return res.status(upstream.status).json({ error: `OpenAI error: ${upstream.status}`, detail: text });
+      return res.status(upstream.status).json(errorBody(`OpenAI error: ${upstream.status}`, 'detail', text));
     }
 
     const data = await upstream.json();
@@ -675,7 +718,7 @@ app.post('/api/repair-transcript', async (req, res) => {
     let parsed;
     try { parsed = JSON.parse(rawText); }
     catch {
-      return res.status(502).json({ error: 'Invalid JSON returned by OpenAI.', raw: rawText });
+      return res.status(502).json(errorBody('Invalid JSON returned by OpenAI.', 'raw', rawText));
     }
 
     const seen = new Set();
@@ -701,7 +744,7 @@ app.post('/api/repair-transcript', async (req, res) => {
 
     res.json({ candidates });
   } catch (err) {
-    res.status(500).json({ error: 'Transcript repair request failed.', detail: err.message });
+    res.status(500).json(errorBody('Transcript repair request failed.', 'detail', err.message));
   }
 });
 
@@ -823,7 +866,7 @@ app.post('/api/interpret-action', async (req, res) => {
 
     if (!upstream.ok) {
       const text = await upstream.text();
-      return res.status(upstream.status).json({ error: `OpenAI error: ${upstream.status}`, detail: text });
+      return res.status(upstream.status).json(errorBody(`OpenAI error: ${upstream.status}`, 'detail', text));
     }
 
     const data = await upstream.json();
@@ -840,12 +883,12 @@ app.post('/api/interpret-action', async (req, res) => {
     let parsed;
     try { parsed = JSON.parse(rawText); }
     catch {
-      return res.status(502).json({ error: 'Invalid JSON returned by OpenAI.', raw: rawText });
+      return res.status(502).json(errorBody('Invalid JSON returned by OpenAI.', 'raw', rawText));
     }
 
     res.json(parsed);
   } catch (err) {
-    res.status(500).json({ error: 'Action interpretation request failed.', detail: err.message });
+    res.status(500).json(errorBody('Action interpretation request failed.', 'detail', err.message));
   }
 });
 
