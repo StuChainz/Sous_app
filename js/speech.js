@@ -4287,7 +4287,9 @@ function buildTapRec(){
       const finalizeOwner={...owner};
       finalizeTimer=setTimeout(()=>finalizeTranscript(finalizeOwner),delay);
 
-      if(Date.now()-utteranceStartTime>MAX_UTTERANCE_MS){
+      if(voiceSessionState!=='listening'||!voiceCurrentlyListening){
+        finalizeTranscript(finalizeOwner);
+      } else if(Date.now()-utteranceStartTime>MAX_UTTERANCE_MS){
         finalizeTranscript(finalizeOwner);
       }
     }
