@@ -3,6 +3,10 @@ const { defineConfig } = require('@playwright/test');
 
 const fakeMicAudio = process.env.SOUS_FAKE_MIC_AUDIO ||
   path.resolve(__dirname, 'tests/audio-fixtures/wav/oats.wav');
+const voiceHeadedRequested = process.env.SOUS_VOICE_HEADED === '1';
+const voiceWatchMode = process.argv.some(arg => arg === '--watch' || arg === '--ui' || arg.startsWith('--ui='));
+const voiceHeadedWatchEnabled = process.env.SOUS_VOICE_WATCH === '1';
+const voiceHeadless = !(voiceHeadedRequested && (!voiceWatchMode || voiceHeadedWatchEnabled));
 
 module.exports = defineConfig({
   testDir: './tests',
@@ -23,7 +27,7 @@ module.exports = defineConfig({
       timeout: 60000,
       use: {
         channel: 'chrome',
-        headless: process.env.SOUS_FAKE_MIC_HEADLESS === '1',
+        headless: voiceHeadless,
         permissions: ['microphone'],
         launchOptions: {
           args: [

@@ -45,10 +45,10 @@ The Playwright project launches Chrome with:
 
 - Google Chrome is recommended and configured through Playwright's `channel: "chrome"`.
 - The browser must expose `SpeechRecognition` or `webkitSpeechRecognition`.
-- The test runs headed by default because browser speech recognition and fake audio are less reliable in headless mode. To try headless locally:
+- The test runs headless by default so automated runs do not steal browser focus. To debug in a visible browser:
 
 ```bash
-SOUS_FAKE_MIC_HEADLESS=1 npm run test:voice:real-audio
+SOUS_VOICE_HEADED=1 npm run test:voice:real-audio
 ```
 
 ## What It Covers

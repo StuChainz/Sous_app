@@ -147,6 +147,7 @@ function recordVoiceTestEventFromTrace(entry){
     'interim_transcript',
     'final_transcript',
     'quantity_prompt_shown',
+    'multi_confirm_voice_prompt',
     'fallback_shown',
     'ingredient_added'
   ]);
@@ -154,6 +155,7 @@ function recordVoiceTestEventFromTrace(entry){
   if(entry.event==='transcript_heard') recordVoiceTestEvent('transcript received',entry);
   if(entry.event==='parser_result') recordVoiceTestEvent('parser result',entry);
   if(entry.event==='clarification_prompt'||entry.event==='clarification_shown'||entry.event==='clarification_started') recordVoiceTestEvent('clarification shown',entry);
+  if(entry.event==='multi_confirm_voice_prompt') recordVoiceTestEvent('clarification shown',entry);
   if(entry.event==='ingredient_added') recordVoiceTestEvent('ingredient row added',entry);
   if(entry.event==='feedback_audio') recordVoiceTestEvent('voice feedback requested',entry);
   if(entry.event==='state_transition'&&/page hidden|pagehide|screen leave|session stopped|test session stopped/i.test(entry.reason||'')) recordVoiceTestEvent('session paused',entry);
@@ -948,10 +950,21 @@ function stopAllVoiceActivity(reason){
   setVoiceSessionState('idle',reason);
 }
 
+const VOICE_PHRASE_REPAIRS=[
+  {label:'semi skim milk',pattern:/\bsemi\s+skim\s+milk\b/gi,to:'semi skimmed milk'},
+  {label:'semi skimmed',pattern:/\bsemi\s+skimmed\b(?!\s+milk)/gi,to:'semi skimmed milk'},
+  {label:'semi skim',pattern:/\bsemi\s+skim\b(?!\s+milk)/gi,to:'semi skimmed milk'},
+  {label:'skim milk',pattern:/\bskim\s+milk\b/gi,to:'skimmed milk'},
+  {label:'ml unit',pattern:/\b(\d+(?:[.,]\d+)?)\s*(?:mil|mill|mils|mills)\b/gi,to:'$1 ml'},
+  {label:'table spoon',pattern:/\btable\s+spoons?\b/gi,to:'tablespoon'},
+  {label:'tea spoon',pattern:/\btea\s+spoons?\b/gi,to:'teaspoon'}
+];
 const VOICE_COMMON_FOOD_REPAIRS=[
   {from:'jeans',to:['cheese','beans']},
   {from:'gene',to:['cheese','beans']},
   {from:'genes',to:['cheese','beans']},
+  {from:'way',to:['whey']},
+  {from:'weigh',to:['whey']},
   {from:'source',to:['sauce']},
   {from:'sore',to:['sauce']},
   {from:'sores',to:['sauce']},
@@ -963,6 +976,9 @@ const VOICE_COMMON_FOOD_REPAIRS=[
   {from:'floor',to:['flour']},
   {from:'serial',to:['cereal']},
   {from:'serials',to:['cereal']},
+  {from:'gramme',to:['gram']},
+  {from:'grammes',to:['grams']},
+  {from:'tbs',to:['tbsp']},
   {from:'chilly',to:['chilli']},
   {from:'chili',to:['chilli']},
   {from:'muscles',to:['mussels']},
@@ -993,13 +1009,56 @@ function uniqVoiceCandidates(candidates){
     return true;
   });
 }
+function voiceFoodMatchScore(clean,results){
+  let score=0;
+  const foods=(results||[]).filter(r=>r&&!r.command);
+  foods.forEach(item=>{
+    if(item.rawFood) score+=item.rawFood.source==='recent_ingredient'?85:55;
+    if(item.weightSpecified) score+=30;
+    if(item.serving) score+=20;
+  });
+  try{
+    if(typeof getFoodTextMatch==='function'){
+      const match=getFoodTextMatch(clean,{includeCustom:true});
+      if(match&&match.food){
+        score+=match.confidence==='high'?80:match.confidence==='medium'?55:30;
+        if(match.food.source==='recent_ingredient'||String(match.food.id||'').startsWith('recent_')) score+=45;
+        if(['exact-name','exact-alias','covered-alias'].includes(match.matchType)) score+=35;
+      }
+    }
+  }catch(e){}
+  try{
+    if(typeof getRecentIngredients==='function'){
+      const norm=typeof normaliseLogText==='function'?normaliseLogText(clean):clean.toLowerCase();
+      const recent=getRecentIngredients().slice(0,12);
+      if(recent.some(item=>{
+        const name=typeof normaliseLogText==='function'?normaliseLogText(item.name||''):String(item.name||'').toLowerCase();
+        return name&&(` ${norm} `).includes(` ${name} `);
+      })) score+=45;
+    }
+  }catch(e){}
+  return score;
+}
+function voiceQuantitySignalScore(clean){
+  let score=0;
+  if(/\b(?:\d+(?:[.,]\d+)?|one|two|three|four|five|six|seven|eight|nine|ten|half|quarter)\s*(?:g|grams?|kg|ml|millilit(?:re|er)s?|l|lit(?:re|er)s?|oz|tbsp|tablespoons?|tsp|teaspoons?|cups?)\b/i.test(clean)) score+=65;
+  if(/\b(?:slice|slices|scoop|scoops|serving|servings|piece|pieces|handful|splash|cup|cups|tablespoon|teaspoon|tbsp|tsp)\b/i.test(clean)) score+=35;
+  if(/\b(?:actually\s+)?(?:make|change|set)\s+(?:that|it|last)?\s*(?:to)?\s*(?:\d+(?:[.,]\d+)?|one|two|half|quarter)/i.test(clean)) score+=35;
+  return score;
+}
+function voiceRecognitionConfidenceScore(confidence){
+  return typeof confidence==='number'&&confidence>0?Math.round(Math.max(0,Math.min(confidence,1))*18):0;
+}
 function voiceParsedScore(text){
   const clean=normalizeVoiceTranscriptText(text);
   if(!clean||typeof parseText!=='function') return {score:-100,results:[],reason:'empty'};
   let results=[];
   try{results=parseText(clean)||[];}catch(e){results=[];}
   const commands=results.filter(r=>r&&r.command);
-  if(commands.length) return {score:900+commands.length*20,results,reason:'command'};
+  if(commands.length){
+    const targeted=commands.filter(cmd=>cmd.target||cmd.replacement||cmd.quantityText||cmd.grams||['undo','clear'].includes(cmd.command)).length;
+    return {score:940+commands.length*35+targeted*45+voiceQuantitySignalScore(clean),results,reason:'command'};
+  }
   const foods=results.filter(r=>r&&!r.command);
   const resolved=foods.filter(r=>!r.ambiguous);
   const clear=foods.filter(isClearIngredient);
@@ -1007,7 +1066,8 @@ function voiceParsedScore(text){
   const ambiguous=foods.filter(r=>r.ambiguous);
   const low=foods.filter(r=>r.confidence==='low'||r.needsConfirm);
   const reason=typeof aiEscalationReason==='function'?aiEscalationReason(clean,results):(!foods.length?'empty':'none');
-  let score=foods.length*110+resolved.length*35+clear.length*45+specified.length*25;
+  let score=foods.length*110+resolved.length*35+clear.length*45+specified.length*35;
+  score+=voiceFoodMatchScore(clean,results)+voiceQuantitySignalScore(clean);
   score-=ambiguous.length*18+low.length*18;
   if(reason==='none') score+=70;
   if(reason==='partial') score-=35;
@@ -1015,9 +1075,24 @@ function voiceParsedScore(text){
   if(reason==='empty') score-=90;
   return {score,results,reason};
 }
-function voiceRepairVariants(text,base={}){
+function voicePhraseRepairVariants(text,base={}){
   const clean=normalizeVoiceTranscriptText(text);
   const variants=[];
+  VOICE_PHRASE_REPAIRS.forEach(rule=>{
+    const repaired=normalizeVoiceTranscriptText(clean.replace(rule.pattern,rule.to));
+    if(!repaired||repaired===clean) return;
+    variants.push({
+      text:repaired,
+      confidence:base.confidence??null,
+      source:'phrase_repair',
+      repair:{from:rule.label,to:rule.to}
+    });
+  });
+  return variants;
+}
+function voiceRepairVariants(text,base={}){
+  const clean=normalizeVoiceTranscriptText(text);
+  const variants=voicePhraseRepairVariants(clean,base);
   VOICE_COMMON_FOOD_REPAIRS.forEach(rule=>{
     const re=new RegExp('\\b'+rule.from.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+'\\b','gi');
     if(!re.test(clean)) return;
@@ -1041,10 +1116,14 @@ function chooseVoiceTranscript(transcript,{alternatives=[],confidence=null,sourc
   ]);
   const repairCandidates=baseCandidates.flatMap(candidate=>voiceRepairVariants(candidate.text,candidate));
   const candidates=uniqVoiceCandidates([...baseCandidates,...repairCandidates]);
-  const scored=candidates.map(candidate=>({
-    ...candidate,
-    ...voiceParsedScore(candidate.text)
-  })).sort((a,b)=>b.score-a.score);
+  const scored=candidates.map(candidate=>{
+    const parsed=voiceParsedScore(candidate.text);
+    return {
+      ...candidate,
+      ...parsed,
+      score:parsed.score+voiceRecognitionConfidenceScore(candidate.confidence)
+    };
+  }).sort((a,b)=>b.score-a.score);
   const originalScore=voiceParsedScore(original);
   const best=scored[0]||{text:original,score:originalScore.score,reason:originalScore.reason,results:originalScore.results};
   const shouldReplace=best.text&&best.text!==original&&(
@@ -3115,6 +3194,54 @@ function resolveAmbig(food,amount){
 // MULTI-CONFIRM (batch ingredient review)
 // ═══════════════════════════════════════════
 let pendingBatch=[];
+function _multiConfirmNeedsType(entry){
+  return !!entry?.ambiguous;
+}
+function _multiConfirmNeedsQuantity(entry){
+  return !entry?.weightSpecified;
+}
+function _multiConfirmPromptForPendingBatch(){
+  const needsType=pendingBatch.some(_multiConfirmNeedsType);
+  const needsQuantity=pendingBatch.some(_multiConfirmNeedsQuantity);
+  if(!needsType&&!needsQuantity) return null;
+  if(needsType&&needsQuantity) return {text:'What type and how much?',cacheKey:'clarify_type_quantity'};
+  if(needsType) return {text:'What type?',cacheKey:'clarify_type'};
+  return {text:'How much?',cacheKey:'clarify_quantity'};
+}
+function _multiConfirmHasUnresolvedRows(){
+  return !!_multiConfirmPromptForPendingBatch();
+}
+function _announceMultiConfirmPrompt(prompt,turnId,phase='scheduled'){
+  if(!prompt) return;
+  const transcript=document.getElementById('transcript-text');
+  if(transcript) transcript.textContent=prompt.text;
+  setVoicePromptOwner('multi_confirm',{
+    turnId,
+    prompt:prompt.text,
+    items:voiceDebugResultSummary(pendingBatch.map(entry=>entry.rawItem||{
+      ambiguous:entry.ambiguous,
+      label:entry.label,
+      amount:entry.weight
+    }))
+  });
+  voiceDebugTrace('multi_confirm_voice_prompt',{
+    turnId,
+    prompt:prompt.text,
+    cacheKey:prompt.cacheKey,
+    phase,
+    needsType:pendingBatch.some(_multiConfirmNeedsType),
+    needsQuantity:pendingBatch.some(_multiConfirmNeedsQuantity)
+  });
+}
+function scheduleMultiConfirmResolutionPrompt(){
+  const prompt=_multiConfirmPromptForPendingBatch();
+  if(!prompt) return;
+  if(!(voiceSessionActive||voiceCurrentlyListening||isRecording)) return;
+  const turnId=activeVoiceTranscriptTurn||null;
+  _announceMultiConfirmPrompt(prompt,turnId,'scheduled');
+  voiceDebugTrace('voice_feedback_requested',{turnId,key:prompt.cacheKey,route:'scheduled',prompt:prompt.text});
+  setTimeout(()=>promptMultiConfirmResolution(turnId),20);
+}
 function _uniqueFoodsByName(foods){
   const seen=new Set();
   return (foods||[]).filter(food=>{
@@ -3160,9 +3287,11 @@ function _multiConfirmEntryScore(entry,item){
   const itemKeys=[
     item?.name,
     item?.label,
+    item?.heardName,
     item?.rawFood?.name,
     ...(item?.rawFood?.aliases||[]),
-    ...(item?.rawFood?.kw||[])
+    ...(item?.rawFood?.kw||[]),
+    ...((item?.matches||[]).flatMap(food=>[food.name,...(food.aliases||[]),...(food.kw||[])]))
   ].map(_multiConfirmTextKey).filter(Boolean);
   const entryKeys=[
     entry.label,
@@ -3182,10 +3311,38 @@ function _multiConfirmEntryScore(entry,item){
   return score;
 }
 function _selectEntryFood(entry,item){
-  if(!entry||!item?.rawFood||!entry.options?.length) return false;
-  const idx=entry.options.findIndex(food=>food.name===item.rawFood.name||food.id===item.rawFood.id);
-  if(idx<0) return false;
-  entry.selectedIdx=idx;
+  if(!entry||!entry.options?.length) return false;
+  const candidateFoods=[item?.rawFood,...(item?.matches||[])].filter(Boolean);
+  const idx=entry.options.findIndex(food=>candidateFoods.some(candidate=>food.name===candidate.name||food.id===candidate.id));
+  if(idx>=0){
+    entry.selectedIdx=idx;
+    entry.ambiguous=false;
+    entry.showCreate=false;
+    entry.manualMacros=false;
+    return true;
+  }
+  const itemKeys=[
+    item?.name,
+    item?.label,
+    item?.heardName,
+    item?.rawFood?.name
+  ].map(_multiConfirmTextKey).filter(Boolean);
+  let bestIdx=-1,bestScore=0;
+  entry.options.forEach((food,index)=>{
+    const foodKeys=[food.name,...(food.aliases||[]),...(food.kw||[])].map(_multiConfirmTextKey).filter(Boolean);
+    itemKeys.forEach(itemKey=>{
+      foodKeys.forEach(foodKey=>{
+        if(!itemKey||!foodKey) return;
+        let score=0;
+        if(itemKey===foodKey) score=100;
+        else if(itemKey.includes(foodKey)||foodKey.includes(itemKey)) score=60+Math.min(itemKey.length,foodKey.length);
+        if(score>bestScore){bestScore=score;bestIdx=index;}
+      });
+    });
+  });
+  if(bestIdx<0||bestScore<60) return false;
+  entry.selectedIdx=bestIdx;
+  entry.ambiguous=false;
   entry.showCreate=false;
   entry.manualMacros=false;
   return true;
@@ -3195,7 +3352,8 @@ function handleMultiConfirmVoiceFill(transcript){
   if(active!=='ls-multi-confirm'||!pendingBatch.length) return false;
   const results=typeof parseText==='function'?parseText(transcript).filter(r=>r&&!r.command):[];
   if(!results.length){
-    showToast("Didn't catch the amounts");
+    showToast("Didn't catch that");
+    voiceDebugTrace('multi_confirm_voice_fill_miss',{transcript,reason:'no_results'});
     return true;
   }
   const used=new Set();
@@ -3221,21 +3379,24 @@ function handleMultiConfirmVoiceFill(transcript){
   });
   if(updated){
     renderMultiConfirm();
-    showToast('Updated '+updated+' amount'+(updated!==1?'s':''));
+    const stillUnresolved=_multiConfirmHasUnresolvedRows();
+    showToast('Updated '+updated+' item'+(updated!==1?'s':''));
     voiceDebugTrace('multi_confirm_voice_fill',{transcript,updated});
+    const el=document.getElementById('transcript-text');
+    if(el) el.textContent=stillUnresolved?'Review updated':'Review ready';
   } else {
-    showToast("Didn't match those amounts");
+    showToast("Didn't match that");
     voiceDebugTrace('multi_confirm_voice_fill_miss',{transcript,results:voiceDebugResultSummary(results)});
   }
   return true;
 }
-function promptMultiConfirmQuantityFill(){
+function promptMultiConfirmResolution(turnId=null){
   if(!pendingBatch.length) return;
-  if(!pendingBatch.some(entry=>!entry.weightSpecified)) return;
+  const prompt=_multiConfirmPromptForPendingBatch();
+  if(!prompt) return;
   if(!(voiceSessionActive||voiceCurrentlyListening||isRecording)) return;
-  const transcript=document.getElementById('transcript-text');
-  if(transcript) transcript.textContent='How much?';
-  speakThenListen('How much?',handleMultiConfirmVoiceFill,'clarify_amount',{}, {force:true});
+  _announceMultiConfirmPrompt(prompt,turnId||activeVoiceTranscriptTurn||null,'listening');
+  speakThenListen(prompt.text,handleMultiConfirmVoiceFill,prompt.cacheKey,{}, {force:true});
 }
 function _updateEntryMacros(entry){
   if(entry.manualMacros) return;
@@ -3267,7 +3428,7 @@ function showMultiConfirm(results){
   pendingBatch=results.filter(r=>!r.command).map(r=>{
     const options=_multiConfirmOptionsForItem(r);
     let entry;
-    if(r.ambiguous) entry={ambiguous:true,label:r.label,options,selectedIdx:0,weight:r.amount||100,weightSpecified:r.amount!=null,manualMacros:false,showCreate:false,customName:r.label||'',customKcal:'',customProtein:'',customCarbs:'',customFat:''};
+    if(r.ambiguous) entry={ambiguous:true,label:r.label,options,selectedIdx:0,weight:r.amount||100,weightSpecified:r.amount!=null,rawItem:r,manualMacros:false,showCreate:false,customName:r.label||'',customKcal:'',customProtein:'',customCarbs:'',customFat:''};
     else {
       const selectedIdx=Math.max(0,options.findIndex(food=>r.rawFood&&(food.name===r.rawFood.name||food.id===r.rawFood.id)));
       entry={ambiguous:false,label:r.name,options,selectedIdx,food:r.rawFood||null,weight:r.weight||r.rawFood?.w||100,weightSpecified:!!r.weightSpecified,rawItem:r,manualMacros:false,showCreate:false,customName:r.heardName||r.name||'',customKcal:'',customProtein:'',customCarbs:'',customFat:''};
@@ -3277,7 +3438,7 @@ function showMultiConfirm(results){
   });
   renderMultiConfirm();
   showLogScreen('multi-confirm');
-  if(pendingBatch.some(entry=>!entry.weightSpecified)) setTimeout(promptMultiConfirmQuantityFill,120);
+  if(_multiConfirmHasUnresolvedRows()) scheduleMultiConfirmResolutionPrompt();
   else if(voiceSessionActive||voiceCurrentlyListening||isRecording) speakCachedResponse('got_it',{},null,{force:true});
 }
 function renderMultiConfirm(){
@@ -3375,7 +3536,7 @@ function renderMultiConfirm(){
     const rmBtn=document.createElement('button');
     rmBtn.textContent='×'; rmBtn.type='button';
     rmBtn.style.cssText='background:none;border:none;font-size:20px;color:var(--text-muted);cursor:pointer;padding:2px 4px;flex-shrink:0;';
-    rmBtn.addEventListener('click',()=>{pendingBatch.splice(idx,1);if(!pendingBatch.length){showLogScreen('listening');return;}renderMultiConfirm();});
+    rmBtn.addEventListener('click',()=>{pendingBatch.splice(idx,1);if(!pendingBatch.length){clearVoicePromptOwner('multi_confirm_empty');showLogScreen('listening');return;}renderMultiConfirm();});
     qRow.appendChild(minusBtn); qRow.appendChild(wtIn); qRow.appendChild(plusBtn); qRow.appendChild(gLbl); qRow.appendChild(rmBtn);
     card.appendChild(qRow);
     // Macro inputs row
@@ -3402,7 +3563,7 @@ function renderMultiConfirm(){
   if(addBtn) addBtn.textContent='Add '+pendingBatch.length+' ingredient'+(pendingBatch.length!==1?'s':'')+' to meal';
 }
 function commitMultiConfirm(){
-  if(!pendingBatch.length){showLogScreen('listening');return;}
+  if(!pendingBatch.length){clearVoicePromptOwner('multi_confirm_empty');showLogScreen('listening');return;}
   snapshotMeal();
   let overrideCandidate=null;
   pendingBatch.forEach(entry=>{
@@ -3442,6 +3603,7 @@ function commitMultiConfirm(){
   _persistDraft();
   if(overrideCandidate){_pendingOverride=overrideCandidate;setTimeout(()=>_showOverridePrompt(overrideCandidate.name),600);}
   const count=pendingBatch.length; pendingBatch=[];
+  clearVoicePromptOwner('multi_confirm_committed');
   showLogScreen('listening');
   updateHome();
   showToast('Added '+count+' ingredient'+(count!==1?'s':'')+' ✓');
@@ -3915,26 +4077,18 @@ function buildTapRec(){
   let pendingConfidence=null;
   let lastInterimTrace='';
 
-  const BASE_DELAY=420;
-  const EXTENDED_DELAY=950;
+  const BASE_DELAY=380;
+  const QUANTITY_TAIL_DELAY=650;
+  const EXTENDED_DELAY=1050;
   const MAX_UTTERANCE_MS=10000;
 
   function getAdaptiveDelay(text){
-    const t=text.toLowerCase();
-
-    const incompleteKeywords=[
-      "swap",
-      "replace",
-      "change",
-      "with",
-      "for",
-      "instead",
-      "and"
-    ];
-
-    const isComplex=incompleteKeywords.some(k=>t.includes(k));
-
-    return isComplex?EXTENDED_DELAY:BASE_DELAY;
+    const t=String(text||'').toLowerCase().replace(/\s+/g,' ').trim();
+    if(!t) return BASE_DELAY;
+    if(/\b(?:and|with|change|swap|replace|instead|to|for)\s*$/.test(t)) return EXTENDED_DELAY;
+    if(/\b(?:instead\s+of|change\s+that\s+to|make\s+that|actually\s+make|swap\s+.+\s+(?:for|with))\b/.test(t)) return EXTENDED_DELAY;
+    if(/\b(?:\d+(?:[.,]\d+)?|one|two|three|half|quarter)\s*(?:g|grams?|kg|ml|millilit(?:re|er)s?|l|oz|tbsp|tablespoons?|tsp|teaspoons?|cups?|slices?|scoops?)?\s*$/.test(t)) return QUANTITY_TAIL_DELAY;
+    return BASE_DELAY;
   }
 
   async function finalizeTranscript(){
@@ -4757,7 +4911,7 @@ function wireLogButtons(){
   document.getElementById('ambig-custom').addEventListener('click',()=>{currentAmbig=null;openCustomEntry();});
   document.getElementById('ambig-skip').addEventListener('click',()=>{currentAmbig=null;showLogScreen('listening');maybeResumeVoiceSession(400);});
   document.getElementById('mc-add-btn').addEventListener('click',commitMultiConfirm);
-  document.getElementById('mc-cancel-btn').addEventListener('click',()=>{pendingBatch=[];showLogScreen('listening');maybeResumeVoiceSession(400);});
+  document.getElementById('mc-cancel-btn').addEventListener('click',()=>{pendingBatch=[];clearVoicePromptOwner('multi_confirm_cancelled');showLogScreen('listening');maybeResumeVoiceSession(400);});
   document.getElementById('add-custom-btn').addEventListener('click',()=>openCustomEntry());
   document.getElementById('add-more-btn').addEventListener('click',()=>openAddModal());
   document.getElementById('sum-section-select').addEventListener('change',e=>{currentMealSection=e.target.value;});

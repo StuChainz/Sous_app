@@ -1310,11 +1310,19 @@ function closePhotoEstimateModal(){
   if(!modal) return;
   modal.classList.remove('show');
   setTimeout(()=>{modal.style.display='none';},200);
-  const input=document.getElementById('photo-estimate-input');
-  if(input) input.value='';
+  ['photo-estimate-input','photo-estimate-library-input'].forEach(id=>{
+    const input=document.getElementById(id);
+    if(input) input.value='';
+  });
+}
+function openPhotoEstimateCameraPicker(){
+  document.getElementById('photo-estimate-input')?.click();
+}
+function openPhotoEstimateLibraryPicker(){
+  document.getElementById('photo-estimate-library-input')?.click();
 }
 function openPhotoEstimatePicker(){
-  document.getElementById('photo-estimate-input')?.click();
+  openPhotoEstimateCameraPicker();
 }
 function resizePhotoForEstimate(file){
   return new Promise((resolve,reject)=>{
@@ -1885,6 +1893,7 @@ function initDateNav(){
 
 function initPhotoEstimate(){
   document.getElementById('photo-estimate-input')?.addEventListener('change',e=>handlePhotoEstimateFile(e.target.files&&e.target.files[0]));
+  document.getElementById('photo-estimate-library-input')?.addEventListener('change',e=>handlePhotoEstimateFile(e.target.files&&e.target.files[0]));
   document.getElementById('photo-estimate-close-btn')?.addEventListener('click',closePhotoEstimateModal);
   document.getElementById('photo-estimate-cancel-btn')?.addEventListener('click',closePhotoEstimateModal);
   document.getElementById('photo-estimate-modal')?.addEventListener('click',e=>{if(e.target===document.getElementById('photo-estimate-modal'))closePhotoEstimateModal();});

@@ -8,10 +8,19 @@ const baseURL = process.env.SOUS_TEST_BASE_URL || 'http://127.0.0.1:8732';
 const fixtureRoot = path.resolve(__dirname, 'audio-fixtures');
 const strictFakeMic = process.env.SOUS_FAKE_MIC_STRICT === '1';
 const recognitionModeSetting = process.env.SOUS_FAKE_MIC_RECOGNITION || 'auto';
+const headedRequested = process.env.SOUS_VOICE_HEADED === '1';
+const watchMode = process.argv.some(arg => arg === '--watch' || arg === '--ui' || arg.startsWith('--ui='));
+const headedWatchEnabled = process.env.SOUS_VOICE_WATCH === '1';
+const headedEnabled = headedRequested && (!watchMode || headedWatchEnabled);
+const fakeMicHeadless = !headedEnabled;
 let fakeMicUnsupported = false;
 let nativeFakeSpeechWorks = null;
 const scenarioResults = [];
 const scenarioMetaByName = new Map();
+
+if (headedRequested && watchMode && !headedWatchEnabled) {
+  console.warn('SOUS_VOICE_HEADED=1 ignored in Playwright watch/UI mode. Set SOUS_VOICE_WATCH=1 as well to allow repeated headed fake-mic launches.');
+}
 
 class ScenarioFailure extends Error {
   constructor(scenario, invariant, message, snapshot) {
@@ -975,7 +984,7 @@ async function probeNativeFakeSpeech(fixturePath, expectedTranscript) {
 async function launchFakeMicBrowser(chromium, fixturePath, scenario) {
   const channel = process.env.SOUS_FAKE_MIC_CHANNEL || 'chrome';
   const launchOptions = {
-    headless: process.env.SOUS_FAKE_MIC_HEADLESS === '1',
+    headless: fakeMicHeadless,
     args: [
       '--use-fake-ui-for-media-stream',
       '--use-fake-device-for-media-stream',

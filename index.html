@@ -620,9 +620,13 @@ html,body{height:100%;height:var(--app-height);min-height:-webkit-fill-available
           <div class="cta-label">Start cooking log</div>
           <div class="cta-sub">Tap mic to start voice logging</div>
         </div>
-        <button class="btn-secondary" type="button" onclick="openPhotoEstimatePicker()" style="margin-top:10px;width:100%;"><i class="ti ti-camera" style="margin-right:6px;"></i>Estimate from photo</button>
+        <div style="display:flex;gap:8px;margin-top:10px;">
+          <button class="btn-secondary" type="button" onclick="openPhotoEstimateCameraPicker()" data-testid="photo-estimate-camera-btn" style="flex:1;min-width:0;"><i class="ti ti-camera" style="margin-right:6px;"></i>Take photo</button>
+          <button class="btn-secondary" type="button" onclick="openPhotoEstimateLibraryPicker()" data-testid="photo-estimate-library-btn" style="flex:1;min-width:0;"><i class="ti ti-photo" style="margin-right:6px;"></i>Choose from photos</button>
+        </div>
         <button class="btn-secondary" type="button" onclick="openBarcodeScannerFromHome()" style="margin-top:10px;width:100%;"><i class="ti ti-barcode" style="margin-right:6px;"></i>Scan barcode</button>
         <input id="photo-estimate-input" type="file" accept="image/*" capture="environment" style="position:absolute;width:1px;height:1px;opacity:0;pointer-events:none;overflow:hidden;">
+        <input id="photo-estimate-library-input" type="file" accept="image/*" style="position:absolute;width:1px;height:1px;opacity:0;pointer-events:none;overflow:hidden;">
       </div>
 
       <div class="section">
@@ -1648,13 +1652,13 @@ window.sousApiUrl=path=>`${window.SOUS_API_BASE}${path}`;
 <script src="js/food-data.js?v=11"></script>
 <script src="js/parser.js?v=12"></script>
 <script src="js/ai-response-cache.js?v=7"></script>
-<script src="js/speech.js?v=25"></script>
+<script src="js/speech.js?v=27"></script>
 <script src="js/history.js?v=10"></script>
 <script src="js/profile.js?v=8"></script>
 <script src="js/recipes.js?v=8"></script>
 <script src="js/onboarding.js?v=1"></script>
 <script src="js/test-mode.js?v=2"></script>
-<script src="js/app.js?v=16"></script>
+<script src="js/app.js?v=17"></script>
 <script src="js/ai-interpreter.js?v=3"></script>
 <script src="js/barcode.js?v=1"></script>
 

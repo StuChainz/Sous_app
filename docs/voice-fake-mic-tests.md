@@ -30,22 +30,66 @@ Multi-turn fixtures are written to `tests/audio-fixtures/sequences/`.
 
 ## Run
 
+Headless:
+
 ```bash
 npm run test:voice:fake-mic
+```
+
+Headed:
+
+```bash
+SOUS_VOICE_HEADED=1 npm run test:voice:fake-mic
 ```
 
 Useful options:
 
 ```bash
 SOUS_FAKE_MIC_STRICT=1 npm run test:voice:fake-mic
-SOUS_FAKE_MIC_HEADLESS=1 npm run test:voice:fake-mic
 SOUS_FAKE_MIC_CHANNEL=bundled npm run test:voice:fake-mic
 SOUS_FAKE_MIC_TIMEOUT_MS=60000 npm run test:voice:fake-mic
 SOUS_FAKE_MIC_RECOGNITION=native npm run test:voice:fake-mic
 SOUS_FAKE_MIC_RECOGNITION=shim npm run test:voice:fake-mic
 ```
 
+The fake-mic suite runs headless by default so automated runs do not steal browser focus. In Playwright watch/UI mode, headed fake-mic windows are still suppressed unless you explicitly set both `SOUS_VOICE_HEADED=1` and `SOUS_VOICE_WATCH=1`.
+
 `SOUS_FAKE_MIC_RECOGNITION=auto` is the default. In auto mode the suite first probes native Chrome `SpeechRecognition` with the fake WAV input. If native Web Speech returns a transcript that matches the fixture phrase, the scenarios use native recognition. If Chrome reports `no-speech`, times out, or returns unrelated text, the suite keeps the fake-mic browser launch but installs a deterministic dev-only `SpeechRecognition` shim that emits the fixture utterances through the recognizer start/result/end callbacks.
+
+## What Shim Mode Means
+
+`SOUS_FAKE_MIC_RECOGNITION=shim` forces the deterministic recognizer shim instead of Chrome's native Web Speech recognizer.
+
+Yes, shim mode bypasses real browser `SpeechRecognition` transcription. The app still constructs and starts a `SpeechRecognition` object, but the test has replaced `window.SpeechRecognition` and `window.webkitSpeechRecognition` with a fake class before the app loads. That fake class calls the same recognizer callbacks the app normally depends on: `onstart`, `onsoundstart`, `onspeechstart`, `onresult`, `onspeechend`, `onsoundend`, `onerror`, and `onend`.
+
+Shim mode does not read transcripts from audio fixture metadata. The expected utterances live in the scenario definitions in `tests/voice-fake-mic.spec.js`, for example `utterances: ['oats', '50 grams']`. The shim consumes that utterance list in order and emits those strings as recognition results. The WAV path is still passed to Chrome through the fake microphone launch flag, but the shim does not inspect the WAV file to decide what text to emit.
+
+Shim mode does not decode audio. It does not prove that Chrome/Web Speech can hear or transcribe the generated WAV. Native mode is the only fake-mic mode that attempts to have Chrome's real Web Speech stack transcribe the fake audio file.
+
+Shim mode still tests these parts of the real Sous voice lifecycle:
+
+- browser page setup with microphone permission enabled
+- app voice-session start/stop/restart state
+- recognizer construction and guarded `start()`/`stop()` calls
+- recognizer callback ordering and async timing
+- final transcript routing through the same voice entry point
+- parser, clarification, quantity, correction, delete, fallback, and save/finish flows
+- silent feedback callbacks and restart-after-feedback behavior
+- duplicate transcript/duplicate row prevention
+- no-speech and recognizer-end recovery paths emitted through recognizer events
+- blocked `/api/**` calls and console/page-error assertions
+
+Shim mode does not test these parts:
+
+- real audio decoding
+- real Chrome/Web Speech transcription accuracy
+- actual microphone hardware input
+- OS audio routing, input device selection, or microphone permission prompts outside the test context
+- native Web Speech service timing, confidence scores, alternative hypotheses, or network/service failures
+- Safari/iOS PWA speech behavior
+- user speech acoustics, accents, background noise, or clipping
+
+Use `SOUS_FAKE_MIC_RECOGNITION=native` when the goal is to prove Chrome can transcribe the generated WAV fixtures. Use `SOUS_FAKE_MIC_RECOGNITION=shim` when the goal is deterministic coverage of Sous' voice lifecycle after recognizer events fire.
 
 ## Current Coverage
 

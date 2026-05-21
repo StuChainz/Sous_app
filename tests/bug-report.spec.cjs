@@ -96,3 +96,31 @@ test('copy helper writes JSON bug report text to clipboard', async ({ page, cont
   expect(report.testerNote).toBe('Copy helper note');
   expect(report.currentURL).toContain('test=1');
 });
+
+test('photo estimate offers camera and camera roll inputs', async ({ page }) => {
+  await boot(page);
+
+  await expect(page.getByTestId('photo-estimate-camera-btn')).toBeVisible();
+  await expect(page.getByTestId('photo-estimate-library-btn')).toBeVisible();
+  const attrs = await page.evaluate(() => {
+    const camera = document.getElementById('photo-estimate-input');
+    const library = document.getElementById('photo-estimate-library-input');
+    return {
+      cameraAccept: camera?.getAttribute('accept'),
+      cameraCapture: camera?.getAttribute('capture'),
+      libraryAccept: library?.getAttribute('accept'),
+      libraryCapture: library?.hasAttribute('capture') ? library.getAttribute('capture') : null,
+      hasCameraOpener: typeof window.openPhotoEstimateCameraPicker === 'function',
+      hasLibraryOpener: typeof window.openPhotoEstimateLibraryPicker === 'function'
+    };
+  });
+
+  expect(attrs).toEqual({
+    cameraAccept: 'image/*',
+    cameraCapture: 'environment',
+    libraryAccept: 'image/*',
+    libraryCapture: null,
+    hasCameraOpener: true,
+    hasLibraryOpener: true
+  });
+});

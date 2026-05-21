@@ -201,6 +201,62 @@ const reviewScenarios = [
   expectedVoicePromptResult: { requiredEventTypes: ['transcript received', 'parser result', 'ingredient row added'] }
 }));
 
+const recognitionRepairScenarios = [
+  makeScenario({
+    name: 'speech repair: soy source',
+    utterances: ['soy source'],
+    expectedMealIngredients: { contains: ['Soy sauce'], minCount: 1 },
+    expectedVoicePromptResult: { requiredEventTypes: ['transcript received', 'parser result', 'ingredient row added'] }
+  }),
+  makeScenario({
+    name: 'speech repair: 30 grams way',
+    utterances: ['30 grams way'],
+    expectedMealIngredients: { contains: ['Protein powder'], minCount: 1 },
+    expectedVoicePromptResult: { requiredEventTypes: ['transcript received', 'parser result', 'ingredient row added'] }
+  }),
+  makeScenario({
+    name: 'review clarification: chicken rice and weigh then typed spoken details',
+    utterances: ['chicken rice and weigh', 'chicken thighs 75g and white rice 100g'],
+    interactions: { quantity: 'none', review: 'none' },
+    expectedUiResult: { allowedScreens: ['ls-multi-confirm'] },
+    expectedReviewIngredients: { contains: ['Chicken thigh', 'White rice'], minRows: 2 },
+    expectedVoicePromptResult: {
+      requiredEventTypes: ['transcript received', 'parser result', 'clarification shown'],
+      anyEventTypes: ['voice feedback requested', 'silent_mode_skipped_feedback'],
+      promptIncludesAny: ['What type and how much?']
+    }
+  }),
+  makeScenario({
+    name: 'speech repair: semi skimmed milk 200 millilitres',
+    utterances: ['semi skimmed milk 200 millilitres'],
+    expectedMealIngredients: { contains: ['Milk'], minCount: 1 },
+    expectedVoicePromptResult: { requiredEventTypes: ['transcript received', 'parser result', 'ingredient row added'] }
+  }),
+  makeScenario({
+    name: 'connector tail: oats and',
+    utterances: ['oats and'],
+    interactions: { quantity: 'none', review: 'none' },
+    expectedUiResult: { allowedScreens: ['ls-listening', 'ls-quantity', 'ls-food-choice', 'ls-confirm'] },
+    expectedMealIngredients: { maxCount: 0 },
+    expectedVoicePromptResult: {
+      requiredEventTypes: ['transcript received', 'parser result'],
+      anyEventTypes: ['clarification shown', 'voice feedback requested', 'silent_mode_skipped_feedback']
+    }
+  }),
+  makeScenario({
+    name: 'connector phrase: oats with banana',
+    utterances: ['oats with banana'],
+    expectedMealIngredients: { contains: ['Oats', 'Banana'], minCount: 2 },
+    expectedVoicePromptResult: { requiredEventTypes: ['transcript received', 'parser result', 'ingredient row added'] }
+  }),
+  makeScenario({
+    name: 'multi ingredient exact: two eggs and toast',
+    utterances: ['two eggs and toast'],
+    expectedMealIngredients: { contains: ['Egg', 'Bread'], minCount: 2 },
+    expectedVoicePromptResult: { requiredEventTypes: ['transcript received', 'parser result', 'ingredient row added'] }
+  })
+];
+
 const promptAndClarificationScenarios = [
   makeScenario({
     name: 'A fresh voice meal oats prompt ownership',
@@ -335,6 +391,13 @@ const correctionScenarios = [
     expectedVoicePromptResult: { requiredEventTypes: ['transcript received', 'parser result'] }
   }),
   makeScenario({
+    name: 'remove the milk removes seeded milk',
+    startingState: { seedUtterances: ['200ml milk'] },
+    utterances: ['remove the milk'],
+    expectedMealIngredients: { maxCount: 0 },
+    expectedVoicePromptResult: { requiredEventTypes: ['transcript received'], anyEventTypes: ['voice feedback requested', 'silent_mode_skipped_feedback'] }
+  }),
+  makeScenario({
     name: 'undo that removes last add',
     startingState: { seedUtterances: ['50g oats', '30g cheddar'] },
     utterances: ['undo that'],
@@ -349,9 +412,23 @@ const correctionScenarios = [
     expectedVoicePromptResult: { requiredEventTypes: ['transcript received', 'parser result'] }
   }),
   makeScenario({
+    name: 'change that to 150 grams updates last ingredient',
+    startingState: { seedUtterances: ['50g oats'] },
+    utterances: ['change that to 150 grams'],
+    expectedMealIngredients: { exactCounts: { Oats: 1 }, contains: ['Oats'] },
+    expectedVoicePromptResult: { requiredEventTypes: ['transcript received', 'parser result'] }
+  }),
+  makeScenario({
     name: 'actually make that 150 grams updates last ingredient',
     startingState: { seedUtterances: ['30g cheddar'] },
     utterances: ['actually make that 150 grams'],
+    expectedMealIngredients: { exactCounts: { Cheddar: 1 }, contains: ['Cheddar'] },
+    expectedVoicePromptResult: { requiredEventTypes: ['transcript received', 'parser result'] }
+  }),
+  makeScenario({
+    name: 'actually make that 50 grams updates last ingredient',
+    startingState: { seedUtterances: ['30g cheddar'] },
+    utterances: ['actually make that 50 grams'],
     expectedMealIngredients: { exactCounts: { Cheddar: 1 }, contains: ['Cheddar'] },
     expectedVoicePromptResult: { requiredEventTypes: ['transcript received', 'parser result'] }
   }),
@@ -491,6 +568,7 @@ const scenarios = [
   ...weightedScenarios,
   ...defaultQuantityScenarios,
   ...reviewScenarios,
+  ...recognitionRepairScenarios,
   ...promptAndClarificationScenarios,
   ...correctionScenarios,
   ...memoryScenarios,
