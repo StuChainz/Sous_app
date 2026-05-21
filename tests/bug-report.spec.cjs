@@ -81,6 +81,7 @@ test('bug report includes note, app state, voice traces, and console errors', as
   expect(Array.isArray(report.currentMealRows)).toBe(true);
   expect(Object.prototype.hasOwnProperty.call(report, 'lastTranscriptText')).toBe(true);
   expect(Array.isArray(report.voiceTrace)).toBe(true);
+  expect(Array.isArray(report.voiceDecisionTrace)).toBe(true);
   expect(Array.isArray(report.voiceTestEvents)).toBe(true);
   expect(report.recentConsoleErrors.some(error => error.message === 'Synthetic tester error')).toBe(true);
 });

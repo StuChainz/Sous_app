@@ -826,6 +826,13 @@ async function handleTranscript(transcript,rawText){
       escalationReason,
       results:typeof voiceDebugResultSummary==='function'?voiceDebugResultSummary(results):results
     });
+    voiceDebugTrace('voice_decision',{
+      step:'parser_escalation',
+      source:'handleTranscript',
+      transcript:transcript.trim(),
+      reason:escalationReason,
+      resultCount:Array.isArray(results)?results.length:0
+    });
   }
 
   if(escalationReason==='none'){
@@ -859,6 +866,7 @@ async function handleTranscript(transcript,rawText){
   if(canUseAIInterpretation()){
     console.log('[Sous] AI allowed');
     if(typeof voiceDebugTrace==='function') voiceDebugTrace('ai_escalation',{transcript:transcript.trim(),reason:escalationReason,allowed:true});
+    if(typeof voiceDebugTrace==='function') voiceDebugTrace('voice_decision',{step:'ai_interpret_escalation',transcript:transcript.trim(),reason:escalationReason,allowed:true});
     try{
       if(typeof interpretMealWithAI==='function'){
         const draft=await interpretMealWithAI({
@@ -901,6 +909,7 @@ async function handleTranscript(transcript,rawText){
   } else {
     console.log('[Sous] AI blocked: free plan');
     if(typeof voiceDebugTrace==='function') voiceDebugTrace('ai_escalation',{transcript:transcript.trim(),reason:escalationReason,allowed:false});
+    if(typeof voiceDebugTrace==='function') voiceDebugTrace('voice_decision',{step:'ai_interpret_escalation',transcript:transcript.trim(),reason:escalationReason,allowed:false});
   }
 
   // AI unavailable or returned nothing — use parser results

@@ -206,6 +206,13 @@
     return [];
   }
 
+  function getVoiceDecisionTrace(){
+    try{
+      if(typeof window.__sousVoiceDecisionTrace==='function') return window.__sousVoiceDecisionTrace().slice(-8);
+    }catch(e){}
+    return [];
+  }
+
   function getVoiceTestEvents(){
     try{
       if(typeof window.__sousLastVoiceEvents==='function') return window.__sousLastVoiceEvents().slice(-50);
@@ -234,6 +241,7 @@
       voiceState:getVoiceState(),
       lastTranscriptText:getLastTranscriptText(),
       voiceTrace:getVoiceTrace(),
+      voiceDecisionTrace:getVoiceDecisionTrace(),
       voiceTestEvents:getVoiceTestEvents(),
       recentConsoleErrors:consoleErrors.slice(-20)
     };

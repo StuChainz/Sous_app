@@ -490,6 +490,39 @@ const additionalScenarioGroups = [
     ]
   },
   {
+    group: 'mishearing repairs',
+    scenarios: [
+      {
+        name: 'mishearing soy source repairs to soy sauce',
+        fixture: 'wav/soy-source.wav',
+        utterances: ['soy source'],
+        done: s => hasFood(s, /soy sauce/i) || hasReviewRows(s) || hasPrompt(s),
+        expected: {
+          forbiddenUiText: ["didn't catch that"],
+          maxFoodCount: { pattern: /soy sauce/i, count: 1 },
+          finalStates: ['listening', 'restarting', 'speaking']
+        }
+      },
+      {
+        name: 'mishearing 30 grams way repairs to whey',
+        fixture: 'wav/30-grams-way.wav',
+        utterances: ['30 grams way'],
+        done: s => hasFood(s, /protein powder|whey/i, 30) || hasReviewRows(s) || hasPrompt(s),
+        validate: s => {
+          const protein = findFood(s, /protein powder|whey/i);
+          if (protein && Number(protein.weight) !== 30) {
+            fail(s, 'Whey mishearing keeps quantity', `expected 30g, got ${protein.weight || 'no weight'}`);
+          }
+        },
+        expected: {
+          forbiddenUiText: ["didn't catch that"],
+          maxFoodCount: { pattern: /protein powder|whey/i, count: 1 },
+          finalStates: ['listening', 'restarting', 'speaking']
+        }
+      }
+    ]
+  },
+  {
     group: 'clarification',
     scenarios: [
       {

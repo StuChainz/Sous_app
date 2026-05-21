@@ -173,6 +173,7 @@ function recordVoiceTestEventFromTrace(entry){
     'voice_feedback_played',
     'voice_feedback_blocked',
     'silent_mode_skipped_feedback',
+    'voice_decision',
     'fallback_timer_started',
     'fallback_timer_cancelled',
     'fallback_timer_ignored_stale_turn',
@@ -229,6 +230,9 @@ function voiceDebugTrace(event,data={}){
   updateVoiceDebugOverlaySoon();
   return entry;
 }
+function traceVoiceDecision(step,data={}){
+  return voiceDebugTrace('voice_decision',{step,...data});
+}
 function setVoicePromptOwner(type,data={}){
   voicePromptOwner={
     type,
@@ -282,6 +286,7 @@ function sousVoiceDebugExport(){
     note:'Local debug export only. Sous does not upload this automatically.',
     owner:voiceOwnerSnapshot(),
     trace:voiceDebugEvents.slice(),
+    decisionTrace:voiceDecisionTraceSummary(voiceDebugEvents,8),
     voiceState:sousVoiceStateSnapshot(),
     context:voiceDebugContextSnapshot(),
     pendingClarification:voiceDebugClarificationSnapshot(),
@@ -311,6 +316,7 @@ function copyTextToClipboard(text){
 window.sousVoiceDebug=()=>voiceDebugEvents.slice();
 window.clearSousVoiceDebug=()=>{voiceDebugEvents=[];voiceDebugSeq=0;try{localStorage.removeItem(VOICE_DEBUG_KEY);}catch(e){};return true;};
 window.__sousVoiceTrace=()=>voiceDebugEvents.slice();
+window.__sousVoiceDecisionTrace=()=>voiceDecisionTraceSummary(voiceDebugEvents,8);
 window.__sousPrintVoiceTrace=()=>{
   const trace=voiceDebugEvents.slice();
   console.table(trace.map(e=>({seq:e.seq,t:e.t,event:e.event,turnId:e.turnId,state:e.voiceState,source:e.source||'',route:e.route||'',text:e.transcript||e.prompt||e.key||e.reason||e.error||''})));
@@ -344,6 +350,97 @@ function latestVoiceDebugEntry(list,predicate){
     if(predicate(list[i])) return list[i];
   }
   return null;
+}
+function cleanVoiceDecisionText(value){
+  return String(value||'').replace(/\s+/g,' ').trim().toLowerCase();
+}
+function voiceDecisionEntryMatches(entry,accepted){
+  if(!entry||!accepted) return false;
+  if(entry.turnId&&accepted.turnId&&entry.turnId===accepted.turnId) return true;
+  const acceptedText=cleanVoiceDecisionText(accepted.transcript);
+  const originalText=cleanVoiceDecisionText(accepted.originalTranscript);
+  return [entry.transcript,entry.originalTranscript,entry.from,entry.to,entry.rawText]
+    .map(cleanVoiceDecisionText)
+    .some(text=>text&&(text===acceptedText||text===originalText));
+}
+function latestVoiceDecisionMatch(list,accepted,predicate){
+  for(let i=list.length-1;i>=0;i--){
+    const entry=list[i];
+    if(predicate(entry)&&voiceDecisionEntryMatches(entry,accepted)) return entry;
+  }
+  return null;
+}
+function latestVoiceDecisionBefore(list,index,accepted,predicate){
+  for(let i=index-1;i>=0;i--){
+    const entry=list[i];
+    if(entry?.event==='transcript_accepted') break;
+    if(predicate(entry)&&voiceDecisionEntryMatches(entry,accepted)) return entry;
+  }
+  return null;
+}
+function latestVoiceDecisionAfter(list,index,accepted,predicate){
+  let match=null;
+  for(let i=index+1;i<list.length;i++){
+    const entry=list[i];
+    if(entry?.event==='transcript_accepted') break;
+    if(predicate(entry)&&voiceDecisionEntryMatches(entry,accepted)) match=entry;
+  }
+  return match;
+}
+function voiceDecisionAroundTurn(list,index,accepted,predicate){
+  return latestVoiceDecisionAfter(list,index,accepted,predicate)||
+    latestVoiceDecisionBefore(list,index,accepted,predicate)||
+    latestVoiceDecisionMatch(list,accepted,predicate);
+}
+function voiceDecisionTraceSummary(list=voiceDebugEvents,limit=8){
+  const accepted=list.map((entry,index)=>({entry,index})).filter(item=>item.entry&&item.entry.event==='transcript_accepted');
+  return accepted.slice(-limit).map(({entry:acceptedEntry,index})=>{
+    const around=predicate=>voiceDecisionAroundTurn(list,index,acceptedEntry,predicate);
+    const candidates=around(entry=>entry.event==='transcript_candidates');
+    const speechAlternatives=around(entry=>entry.event==='speech_alternatives');
+    const localRepair=around(entry=>entry.event==='transcript_repaired');
+    const aiAccepted=around(entry=>entry.event==='ai_repair_accepted');
+    const aiRejected=around(entry=>entry.event==='ai_repair_rejected');
+    const aiTimeout=around(entry=>entry.event==='ai_repair_timeout');
+    const parser=around(entry=>entry.event==='parser_result');
+    const route=around(entry=>entry.event==='transcript_routed');
+    const outcome=around(entry=>entry.event==='outcome_decided');
+    const restart=around(entry=>entry.event==='session_restart_completed'||entry.event==='session_restart_requested');
+    const decision=around(entry=>entry.event==='voice_decision'&&entry.step==='transcript_choice');
+    let aiRepair='not requested';
+    if(aiAccepted) aiRepair='accepted: '+(aiAccepted.to||'candidate');
+    else if(aiTimeout) aiRepair='timeout';
+    else if(aiRejected) aiRepair='rejected: '+(aiRejected.reason||'candidate');
+    return {
+      turnId:acceptedEntry.turnId||null,
+      source:acceptedEntry.source||null,
+      heard:acceptedEntry.originalTranscript||acceptedEntry.transcript||null,
+      selected:acceptedEntry.transcript||null,
+      alternatives:(candidates?.alternatives||speechAlternatives?.alternatives||[]).slice(0,5),
+      localRepair:localRepair?{from:localRepair.from||null,to:localRepair.to||null,reason:localRepair.reasonAfter||localRepair.repair?.to||null}:null,
+      aiRepair,
+      parserReason:parser?.escalationReason||parser?.reason||null,
+      parserResults:Array.isArray(parser?.results)?parser.results.length:null,
+      route:route?.route||null,
+      outcome:outcome?.outcome||null,
+      restart:restart?{
+        phase:restart.phase||(/completed/.test(restart.event)?'completed':'requested'),
+        route:restart.route||null,
+        count:restart.restartCount??null
+      }:null,
+      scoreBefore:decision?.scoreBefore??localRepair?.scoreBefore??null,
+      scoreAfter:decision?.scoreAfter??localRepair?.scoreAfter??null
+    };
+  });
+}
+function summarizeVoiceDecision(decision){
+  if(!decision) return '—';
+  const heard=decision.heard&&decision.selected&&decision.heard!==decision.selected
+    ? decision.heard+' -> '+decision.selected
+    : (decision.selected||decision.heard||'—');
+  const parser=decision.parserReason?'parser '+decision.parserReason:null;
+  const outcome=decision.outcome||decision.route||null;
+  return shortVoiceDebugText([heard,parser,outcome].filter(Boolean).join(' | '));
 }
 function voiceLifecycleSnapshot(opts={}){
   const includeAlwaysOn=!!opts.includeAlwaysOn;
@@ -426,10 +523,12 @@ function voiceDebugOverlaySnapshot(){
     e.message
   ));
   const transitionEntry=latestVoiceDebugEntry(list,e=>e&&e.event==='state_transition');
+  const decision=voiceDecisionTraceSummary(list,1)[0]||null;
   const transcriptText=document.getElementById('transcript-text')?.textContent||'';
   return {
     ...voiceLifecycleSnapshot({includeAlwaysOn:true}),
     lastTranscript:shortVoiceDebugText(transcriptEntry?.transcript||transcriptEntry?.rawText||transcriptText.replace(/^"|"$/g,'')),
+    lastDecision:summarizeVoiceDecision(decision),
     lastAction:summarizeVoiceDebugAction(actionEntry),
     lastError:shortVoiceDebugText(errorEntry?.error||errorEntry?.message||errorEntry?.issue),
     lastReason:shortVoiceDebugText(transitionEntry?.reason)
@@ -488,6 +587,7 @@ function updateVoiceDebugOverlay(){
     ['recognizer',s.recognizerActive?'yes':'no'],
     ['session',s.sessionActive?'yes':'no'],
     ['transcript',s.lastTranscript],
+    ['decision',s.lastDecision],
     ['action',s.lastAction],
     ['error',s.lastError],
     ['restarts',s.restartCount],
@@ -662,6 +762,7 @@ function markVoiceOutcome(turnId,outcome,data={}){
   if(!turnId||voiceOutcomeTurns.has(turnId)) return false;
   voiceOutcomeTurns.add(turnId);
   voiceDebugTrace('outcome_decided',{turnId,outcome,...data});
+  traceVoiceDecision('outcome',{turnId,outcome,...data});
   return true;
 }
 function voiceRecoveryPrompt(issue){
@@ -926,6 +1027,7 @@ function scheduleVoiceSessionRestart(delay=VOICE_RESTART_DEFAULT_MS){
   logVoiceState('restart scheduled',{delay:safeDelay});
   voiceDebugTrace('session_restart',{phase:'requested',delay:safeDelay,turnId:activeVoiceTranscriptTurn||null});
   voiceDebugTrace('session_restart_requested',{delay:safeDelay,turnId:activeVoiceTranscriptTurn||null});
+  traceVoiceDecision('restart_requested',{delay:safeDelay,turnId:activeVoiceTranscriptTurn||null});
   if(!isSpeaking&&!processingTranscript) setVoiceSessionState('restarting','restart scheduled',{delay:safeDelay});
   voiceRestartTimer=setTimeout(()=>{
     voiceRestartTimer=null;
@@ -1254,6 +1356,8 @@ function voiceAIRepairRecentIngredients(){
 function voicePhraseRepairVariants(text,base={}){
   const clean=normalizeVoiceTranscriptText(text);
   const variants=[];
+  let cumulative=clean;
+  const applied=[];
   VOICE_PHRASE_REPAIRS.forEach(rule=>{
     const repaired=normalizeVoiceTranscriptText(clean.replace(rule.pattern,rule.to));
     if(!repaired||repaired===clean) return;
@@ -1263,7 +1367,20 @@ function voicePhraseRepairVariants(text,base={}){
       source:'phrase_repair',
       repair:{from:rule.label,to:rule.to}
     });
+    const cumulativeRepaired=normalizeVoiceTranscriptText(cumulative.replace(rule.pattern,rule.to));
+    if(cumulativeRepaired&&cumulativeRepaired!==cumulative){
+      cumulative=cumulativeRepaired;
+      applied.push(rule.label);
+    }
   });
+  if(applied.length>1&&cumulative&&cumulative!==clean){
+    variants.push({
+      text:cumulative,
+      confidence:base.confidence??null,
+      source:'phrase_repair',
+      repair:{from:applied.join(' + '),to:'combined'}
+    });
+  }
   return variants;
 }
 function voiceRepairVariants(text,base={}){
@@ -1307,11 +1424,24 @@ function chooseVoiceTranscript(transcript,{alternatives=[],confidence=null,sourc
     (originalScore.reason==='empty'&&best.score>0)||
     (originalScore.reason==='partial'&&best.reason==='none')
   );
+  const topCandidates=scored.slice(0,5).map(c=>({text:c.text,score:Math.round(c.score),reason:c.reason,source:c.source,repair:c.repair||null}));
   voiceDebugTrace('transcript_candidates',{
     source,
     transcript:original,
     alternatives:baseCandidates.map(c=>({text:c.text,confidence:c.confidence,source:c.source})).slice(0,8),
-    top:scored.slice(0,5).map(c=>({text:c.text,score:Math.round(c.score),reason:c.reason,source:c.source,repair:c.repair||null}))
+    top:topCandidates
+  });
+  traceVoiceDecision('transcript_choice',{
+    source,
+    transcript:original,
+    selected:shouldReplace?best.text:original,
+    changed:!!shouldReplace,
+    reasonBefore:originalScore.reason,
+    reasonAfter:shouldReplace?best.reason:originalScore.reason,
+    scoreBefore:Math.round(originalScore.score),
+    scoreAfter:Math.round(shouldReplace?best.score:originalScore.score),
+    alternatives:baseCandidates.map(c=>({text:c.text,confidence:c.confidence,source:c.source})).slice(0,5),
+    top:topCandidates
   });
   if(!shouldReplace) return {transcript:original,original,changed:false,score:originalScore.score,reason:originalScore.reason,alternatives:baseCandidates};
   voiceDebugTrace('transcript_repaired',{
@@ -1322,6 +1452,16 @@ function chooseVoiceTranscript(transcript,{alternatives=[],confidence=null,sourc
     scoreAfter:Math.round(best.score),
     reasonBefore:originalScore.reason,
     reasonAfter:best.reason,
+    repair:best.repair||null
+  });
+  traceVoiceDecision('local_repair',{
+    source,
+    from:original,
+    to:best.text,
+    reasonBefore:originalScore.reason,
+    reasonAfter:best.reason,
+    scoreBefore:Math.round(originalScore.score),
+    scoreAfter:Math.round(best.score),
     repair:best.repair||null
   });
   return {
@@ -1398,15 +1538,23 @@ async function chooseVoiceTranscriptWithAIRerank(transcript,opts={}){
     reason:selected.reason,
     score:Math.round(selected.score||0)
   });
+  traceVoiceDecision('ai_repair_requested',{
+    source:opts.source||'tap',
+    transcript:selected.transcript,
+    reason:selected.reason,
+    score:Math.round(selected.score||0)
+  });
   let result;
   try{
     result=await callAITranscriptRepair(payload);
   }catch(e){
     voiceDebugTrace('ai_repair_rejected',{transcript:selected.transcript,reason:'request_failed',error:e?.message||String(e)});
+    traceVoiceDecision('ai_repair_rejected',{transcript:selected.transcript,reason:'request_failed'});
     return selected;
   }
   if(result?.timedOut){
     voiceDebugTrace('ai_repair_timeout',{transcript:selected.transcript,timeoutMs:AI_TRANSCRIPT_REPAIR_TIMEOUT_MS});
+    traceVoiceDecision('ai_repair_timeout',{transcript:selected.transcript,timeoutMs:AI_TRANSCRIPT_REPAIR_TIMEOUT_MS});
     return selected;
   }
   const candidates=uniqVoiceCandidates((Array.isArray(result?.candidates)?result.candidates:[]).map(candidate=>({
@@ -1430,9 +1578,25 @@ async function chooseVoiceTranscriptWithAIRerank(transcript,opts={}){
         score:item.validation.parsed?Math.round(item.validation.parsed.score):null
       }))
     });
+    traceVoiceDecision('ai_repair_rejected',{
+      transcript:selected.transcript,
+      reason:'no_valid_candidate',
+      candidates:validations.map(item=>({
+        text:item.candidate.text,
+        reason:item.validation.reason,
+        score:item.validation.parsed?Math.round(item.validation.parsed.score):null
+      }))
+    });
     return selected;
   }
   voiceDebugTrace('ai_repair_accepted',{
+    from:selected.transcript,
+    to:accepted.validation.text,
+    scoreBefore:Math.round(accepted.validation.scoreBefore),
+    scoreAfter:Math.round(accepted.validation.scoreAfter),
+    reason:accepted.candidate.repair?.to||''
+  });
+  traceVoiceDecision('ai_repair_accepted',{
     from:selected.transcript,
     to:accepted.validation.text,
     scoreBefore:Math.round(accepted.validation.scoreBefore),
@@ -4755,17 +4919,38 @@ function forceRealtimeReviewResults(results){
 function routeRealtimeTranscriptToReview(transcript){
   const text=String(transcript||'').trim();
   if(!text) return false;
-  voiceDebugTrace('final_transcript',{source:'realtime',transcript:text,turnId:activeVoiceTranscriptTurn||voiceTranscriptTurn+1});
-  voiceDebugTrace('transcript_heard',{source:'realtime',transcript:text});
+  const turnId=beginVoiceTranscriptTurn(text);
+  const startedAt=Date.now();
+  voiceDebugTrace('final_transcript',{source:'realtime',transcript:text,turnId});
+  voiceDebugTrace('transcript_heard',{source:'realtime',transcript:text,turnId});
+  voiceDebugTrace('transcript_accepted',{source:'realtime',transcript:text,originalTranscript:text,confidence:null,corrected:false,turnId});
+  traceVoiceDecision('transcript_choice',{source:'realtime',transcript:text,selected:text,changed:false,turnId});
+  const finish=(outcome,extra={})=>{
+    markVoiceOutcome(turnId,outcome,{source:'realtime',transcript:text,...extra});
+    voiceDebugTrace('voice_timing',{
+      source:'realtime',
+      transcript:text,
+      processingMs:Math.max(0,Date.now()-startedAt),
+      totalMs:Math.max(0,Date.now()-startedAt),
+      turnId
+    });
+  };
   if(clarificationState?.active){
-    voiceDebugTrace('transcript_routed',{route:'clarification',source:'realtime',transcript:text});
+    voiceDebugTrace('transcript_routed',{route:'clarification',source:'realtime',transcript:text,turnId});
     handleClarification(text);
+    finish('clarification_answer');
     return true;
   }
   const results=typeof parseText==='function'?parseText(text):[];
-  voiceDebugTrace('parser_result',{source:'realtime',transcript:text,results:voiceDebugResultSummary(results),forcedReview:true});
+  const escalationReason=typeof aiEscalationReason==='function'?aiEscalationReason(text,results):(!results||!results.length?'empty':'none');
+  voiceDebugTrace('parser_result',{source:'realtime',transcript:text,escalationReason,results:voiceDebugResultSummary(results),forcedReview:true,turnId});
+  traceVoiceDecision('parser_escalation',{source:'realtime',transcript:text,reason:escalationReason,resultCount:Array.isArray(results)?results.length:0,turnId});
   const forced=forceRealtimeReviewResults(results);
+  voiceDebugTrace('transcript_routed',{route:'realtime_review',source:'realtime',transcript:text,turnId});
   handleParsed(forced,text);
+  const hasFood=Array.isArray(forced)&&forced.some(item=>item&&!item.command);
+  const hasCommand=Array.isArray(forced)&&forced.some(item=>item&&item.command);
+  finish(hasFood?'realtime_review':hasCommand?'realtime_command':'realtime_fallback',{route:'realtime_review'});
   return Array.isArray(forced)&&forced.some(item=>item&&!item.command);
 }
 function handleRealtimeActionText(text){
