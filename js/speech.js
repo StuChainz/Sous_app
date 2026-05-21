@@ -780,8 +780,12 @@ function canRestartVoiceListening(){
   if(reason){logRestartBlocked(reason);return false;}
   return true;
 }
+function cancelTapFinalizer(reason='tap finalizer cancelled'){
+  if(tapRec&&typeof tapRec.__sousCancelFinalizer==='function') tapRec.__sousCancelFinalizer(reason);
+}
 function requestTapStop(reason){
   if(!tapRec) return;
+  cancelTapFinalizer(reason||'tap stop requested');
   if(tapRecStopping) return;
   if(!isRecording&&!voiceCurrentlyListening&&!tapRecStarting) return;
   tapRecStopping=true;
@@ -969,6 +973,7 @@ function stopAllVoiceActivity(reason){
     voiceDebugTrace('session_stop',{reason});
   }
   nextVoiceSessionId(reason);
+  cancelTapFinalizer(reason||'stop all voice activity');
   clearVoiceTimers();
   voiceSessionActive=false;
   voiceTestSessionActive=false;
@@ -4116,6 +4121,7 @@ function saveMealToLog(saveAsUsual=false){
 // ═══════════════════════════════════════════
 function buildTapRec(){
   if(!SR) return null;
+  let tapOwner=null;
   let pendingTranscript="";
   let pendingAlternatives=[];
   let finalizeTimer=null;
@@ -4128,6 +4134,30 @@ function buildTapRec(){
   const EXTENDED_DELAY=1050;
   const MAX_UTTERANCE_MS=10000;
 
+  function currentTapOwner(){
+    return tapOwner||voiceOwnerSnapshot({source:'tap'});
+  }
+  function isCurrentTapOwner(owner=currentTapOwner()){
+    return isCurrentVoiceOwner(owner);
+  }
+  function traceStaleTapCallback(label,owner=currentTapOwner(),extra={}){
+    traceStaleVoiceCallback(label,owner,{source:'tap',...extra});
+  }
+  function clearPendingTapTranscript(){
+    pendingTranscript="";
+    pendingAlternatives=[];
+    pendingConfidence=null;
+    utteranceStartTime=null;
+  }
+  function clearTapFinalizeTimer(reason,opts={}){
+    if(finalizeTimer){
+      clearTimeout(finalizeTimer);
+      voiceDebugTrace('fallback_timer_cancelled',{route:'speech_finalize',transcript:opts.transcript??pendingTranscript,reason});
+    }
+    finalizeTimer=null;
+    if(opts.clearPending) clearPendingTapTranscript();
+  }
+
   function getAdaptiveDelay(text){
     const t=String(text||'').toLowerCase().replace(/\s+/g,' ').trim();
     if(!t) return BASE_DELAY;
@@ -4137,7 +4167,11 @@ function buildTapRec(){
     return BASE_DELAY;
   }
 
-  async function finalizeTranscript(){
+  async function finalizeTranscript(owner=currentTapOwner()){
+    if(!isCurrentTapOwner(owner)){
+      traceStaleTapCallback('tap_finalize',owner,{pendingTranscript:pendingTranscript.trim()||null});
+      return;
+    }
     if(!pendingTranscript) return;
 
     const transcript=pendingTranscript.trim();
@@ -4145,15 +4179,8 @@ function buildTapRec(){
     const alternatives=pendingAlternatives.slice(0,10);
     const firstHeardAt=utteranceStartTime;
 
-    pendingTranscript="";
-    pendingAlternatives=[];
-    pendingConfidence=null;
-    utteranceStartTime=null;
-    if(finalizeTimer){
-      clearTimeout(finalizeTimer);
-      voiceDebugTrace('fallback_timer_cancelled',{route:'speech_finalize',transcript,reason:'finalizing_transcript'});
-    }
-    finalizeTimer=null;
+    clearPendingTapTranscript();
+    clearTapFinalizeTimer('finalizing_transcript',{transcript});
 
     requestTapStop('finalizing transcript');
 
@@ -4211,8 +4238,15 @@ function buildTapRec(){
     });
     return uniqVoiceCandidates(merged).slice(0,10);
   }
-  r.onstart=()=>{tapRecStarting=false;tapRecStopping=false;isRecording=true;voiceCurrentlyListening=true;voiceListenStartedAt=Date.now();setVoiceSessionState('listening','recognition started');voiceDebugTrace('recognizer_start',{source:'tap',phase:'started'});voiceDebugTrace('session_restart',{phase:'completed',route:'tap_recognition',restartCount:voiceRestartCount,turnId:activeVoiceTranscriptTurn||null});voiceDebugTrace('session_restart_completed',{route:'tap_recognition',restartCount:voiceRestartCount,turnId:activeVoiceTranscriptTurn||null});console.log('[Sous Voice] listening');logVoiceState('recognition actually started');setMicState('recording');startVoiceListeningWatchdog('tap');};
+  r.__sousSetOwner=owner=>{tapOwner=owner||null;};
+  r.__sousCancelFinalizer=reason=>clearTapFinalizeTimer(reason||'tap finalizer cancelled',{clearPending:true});
+  r.onstart=()=>{const owner=currentTapOwner();if(!isCurrentTapOwner(owner)){traceStaleTapCallback('tap_onstart',owner);return;}tapRecStarting=false;tapRecStopping=false;isRecording=true;voiceCurrentlyListening=true;voiceListenStartedAt=Date.now();setVoiceSessionState('listening','recognition started');voiceDebugTrace('recognizer_start',{source:'tap',phase:'started'});voiceDebugTrace('session_restart',{phase:'completed',route:'tap_recognition',restartCount:voiceRestartCount,turnId:activeVoiceTranscriptTurn||null});voiceDebugTrace('session_restart_completed',{route:'tap_recognition',restartCount:voiceRestartCount,turnId:activeVoiceTranscriptTurn||null});console.log('[Sous Voice] listening');logVoiceState('recognition actually started');setMicState('recording');startVoiceListeningWatchdog('tap');};
   r.onresult=e=>{
+    const owner=currentTapOwner();
+    if(!isCurrentTapOwner(owner)){
+      traceStaleTapCallback('tap_onresult',owner);
+      return;
+    }
     startVoiceListeningWatchdog('tap');
     let interim='',final='',finalConf=null;
     const finalAltGroups=[];
@@ -4245,20 +4279,25 @@ function buildTapRec(){
         alternatives:pendingAlternatives.map(a=>({text:a.text,confidence:a.confidence,source:a.source})).slice(0,8)
       });
 
-      if(finalizeTimer) clearTimeout(finalizeTimer);
-      if(finalizeTimer) voiceDebugTrace('fallback_timer_cancelled',{route:'speech_finalize',transcript:pendingTranscript,reason:'new_final_segment'});
+      clearTapFinalizeTimer('new_final_segment');
 
       const delay=getAdaptiveDelay(pendingTranscript);
 
       voiceDebugTrace('fallback_timer_started',{route:'speech_finalize',transcript:pendingTranscript,delay});
-      finalizeTimer=setTimeout(finalizeTranscript,delay);
+      const finalizeOwner={...owner};
+      finalizeTimer=setTimeout(()=>finalizeTranscript(finalizeOwner),delay);
 
       if(Date.now()-utteranceStartTime>MAX_UTTERANCE_MS){
-        finalizeTranscript();
+        finalizeTranscript(finalizeOwner);
       }
     }
   };
   r.onerror=e=>{
+    const owner=currentTapOwner();
+    if(!isCurrentTapOwner(owner)){
+      traceStaleTapCallback('tap_onerror',owner,{error:e?.error||'unknown',pendingTranscript:pendingTranscript.trim()||null});
+      return;
+    }
     clearVoiceListeningWatchdog();
     const err=e.error||'unknown';
     logVoiceState('recognition error',{error:err});
@@ -4267,36 +4306,20 @@ function buildTapRec(){
     if(err==='no-speech') voiceDebugTrace('no_speech',{source:'tap',pendingTranscript:pendingTranscript.trim()||null,turnId:activeVoiceTranscriptTurn||null});
     if(err==='no-speech'&&pendingTranscript.trim()){
       voiceDebugTrace('voice_recovery',{issue:'no_speech_after_transcript',transcript:pendingTranscript.trim()});
-      finalizeTranscript();
+      finalizeTranscript(owner);
       return;
     }
     if(err==='no-speech'&&(processingTranscript||voiceSessionState==='processing'||(lastAcceptedTranscriptAt&&Date.now()-lastAcceptedTranscriptAt<10000))){
       voiceDebugTrace('voice_recovery',{issue:'stale_no_speech_ignored',transcript:lastAcceptedTranscript||null,turnId:activeVoiceTranscriptTurn||null});
       voiceDebugTrace('fallback_timer_ignored_stale_turn',{route:'speech_error',issue:'stale_no_speech_ignored',transcript:lastAcceptedTranscript||null,turnId:activeVoiceTranscriptTurn||null});
-      if(finalizeTimer){
-        clearTimeout(finalizeTimer);
-        voiceDebugTrace('fallback_timer_cancelled',{route:'speech_finalize',transcript:pendingTranscript,reason:'stale_no_speech_ignored'});
-      }
-      finalizeTimer=null;
-      pendingTranscript="";
-      pendingAlternatives=[];
-      pendingConfidence=null;
-      utteranceStartTime=null;
+      clearTapFinalizeTimer('stale_no_speech_ignored',{clearPending:true});
       tapRecStarting=false;
       tapRecStopping=false;
       stopTapRec();
       if(voiceSessionActive&&!processingTranscript&&!isSpeaking) scheduleVoiceSessionRestart(VOICE_RESTART_DEFAULT_MS);
       return;
     }
-    if(finalizeTimer){
-      clearTimeout(finalizeTimer);
-      voiceDebugTrace('fallback_timer_cancelled',{route:'speech_finalize',transcript:pendingTranscript,reason:'recognition_error_'+err});
-    }
-    finalizeTimer=null;
-    pendingTranscript="";
-    pendingAlternatives=[];
-    pendingConfidence=null;
-    utteranceStartTime=null;
+    clearTapFinalizeTimer('recognition_error_'+err,{clearPending:true});
     tapRecStarting=false;
     tapRecStopping=false;
     stopTapRec();
@@ -4321,6 +4344,11 @@ function buildTapRec(){
     }
   };
   r.onend=()=>{
+    const owner=currentTapOwner();
+    if(!isCurrentTapOwner(owner)){
+      traceStaleTapCallback('tap_onend',owner,{hadFinalizeTimer:!!finalizeTimer});
+      return;
+    }
     clearVoiceListeningWatchdog();
     const wasListening=voiceSessionState==='listening';
     tapRecStarting=false;
@@ -4337,6 +4365,7 @@ function buildTapRec(){
 }
 function stopTapRec(){
   clearVoiceListeningWatchdog();
+  cancelTapFinalizer('tap recognition stopped');
   if(isRecording||voiceCurrentlyListening) console.log('[Sous Voice] tap listen stop');
   isRecording=false;
   voiceCurrentlyListening=false;
@@ -4734,6 +4763,8 @@ function startTapRec(opts={}){
   const inp=document.getElementById('text-input'); if(inp) inp.value='';
   console.log('[Sous Voice] tap listen start');
   nextVoiceRecognizerRunId('tap','recognition start requested');
+  const owner=voiceOwnerSnapshot({source:'tap'});
+  if(tapRec&&typeof tapRec.__sousSetOwner==='function') tapRec.__sousSetOwner(owner);
   voiceDebugTrace('recognizer_start',{source:'tap',phase:'requested',sessionRestart:!!opts.sessionRestart});
   setVoiceSessionState('restarting','recognition start requested',{source:'tap'});
   tapRecStarting=true;
@@ -4748,7 +4779,9 @@ function startTapRec(opts={}){
       if(voiceSessionActive) scheduleVoiceSessionRestart(VOICE_RESTART_DEFAULT_MS);
       return;
     }
+    cancelTapFinalizer('recognizer replacement');
     tapRec=buildTapRec();
+    if(tapRec&&typeof tapRec.__sousSetOwner==='function') tapRec.__sousSetOwner(owner);
     tapRecStarting=true;
     try{tapRec.start();}
     catch(e2){
