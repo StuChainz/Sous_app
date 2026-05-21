@@ -128,17 +128,17 @@ function cloneAIContextIngredient(item,index,prefix){
   };
 }
 
-function isoDateOffset(days){
+function aiLocalDateOffset(days){
   const d=new Date();
   d.setDate(d.getDate()+days);
-  return d.toISOString().slice(0,10);
+  return localDateKey(d);
 }
 
 function buildAIActionContext({section=null}={}){
   const context={
     currentSection:section||null,
-    today:isoDateOffset(0),
-    yesterday:isoDateOffset(-1),
+    today:aiLocalDateOffset(0),
+    yesterday:aiLocalDateOffset(-1),
     currentMeal:[],
     historyMeals:[],
     usualMeals:[],

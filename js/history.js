@@ -12,7 +12,7 @@ function histNav(dir){
 
 function histDateStr(offset){
   const d=new Date(); d.setDate(d.getDate()+offset);
-  return d.toISOString().slice(0,10);
+  return localDateKey(d);
 }
 
 function renderHistoryDay(){
@@ -190,7 +190,7 @@ function renderCharts(){
 
   for(let i=chartRange-1;i>=0;i--){
     const d=new Date(); d.setDate(d.getDate()-i);
-    const ds=d.toISOString().slice(0,10);
+    const ds=localDateKey(d);
     calVals.push(log[ds]?Math.round(log[ds].totals.kcal):null);
     protVals.push(log[ds]?Math.round(log[ds].totals.protein):null);
     wtVals.push(wtMap[ds]||null);

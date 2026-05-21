@@ -10,7 +10,7 @@ const saveLog=l=>localStorage.setItem(KEYS.log,JSON.stringify(l));
 const saveWeights=w=>localStorage.setItem(KEYS.weights,JSON.stringify(w));
 const saveProfile=p=>localStorage.setItem(KEYS.profile,JSON.stringify(p));
 const saveRecipes=r=>localStorage.setItem(KEYS.recipes,JSON.stringify(r));
-const todayStr=()=>new Date().toISOString().slice(0,10);
+const todayStr=()=>typeof window.localDateKey==='function'?window.localDateKey():new Date().toISOString().slice(0,10);
 function normaliseUserCountry(countryCode){return String(countryCode||'GLOBAL').toUpperCase().trim()||'GLOBAL';}
 function getUserCountry(){try{return normaliseUserCountry(localStorage.getItem(KEYS.userCountry)||'GLOBAL');}catch(e){return'GLOBAL';}}
 function setUserCountry(countryCode){

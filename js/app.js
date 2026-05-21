@@ -334,7 +334,7 @@ function cloneMealIngredientForAIAction(item,index=0){
 function localDateOffset(days){
   const d=new Date();
   d.setDate(d.getDate()+days);
-  return d.toISOString().slice(0,10);
+  return localDateKey(d);
 }
 
 function aiHistoryMealFromRef(ref){
@@ -1144,7 +1144,7 @@ function updateClock(){
 // DATE SELECTION
 // ═══════════════════════════════════════════
 function localDateStr(d=new Date()){
-  return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+  return localDateKey(d);
 }
 function formatDisplayDate(dateStr){
   const months=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
