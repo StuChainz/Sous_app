@@ -4,9 +4,10 @@
 let meal=[], itemQueue=[], pendingFood=null, currentAmbig=null;
 let tapRec=null, alwaysOnRec=null, clarificationRec=null, isRecording=false, alwaysOnActive=false, isSpeaking=false;
 let voiceSessionActive=false, voiceCurrentlyListening=false, processingTranscript=false, voiceSessionStoppedManually=false, voiceSessionUseRealtime=false, voiceTestSessionActive=false;
-let voiceRestartTimer=null, voiceProcessingTimer=null, voiceSpeakingTimer=null, voiceListeningWatchdogTimer=null, voiceNoSpeechRetries=0;
+let voiceRestartTimer=null, voiceProcessingTimer=null, voiceSpeakingTimer=null, voiceListeningWatchdogTimer=null, voiceRecognizerStartTimer=null, voiceNoSpeechRetries=0;
 let voiceSessionState='idle', tapRecStarting=false, tapRecStopping=false, sousRealtimeStarting=false, voicePausedForVisibility=false, voiceMicWarmupActive=false;
 let voiceRestartCount=0, voiceSuccessCueCount=0, voiceFlowCueCooldownUntil=0, voiceDebugOverlayEl=null, voiceDebugOverlayTimer=null, voiceDebugOverlayDismissed=false, voiceDebugOverlayUpdateQueued=false;
+let voiceTapHardResetCount=0;
 let voiceListenStartedAt=0;
 let voiceTestEvents=[];
 let voiceTranscriptTurn=0, activeVoiceTranscriptTurn=0, lastAcceptedTranscript='', lastAcceptedTranscriptAt=0;
@@ -35,6 +36,7 @@ const VOICE_TTS_START_TIMEOUT_MS=2500;
 const VOICE_PROCESSING_TIMEOUT_MS=10000;
 const VOICE_SPEAKING_TIMEOUT_MS=14000;
 const VOICE_MIC_WARMUP_TIMEOUT_MS=1800;
+const VOICE_RECOGNIZER_START_TIMEOUT_MS=3500;
 const VOICE_FLOW_CUE_MIN_SUCCESSES=3;
 const VOICE_FLOW_CUE_COOLDOWN_MS=18000;
 const VOICE_FLOW_CUE_CHANCE=0.55;
@@ -356,6 +358,7 @@ function voiceLifecycleSnapshot(opts={}){
     isRecording:!!isRecording,
     tapRecStarting:!!tapRecStarting,
     tapRecStopping:!!tapRecStopping,
+    tapHardResetCount:voiceTapHardResetCount,
     processing:!!processingTranscript,
     speaking:!!isSpeaking,
     restartCount:voiceRestartCount
@@ -596,11 +599,18 @@ function clearVoiceListeningWatchdog(){
     voiceListeningWatchdogTimer=null;
   }
 }
+function clearVoiceRecognizerStartTimer(){
+  if(voiceRecognizerStartTimer){
+    clearTimeout(voiceRecognizerStartTimer);
+    voiceRecognizerStartTimer=null;
+  }
+}
 function clearVoiceTimers(){
   clearVoiceRestartTimer();
   clearVoiceProcessingTimer();
   clearVoiceSpeakingTimer();
   clearVoiceListeningWatchdog();
+  clearVoiceRecognizerStartTimer();
 }
 function isVoiceSilentMode(){
   try{return typeof localStorage!=='undefined'&&localStorage.getItem('sous_voice_feedback')==='0';}
@@ -623,6 +633,9 @@ function startVoiceListeningWatchdog(source='tap'){
     if(source==='realtime'||(sousRealtime&&sousRealtime.active)){
       voiceSessionUseRealtime=false;
       stopSousRealtimeVoice(false);
+    } else if(source==='tap'&&!tapRecognizerHasHeardSpeech()){
+      recoverTapRecognizerStack('listening_stalled_no_audio',voiceOwnerSnapshot({source:'tap'}),{warmup:true,trace:false});
+      return;
     } else {
       requestTapStop('listening stalled');
       stopTapRec();
@@ -783,8 +796,57 @@ function canRestartVoiceListening(){
 function cancelTapFinalizer(reason='tap finalizer cancelled'){
   if(tapRec&&typeof tapRec.__sousCancelFinalizer==='function') tapRec.__sousCancelFinalizer(reason);
 }
+function tapRecognizerHasHeardSpeech(){
+  return !!(tapRec&&typeof tapRec.__sousHasHeardSpeech==='function'&&tapRec.__sousHasHeardSpeech());
+}
+function hardResetTapRecognizer(reason='tap recognizer hard reset',owner=null){
+  const rec=tapRec;
+  voiceTapHardResetCount++;
+  clearVoiceRecognizerStartTimer();
+  clearVoiceListeningWatchdog();
+  cancelTapFinalizer(reason);
+  if(rec&&typeof rec.__sousSetOwner==='function'){
+    rec.__sousSetOwner({...(owner||voiceOwnerSnapshot({source:'tap'})),recognizerRunId:-1,hardReset:true});
+  }
+  tapRec=null;
+  tapRecStarting=false;
+  tapRecStopping=false;
+  voiceCurrentlyListening=false;
+  isRecording=false;
+  try{rec&&rec.abort&&rec.abort();}catch(e){
+    try{rec&&rec.stop&&rec.stop();}catch(e2){}
+  }
+  if(voiceSessionState==='listening'||voiceSessionState==='restarting') setVoiceSessionState(voiceSessionActive?'restarting':'idle',reason);
+  if(!isSpeaking&&!processingTranscript) setMicState(alwaysOnActive&&cookingModeEnabled()?'listening':'idle');
+  voiceDebugTrace('tap_recognizer_hard_reset',{reason,count:voiceTapHardResetCount,owner:owner||null});
+}
+function recoverTapRecognizerStack(reason='tap recognizer recovery',owner=null,opts={}){
+  if(opts.trace!==false){
+    voiceDebugTrace('voice_recovery',{issue:reason,source:'tap',hardReset:true});
+    voiceDebugTrace('voice_error',{source:'tap',error:reason});
+  }
+  hardResetTapRecognizer(reason,owner);
+  if(!voiceSessionActive||processingTranscript||isSpeaking||voiceSessionStoppedManually) return;
+  const restart=()=>{if(voiceSessionActive&&!processingTranscript&&!isSpeaking&&!voiceSessionStoppedManually) scheduleVoiceSessionRestart(opts.delay||VOICE_RESTART_DEFAULT_MS);};
+  if(opts.warmup){
+    warmUpVoiceInput().then(restart).catch(restart);
+  } else restart();
+}
+function startTapRecognizerStartWatchdog(owner){
+  clearVoiceRecognizerStartTimer();
+  voiceRecognizerStartTimer=setTimeout(()=>{
+    voiceRecognizerStartTimer=null;
+    if(!isCurrentVoiceOwner(owner)){
+      traceStaleVoiceCallback('tap_start_watchdog',owner,{source:'tap'});
+      return;
+    }
+    if(!tapRecStarting||voiceCurrentlyListening||isRecording||voiceSessionState==='listening') return;
+    recoverTapRecognizerStack('recognition_start_stalled',owner,{warmup:true,delay:VOICE_RESTART_DEFAULT_MS});
+  },VOICE_RECOGNIZER_START_TIMEOUT_MS);
+}
 function requestTapStop(reason){
   if(!tapRec) return;
+  clearVoiceRecognizerStartTimer();
   cancelTapFinalizer(reason||'tap stop requested');
   if(tapRecStopping) return;
   if(!isRecording&&!voiceCurrentlyListening&&!tapRecStarting) return;
@@ -799,6 +861,7 @@ function requestTapStop(reason){
 }
 function stopRecognitionForState(reason){
   clearVoiceListeningWatchdog();
+  clearVoiceRecognizerStartTimer();
   requestTapStop(reason);
   if(sousRealtime&&sousRealtime.active) stopSousRealtimeVoice(false);
   if(clarificationRec){
@@ -993,6 +1056,7 @@ function stopAllVoiceActivity(reason){
   try{if(tapRec)tapRec.stop();}catch(e){}
   try{if(clarificationRec)clarificationRec.stop();}catch(e){}
   try{if(alwaysOnRec)alwaysOnRec.stop();}catch(e){}
+  tapRec=null;
   clarificationRec=null;
   isRecording=false;
   isSpeaking=false;
@@ -4240,7 +4304,8 @@ function buildTapRec(){
   }
   r.__sousSetOwner=owner=>{tapOwner=owner||null;};
   r.__sousCancelFinalizer=reason=>clearTapFinalizeTimer(reason||'tap finalizer cancelled',{clearPending:true});
-  r.onstart=()=>{const owner=currentTapOwner();if(!isCurrentTapOwner(owner)){traceStaleTapCallback('tap_onstart',owner);return;}tapRecStarting=false;tapRecStopping=false;isRecording=true;voiceCurrentlyListening=true;voiceListenStartedAt=Date.now();setVoiceSessionState('listening','recognition started');voiceDebugTrace('recognizer_start',{source:'tap',phase:'started'});voiceDebugTrace('session_restart',{phase:'completed',route:'tap_recognition',restartCount:voiceRestartCount,turnId:activeVoiceTranscriptTurn||null});voiceDebugTrace('session_restart_completed',{route:'tap_recognition',restartCount:voiceRestartCount,turnId:activeVoiceTranscriptTurn||null});console.log('[Sous Voice] listening');logVoiceState('recognition actually started');setMicState('recording');startVoiceListeningWatchdog('tap');};
+  r.__sousHasHeardSpeech=()=>!!(pendingTranscript.trim()||lastInterimTrace);
+  r.onstart=()=>{const owner=currentTapOwner();if(!isCurrentTapOwner(owner)){traceStaleTapCallback('tap_onstart',owner);return;}clearVoiceRecognizerStartTimer();tapRecStarting=false;tapRecStopping=false;isRecording=true;voiceCurrentlyListening=true;voiceListenStartedAt=Date.now();setVoiceSessionState('listening','recognition started');voiceDebugTrace('recognizer_start',{source:'tap',phase:'started'});voiceDebugTrace('session_restart',{phase:'completed',route:'tap_recognition',restartCount:voiceRestartCount,turnId:activeVoiceTranscriptTurn||null});voiceDebugTrace('session_restart_completed',{route:'tap_recognition',restartCount:voiceRestartCount,turnId:activeVoiceTranscriptTurn||null});console.log('[Sous Voice] listening');logVoiceState('recognition actually started');setMicState('recording');startVoiceListeningWatchdog('tap');};
   r.onresult=e=>{
     const owner=currentTapOwner();
     if(!isCurrentTapOwner(owner)){
@@ -4300,6 +4365,7 @@ function buildTapRec(){
       traceStaleTapCallback('tap_onerror',owner,{error:e?.error||'unknown',pendingTranscript:pendingTranscript.trim()||null});
       return;
     }
+    clearVoiceRecognizerStartTimer();
     clearVoiceListeningWatchdog();
     const err=e.error||'unknown';
     logVoiceState('recognition error',{error:err});
@@ -4351,6 +4417,7 @@ function buildTapRec(){
       traceStaleTapCallback('tap_onend',owner,{hadFinalizeTimer:!!finalizeTimer});
       return;
     }
+    clearVoiceRecognizerStartTimer();
     clearVoiceListeningWatchdog();
     const wasListening=voiceSessionState==='listening';
     tapRecStarting=false;
@@ -4367,6 +4434,7 @@ function buildTapRec(){
 }
 function stopTapRec(){
   clearVoiceListeningWatchdog();
+  clearVoiceRecognizerStartTimer();
   cancelTapFinalizer('tap recognition stopped');
   if(isRecording||voiceCurrentlyListening) console.log('[Sous Voice] tap listen stop');
   isRecording=false;
@@ -4770,23 +4838,26 @@ function startTapRec(opts={}){
   voiceDebugTrace('recognizer_start',{source:'tap',phase:'requested',sessionRestart:!!opts.sessionRestart});
   setVoiceSessionState('restarting','recognition start requested',{source:'tap'});
   tapRecStarting=true;
+  startTapRecognizerStartWatchdog(owner);
   try{tapRec.start();}
   catch(e){
+    clearVoiceRecognizerStartTimer();
     tapRecStarting=false;
     logVoiceState('recognition error',{error:e.name||e.message||'start failed'});
     voiceDebugTrace('recognizer_error',{source:'tap_start',error:e.name||e.message||'start failed'});
     voiceDebugTrace('voice_error',{source:'tap_start',error:e.name||e.message||'start failed'});
     if(e.name==='InvalidStateError'){
-      setVoiceSessionState('error','recognition start overlap',{error:e.name});
-      if(voiceSessionActive) scheduleVoiceSessionRestart(VOICE_RESTART_DEFAULT_MS);
+      recoverTapRecognizerStack('recognition_start_overlap',owner,{delay:VOICE_RESTART_DEFAULT_MS});
       return;
     }
     cancelTapFinalizer('recognizer replacement');
     tapRec=buildTapRec();
     if(tapRec&&typeof tapRec.__sousSetOwner==='function') tapRec.__sousSetOwner(owner);
     tapRecStarting=true;
+    startTapRecognizerStartWatchdog(owner);
     try{tapRec.start();}
     catch(e2){
+      clearVoiceRecognizerStartTimer();
       tapRecStarting=false;
       setVoiceSessionState('error','recognition start failed',{error:e2.name||e2.message||'restart failed'});
       voiceDebugTrace('recognizer_error',{source:'tap_start',error:e2.name||e2.message||'restart failed'});

@@ -1068,6 +1068,112 @@ test('C simulated SpeechRecognition interim then final transcript follows turn i
   expect(result.visibleText.toLowerCase()).not.toContain('"oa"\ndidn\'t catch');
 });
 
+test('tap recognizer start stall hard resets and accepts the next run', async ({ page }) => {
+  await page.route('**/favicon.ico', route => route.fulfill({ status: 204, body: '' }));
+  await page.addInitScript(() => {
+    localStorage.clear();
+    localStorage.setItem('userPlan', 'free');
+    localStorage.setItem('sous_onboarding_seen', '1');
+    localStorage.setItem('sous_voice_feedback', '0');
+    localStorage.setItem('sous_voice_test_harness', '1');
+    navigator.mediaDevices = {
+      getUserMedia: async () => ({
+        getTracks: () => [{ stop() {} }]
+      })
+    };
+    class MockAudio {
+      constructor() {
+        this.onended = null;
+        this.onplaying = null;
+        this.onerror = null;
+        this.src = '';
+      }
+      play() {
+        setTimeout(() => {
+          if (this.onplaying) this.onplaying();
+          if (this.onended) this.onended();
+        }, 0);
+        return Promise.resolve();
+      }
+      pause() {}
+    }
+    window.Audio = MockAudio;
+    window.SpeechSynthesisUtterance = function SpeechSynthesisUtterance(text) {
+      this.text = text;
+    };
+    window.speechSynthesis = {
+      speaking: false,
+      cancel() {},
+      getVoices() { return []; },
+      speak(utterance) {
+        this.speaking = true;
+        setTimeout(() => {
+          if (utterance.onstart) utterance.onstart();
+          this.speaking = false;
+          if (utterance.onend) utterance.onend();
+        }, 0);
+      }
+    };
+    class MockSpeechRecognition {
+      constructor() {
+        this.onstart = null;
+        this.onend = null;
+        this.onerror = null;
+        this.onresult = null;
+        window.__mockRecognizers = window.__mockRecognizers || [];
+        this.index = window.__mockRecognizers.length;
+        window.__mockRecognizers.push(this);
+      }
+      start() {
+        if (this.index === 0) return;
+        setTimeout(() => this.onstart && this.onstart(), 0);
+      }
+      stop() {
+        setTimeout(() => this.onend && this.onend(), 0);
+      }
+      abort() {
+        this.stop();
+      }
+    }
+    window.SpeechRecognition = MockSpeechRecognition;
+    window.webkitSpeechRecognition = MockSpeechRecognition;
+  });
+
+  await page.goto('/?sousVoiceTest=1');
+  await page.waitForFunction(() => typeof window.__sousStartVoiceTestSession === 'function');
+  await page.evaluate(() => {
+    switchTab('log', { fresh: true, silent: true, section: 'breakfast' });
+    beginVoiceSession();
+  });
+
+  await page.waitForFunction(() => (window.__mockRecognizers || []).length >= 1);
+  await expect.poll(
+    () => page.evaluate(() => (window.__mockRecognizers || []).length),
+    { timeout: 7000, intervals: [100, 250, 500] }
+  ).toBeGreaterThanOrEqual(2);
+  await expect.poll(
+    () => page.evaluate(() => window.__sousVoiceState().state),
+    { timeout: 3000, intervals: [50, 100, 200] }
+  ).toBe('listening');
+
+  await page.evaluate(() => {
+    const rec = window.__mockRecognizers[window.__mockRecognizers.length - 1];
+    const final = [{ transcript: 'oats', confidence: 0.96 }];
+    final.isFinal = true;
+    rec.onresult({ resultIndex: 0, results: [final] });
+  });
+  await waitUntilNotProcessing(page);
+
+  await expect.poll(
+    () => page.evaluate(() => window.__sousLastVoiceEvents().some(event => event.type === 'transcript_accepted' && event.transcript === 'oats')),
+    { timeout: 3000, intervals: [50, 100, 200] }
+  ).toBe(true);
+  const state = await page.evaluate(() => window.__sousVoiceState());
+  const trace = await page.evaluate(() => window.sousVoiceDebug());
+  expect(state.tapHardResetCount).toBeGreaterThanOrEqual(1);
+  expect(trace.some(event => event.event === 'tap_recognizer_hard_reset' && event.reason === 'recognition_start_stalled')).toBe(true);
+});
+
 test('AI memory intent guardrails require confidence and local refs', async ({ page }) => {
   await page.route('**/favicon.ico', route => route.fulfill({ status: 204, body: '' }));
   await page.addInitScript(() => {
