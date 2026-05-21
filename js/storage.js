@@ -60,21 +60,50 @@ window.getLastMealBySection=getLastMealBySection;
 // ═══════════════════════════════════════════
 function getUsualMeals(){try{return JSON.parse(localStorage.getItem(KEYS.usualMeals)||'{}');}catch(e){return{};}}
 function saveUsualMeals(u){localStorage.setItem(KEYS.usualMeals,JSON.stringify(u));}
+function usualFingerprintText(value){return String(value||'').toLowerCase().replace(/\s+/g,' ').trim();}
+function usualFingerprintNumber(value){
+  const n=Number(value);
+  return Number.isFinite(n)?Math.round(n*100)/100:'';
+}
+function usualIngredientFingerprint(item={}){
+  const serving=item.serving||{};
+  const raw=item.rawFood||{};
+  return [
+    usualFingerprintText(item.name),
+    usualFingerprintText(item.source||raw.source||raw.id||''),
+    'w:'+usualFingerprintNumber(item.weight),
+    'sq:'+usualFingerprintNumber(serving.quantity),
+    'sl:'+usualFingerprintText(serving.label||serving.unit||item.unit),
+    'sg:'+usualFingerprintNumber(serving.grams),
+    'k:'+usualFingerprintNumber(item.kcal),
+    'p:'+usualFingerprintNumber(item.protein),
+    'c:'+usualFingerprintNumber(item.carbs),
+    'f:'+usualFingerprintNumber(item.fat),
+    'fi:'+usualFingerprintNumber(item.fibre)
+  ].join('~');
+}
+function usualMealFingerprint(mealObj={}){
+  return (mealObj.ingredients||[])
+    .map(usualIngredientFingerprint)
+    .sort()
+    .join('|');
+}
 function updateUsualMeals(mealObj,typedName=''){
   if(!mealObj.ingredients||!mealObj.ingredients.length) return;
   const section=mealObj.section||'snacks';
   const usual=getUsualMeals();
   if(!usual[section]) usual[section]=[];
-  const fp=mealObj.ingredients.map(i=>i.name.toLowerCase().trim()).sort().join('|');
+  const fp=usualMealFingerprint(mealObj);
   const now=Date.now();
-  const existing=usual[section].find(u=>u.ingredients.map(i=>i.name.toLowerCase().trim()).sort().join('|')===fp);
+  const existing=usual[section].find(u=>(u.fingerprint||usualMealFingerprint(u))===fp);
   if(existing){
     existing.useCount=(existing.useCount||1)+1;
     existing.lastUsed=now;
     if(typedName) existing.name=typedName;
     existing.ingredients=mealObj.ingredients;
+    existing.fingerprint=fp;
   } else {
-    usual[section].push({id:'usual_'+now+'_'+Math.random().toString(36).slice(2,7),section,name:mealObj.name,ingredients:mealObj.ingredients,useCount:1,lastUsed:now});
+    usual[section].push({id:'usual_'+now+'_'+Math.random().toString(36).slice(2,7),section,name:mealObj.name,ingredients:mealObj.ingredients,fingerprint:fp,useCount:1,lastUsed:now});
   }
   const recencyBoost=ts=>{const d=(Date.now()-ts)/86400000;return d<2?5:d<7?2:0;};
   usual[section].sort((a,b)=>(b.useCount+recencyBoost(b.lastUsed))-(a.useCount+recencyBoost(a.lastUsed)));
@@ -100,6 +129,7 @@ function removeUsualMeal(section,idx){
 window.getUsualMeals=getUsualMeals;
 window.getUsualMealsForSection=getUsualMealsForSection;
 window.updateUsualMeals=updateUsualMeals;
+window.usualMealFingerprint=usualMealFingerprint;
 window.renameUsualMeal=renameUsualMeal;
 window.removeUsualMeal=removeUsualMeal;
 
