@@ -7,7 +7,7 @@ let voiceSessionActive=false, voiceCurrentlyListening=false, processingTranscrip
 let voiceRestartTimer=null, voiceProcessingTimer=null, voiceSpeakingTimer=null, voiceListeningWatchdogTimer=null, voiceRecognizerStartTimer=null, voiceNoSpeechRetries=0;
 let voiceSessionState='idle', tapRecStarting=false, tapRecStopping=false, sousRealtimeStarting=false, voicePausedForVisibility=false, voiceMicWarmupActive=false;
 let voiceRestartCount=0, voiceSuccessCueCount=0, voiceFlowCueCooldownUntil=0, voiceDebugOverlayEl=null, voiceDebugOverlayTimer=null, voiceDebugOverlayDismissed=false, voiceDebugOverlayUpdateQueued=false;
-let voiceTapHardResetCount=0;
+let voiceTapHardResetCount=0, voiceRecoveryCueCooldownUntil=0;
 let voiceListenStartedAt=0;
 let voiceTestEvents=[];
 let voiceTranscriptTurn=0, activeVoiceTranscriptTurn=0, lastAcceptedTranscript='', lastAcceptedTranscriptAt=0;
@@ -38,6 +38,7 @@ const VOICE_PROCESSING_TIMEOUT_MS=10000;
 const VOICE_SPEAKING_TIMEOUT_MS=14000;
 const VOICE_MIC_WARMUP_TIMEOUT_MS=1800;
 const VOICE_RECOGNIZER_START_TIMEOUT_MS=3500;
+const VOICE_RECOVERY_CUE_COOLDOWN_MS=8000;
 const VOICE_FLOW_CUE_MIN_SUCCESSES=3;
 const VOICE_FLOW_CUE_COOLDOWN_MS=18000;
 const VOICE_FLOW_CUE_CHANCE=0.55;
@@ -1105,6 +1106,7 @@ async function beginVoiceSession(){
   voiceRestartCount=0;
   voiceSuccessCueCount=0;
   voiceFlowCueCooldownUntil=0;
+  voiceRecoveryCueCooldownUntil=0;
   voiceOutcomeTurns=new Set();
   voiceSessionActive=true;
   nextVoiceSessionId('session started');
@@ -1148,6 +1150,7 @@ function stopAllVoiceActivity(reason){
   processingTranscript=false;
   voiceSessionUseRealtime=false;
   voiceNoSpeechRetries=0;
+  voiceRecoveryCueCooldownUntil=0;
   voiceMicWarmupActive=false;
   tapRecStarting=false;
   tapRecStopping=false;
@@ -1754,6 +1757,7 @@ function exposeSousVoiceTestHarness(){
     voiceRestartCount=0;
     voiceSuccessCueCount=0;
     voiceFlowCueCooldownUntil=0;
+    voiceRecoveryCueCooldownUntil=0;
     voiceOutcomeTurns=new Set();
     voiceSessionActive=true;
     nextVoiceSessionId('test session started');
@@ -4553,6 +4557,7 @@ function buildTapRec(){
   let utteranceStartTime=null;
   let pendingConfidence=null;
   let lastInterimTrace='';
+  let tapRunState=null;
 
   const BASE_DELAY=380;
   const QUANTITY_TAIL_DELAY=650;
@@ -4568,11 +4573,137 @@ function buildTapRec(){
   function traceStaleTapCallback(label,owner=currentTapOwner(),extra={}){
     traceStaleVoiceCallback(label,owner,{source:'tap',...extra});
   }
+  function createTapRunState(owner=currentTapOwner()){
+    return {
+      id:owner?.recognizerRunId??voiceRecognizerRunId,
+      owner:owner?{...owner}:voiceOwnerSnapshot({source:'tap'}),
+      startedAt:Date.now(),
+      hadSound:false,
+      hadSpeech:false,
+      hadInterim:false,
+      hadFinal:false,
+      hadNomatch:false,
+      error:null,
+      recoveryReason:null,
+      restartIntent:null,
+      cueIntent:'none'
+    };
+  }
+  function currentTapRunState(){
+    if(!tapRunState) tapRunState=createTapRunState();
+    return tapRunState;
+  }
+  function isCurrentTapRun(run=currentTapRunState()){
+    return !!run&&run.id===voiceRecognizerRunId&&isCurrentVoiceOwner(run.owner||{});
+  }
+  function tapRunTraceData(run=currentTapRunState()){
+    return {
+      runId:run?.id??null,
+      error:run?.error||null,
+      hadSound:!!run?.hadSound,
+      hadSpeech:!!run?.hadSpeech,
+      hadInterim:!!run?.hadInterim,
+      hadFinal:!!run?.hadFinal,
+      hadNomatch:!!run?.hadNomatch,
+      restartIntent:run?.restartIntent||null,
+      cueIntent:run?.cueIntent||'none',
+      reason:run?.recoveryReason||null
+    };
+  }
+  function traceStaleTapRun(label,run=currentTapRunState(),extra={}){
+    traceStaleVoiceCallback(label,run?.owner||currentTapOwner(),{source:'tap',runId:run?.id??null,...extra});
+  }
+  function traceTapRunActivity(phase,updates={}){
+    const run=currentTapRunState();
+    if(!isCurrentTapRun(run)){
+      traceStaleTapRun('tap_'+phase,run);
+      return;
+    }
+    Object.assign(run,updates);
+    voiceDebugTrace('recognizer_audio',{source:'tap',phase,...tapRunTraceData(run)});
+  }
+  function classifyTapNoSpeechRecovery(run=currentTapRunState()){
+    const hasPendingFinal=!!pendingTranscript.trim()||!!run.hadFinal;
+    const staleAfterAccepted=!!(processingTranscript||voiceSessionState==='processing'||(lastAcceptedTranscriptAt&&Date.now()-lastAcceptedTranscriptAt<10000));
+    const strongNomatch=!!(run.hadNomatch&&(run.hadSpeech||run.hadInterim));
+    run.error='no-speech';
+    if(hasPendingFinal){
+      run.restartIntent='normal';
+      run.cueIntent='none';
+      run.recoveryReason='trailing_no_speech_ignored';
+      return run;
+    }
+    if(staleAfterAccepted){
+      run.restartIntent='quiet';
+      run.cueIntent='none';
+      run.recoveryReason='stale_no_speech_ignored';
+      return run;
+    }
+    if(run.hadInterim||run.hadSpeech||strongNomatch){
+      run.restartIntent='normal';
+      run.cueIntent='speech_without_transcript';
+      run.recoveryReason=run.hadInterim?'interim_without_final':'speech_without_transcript';
+      return run;
+    }
+    run.restartIntent='quiet';
+    run.cueIntent='none';
+    run.recoveryReason=run.hadNomatch?'nomatch_only':(run.hadSound?'sound_without_speech':'pure_silence');
+    return run;
+  }
+  function classifyTapRecognitionError(err,run=currentTapRunState()){
+    run.error=err||'unknown';
+    if(run.error==='no-speech') return classifyTapNoSpeechRecovery(run);
+    if(run.error==='aborted'){
+      const intentional=!!(tapRecStopping||voiceSessionStoppedManually||!voiceSessionActive||voicePausedForVisibility);
+      run.restartIntent=intentional?null:'quiet';
+      run.cueIntent='none';
+      run.recoveryReason=intentional?'aborted_intentional':'aborted_unexpected';
+      return run;
+    }
+    run.restartIntent='hard-stop';
+    run.cueIntent='none';
+    run.recoveryReason=run.error;
+    return run;
+  }
+  function traceTapRecognitionRecovery(run=currentTapRunState()){
+    voiceDebugTrace('recognition_recovery',{source:'tap',...tapRunTraceData(run)});
+    if(run.error==='no-speech'){
+      voiceDebugTrace('no_speech',{source:'tap',pendingTranscript:pendingTranscript.trim()||null,turnId:activeVoiceTranscriptTurn||null,...tapRunTraceData(run)});
+      if(run.recoveryReason==='trailing_no_speech_ignored'){
+        voiceDebugTrace('fallback_timer_ignored_stale_turn',{route:'speech_error',issue:run.recoveryReason,transcript:pendingTranscript.trim()||lastAcceptedTranscript||null,turnId:activeVoiceTranscriptTurn||null});
+      }
+    }
+  }
+  function playTapRecoveryCueThenRestart(run=currentTapRunState()){
+    if(run.cueIntent!=='speech_without_transcript') return false;
+    const now=Date.now();
+    if(now<voiceRecoveryCueCooldownUntil){
+      voiceDebugTrace('recognition_recovery_cue_suppressed',{source:'tap',cooldownUntil:voiceRecoveryCueCooldownUntil,...tapRunTraceData(run)});
+      return false;
+    }
+    voiceRecoveryCueCooldownUntil=now+VOICE_RECOVERY_CUE_COOLDOWN_MS;
+    const prompt="Didn't catch that";
+    const el=document.getElementById('transcript-text');
+    if(el) el.textContent=prompt;
+    showToast(prompt);
+    voiceDebugTrace('ui_updated',{screen:document.querySelector('.log-screen.active')?.id||null,reason:'recognition_recovery',prompt,...tapRunTraceData(run)});
+    voiceDebugTrace('voice_recovery',{issue:run.recoveryReason||run.cueIntent,...tapRunTraceData(run)});
+    speakRecoveryCue(()=>scheduleVoiceSessionRestart(300),{force:true});
+    return true;
+  }
+  function maybeRestartAfterTapRun(run=currentTapRunState(),wasListening=false,hadFinalizeTimer=false){
+    if(hadFinalizeTimer) return;
+    if(!voiceSessionActive||processingTranscript||isSpeaking||voiceSessionStoppedManually) return;
+    if(run.restartIntent==='hard-stop'||run.restartIntent==null) return;
+    if(playTapRecoveryCueThenRestart(run)) return;
+    scheduleVoiceSessionRestart(VOICE_RESTART_DEFAULT_MS);
+  }
   function clearPendingTapTranscript(){
     pendingTranscript="";
     pendingAlternatives=[];
     pendingConfidence=null;
     utteranceStartTime=null;
+    lastInterimTrace='';
   }
   function clearTapFinalizeTimer(reason,opts={}){
     if(finalizeTimer){
@@ -4663,14 +4794,24 @@ function buildTapRec(){
     });
     return uniqVoiceCandidates(merged).slice(0,10);
   }
-  r.__sousSetOwner=owner=>{tapOwner=owner||null;};
+  r.__sousSetOwner=owner=>{
+    tapOwner=owner||null;
+    tapRunState=createTapRunState(tapOwner);
+    clearPendingTapTranscript();
+  };
   r.__sousCancelFinalizer=reason=>clearTapFinalizeTimer(reason||'tap finalizer cancelled',{clearPending:true});
-  r.__sousHasHeardSpeech=()=>!!(pendingTranscript.trim()||lastInterimTrace);
-  r.onstart=()=>{const owner=currentTapOwner();if(!isCurrentTapOwner(owner)){traceStaleTapCallback('tap_onstart',owner);return;}clearVoiceRecognizerStartTimer();tapRecStarting=false;tapRecStopping=false;isRecording=true;voiceCurrentlyListening=true;voiceListenStartedAt=Date.now();setVoiceSessionState('listening','recognition started');voiceDebugTrace('recognizer_start',{source:'tap',phase:'started'});voiceDebugTrace('session_restart',{phase:'completed',route:'tap_recognition',restartCount:voiceRestartCount,turnId:activeVoiceTranscriptTurn||null});voiceDebugTrace('session_restart_completed',{route:'tap_recognition',restartCount:voiceRestartCount,turnId:activeVoiceTranscriptTurn||null});console.log('[Sous Voice] listening');logVoiceState('recognition actually started');setMicState('recording');startVoiceListeningWatchdog('tap');};
+  r.__sousHasHeardSpeech=()=>!!(pendingTranscript.trim()||lastInterimTrace||tapRunState?.hadSound||tapRunState?.hadSpeech||tapRunState?.hadInterim||tapRunState?.hadFinal);
+  r.onstart=()=>{const run=currentTapRunState();if(!isCurrentTapRun(run)){traceStaleTapRun('tap_onstart',run);return;}run.startedAt=Date.now();clearVoiceRecognizerStartTimer();tapRecStarting=false;tapRecStopping=false;isRecording=true;voiceCurrentlyListening=true;voiceListenStartedAt=Date.now();setVoiceSessionState('listening','recognition started');voiceDebugTrace('recognizer_start',{source:'tap',phase:'started',runId:run.id});voiceDebugTrace('session_restart',{phase:'completed',route:'tap_recognition',restartCount:voiceRestartCount,turnId:activeVoiceTranscriptTurn||null});voiceDebugTrace('session_restart_completed',{route:'tap_recognition',restartCount:voiceRestartCount,turnId:activeVoiceTranscriptTurn||null});console.log('[Sous Voice] listening');logVoiceState('recognition actually started');setMicState('recording');startVoiceListeningWatchdog('tap');};
+  r.onsoundstart=()=>traceTapRunActivity('soundstart',{hadSound:true});
+  r.onspeechstart=()=>traceTapRunActivity('speechstart',{hadSound:true,hadSpeech:true});
+  r.onspeechend=()=>traceTapRunActivity('speechend',{hadSpeech:true});
+  r.onsoundend=()=>traceTapRunActivity('soundend');
+  r.onnomatch=()=>traceTapRunActivity('nomatch',{hadNomatch:true});
   r.onresult=e=>{
-    const owner=currentTapOwner();
-    if(!isCurrentTapOwner(owner)){
-      traceStaleTapCallback('tap_onresult',owner);
+    const run=currentTapRunState();
+    const owner=run.owner||currentTapOwner();
+    if(!isCurrentTapRun(run)){
+      traceStaleTapRun('tap_onresult',run);
       return;
     }
     startVoiceListeningWatchdog('tap');
@@ -4684,6 +4825,7 @@ function buildTapRec(){
         if(finalConf===null)finalConf=res[0].confidence;
       }else interim+=res[0].transcript;
     }
+    if(interim) run.hadInterim=true;
     const el=document.getElementById('transcript-text');
     const heard=[pendingTranscript,final,interim].filter(Boolean).join(' ').replace(/\s+/g,' ').trim();
     if(el) el.textContent=heard?'"'+heard+'"':'—';
@@ -4692,6 +4834,7 @@ function buildTapRec(){
       voiceDebugTrace('interim_transcript',{source:'tap',transcript:heard,turnId:activeVoiceTranscriptTurn||voiceTranscriptTurn+1});
     }
     if(final){
+      run.hadFinal=true;
       if(!pendingTranscript) utteranceStartTime=Date.now();
       const previousTranscript=pendingTranscript;
       const newAlternatives=combineSpeechAlternativeGroups(finalAltGroups);
@@ -4721,33 +4864,20 @@ function buildTapRec(){
     }
   };
   r.onerror=e=>{
-    const owner=currentTapOwner();
-    if(!isCurrentTapOwner(owner)){
-      traceStaleTapCallback('tap_onerror',owner,{error:e?.error||'unknown',pendingTranscript:pendingTranscript.trim()||null});
+    const run=currentTapRunState();
+    if(!isCurrentTapRun(run)){
+      traceStaleTapRun('tap_onerror',run,{error:e?.error||'unknown',pendingTranscript:pendingTranscript.trim()||null});
       return;
     }
     clearVoiceRecognizerStartTimer();
     clearVoiceListeningWatchdog();
     const err=e.error||'unknown';
     logVoiceState('recognition error',{error:err});
-    voiceDebugTrace('recognizer_error',{source:'tap',error:err});
-    voiceDebugTrace('voice_error',{source:'tap',error:err});
-    if(err==='no-speech') voiceDebugTrace('no_speech',{source:'tap',pendingTranscript:pendingTranscript.trim()||null,turnId:activeVoiceTranscriptTurn||null});
-    if(err==='no-speech'&&pendingTranscript.trim()){
-      voiceDebugTrace('voice_recovery',{issue:'no_speech_after_transcript',transcript:pendingTranscript.trim()});
-      finalizeTranscript(owner);
-      return;
-    }
-    if(err==='no-speech'&&(processingTranscript||voiceSessionState==='processing'||(lastAcceptedTranscriptAt&&Date.now()-lastAcceptedTranscriptAt<10000))){
-      voiceDebugTrace('voice_recovery',{issue:'stale_no_speech_ignored',transcript:lastAcceptedTranscript||null,turnId:activeVoiceTranscriptTurn||null});
-      voiceDebugTrace('fallback_timer_ignored_stale_turn',{route:'speech_error',issue:'stale_no_speech_ignored',transcript:lastAcceptedTranscript||null,turnId:activeVoiceTranscriptTurn||null});
-      clearTapFinalizeTimer('stale_no_speech_ignored',{clearPending:true});
-      tapRecStarting=false;
-      tapRecStopping=false;
-      stopTapRec();
-      if(voiceSessionActive&&!processingTranscript&&!isSpeaking) scheduleVoiceSessionRestart(VOICE_RESTART_DEFAULT_MS);
-      return;
-    }
+    classifyTapRecognitionError(err,run);
+    voiceDebugTrace('recognizer_error',{source:'tap',error:err,...tapRunTraceData(run)});
+    voiceDebugTrace('voice_error',{source:'tap',error:err,...tapRunTraceData(run)});
+    traceTapRecognitionRecovery(run);
+    if(err==='no-speech'||err==='aborted') return;
     clearTapFinalizeTimer('recognition_error_'+err,{clearPending:true});
     tapRecStarting=false;
     tapRecStopping=false;
@@ -4756,39 +4886,40 @@ function buildTapRec(){
       document.getElementById('perm-warn').style.display='block';
       speakCachedResponse('realtime_error');
       endVoiceSession();
-    } else if(err==='no-speech'&&voiceSessionActive){
-      if(voiceNoSpeechRetries>=2){showVoiceRetry("Didn't catch that — try again");endVoiceSession();return;}
-      voiceNoSpeechRetries++;
-      resetVoiceRecovery();
-      voiceDebugTrace('voice_recovery',{issue:'no_speech',attempt:voiceNoSpeechRetries});
-      showToast("Didn't catch that");
-      speakRecoveryCue(()=>scheduleVoiceSessionRestart(300),{force:true});
-    } else if(err==='no-speech') showVoiceRetry("Didn't catch that — try again");
-    else if(err==='network'||err==='service-not-allowed'){
+    } else if(err==='network'||err==='service-not-allowed'){
       showVoiceRetry("Voice service is unavailable — try again");
       endVoiceSession();
-    } else if(err!=='aborted'){
+    } else {
       showVoiceRetry("Couldn't understand that");
       endVoiceSession();
     }
   };
   r.onend=()=>{
-    const owner=currentTapOwner();
-    if(!isCurrentTapOwner(owner)){
-      traceStaleTapCallback('tap_onend',owner,{hadFinalizeTimer:!!finalizeTimer});
+    const run=currentTapRunState();
+    if(!isCurrentTapRun(run)){
+      traceStaleTapRun('tap_onend',run,{hadFinalizeTimer:!!finalizeTimer});
       return;
     }
     clearVoiceRecognizerStartTimer();
     clearVoiceListeningWatchdog();
     const wasListening=voiceSessionState==='listening';
+    const hadFinalizeTimer=!!finalizeTimer;
     tapRecStarting=false;
     tapRecStopping=false;
     logVoiceState('recognition ended');
-    voiceDebugTrace('recognizer_end',{source:'tap',wasListening,hadFinalizeTimer:!!finalizeTimer});
-    if(!finalizeTimer) stopTapRec();
+    voiceDebugTrace('recognizer_end',{source:'tap',wasListening,hadFinalizeTimer,...tapRunTraceData(run)});
+    if(!hadFinalizeTimer) stopTapRec();
+    if(hadFinalizeTimer) return;
+    if(run.error){
+      maybeRestartAfterTapRun(run,wasListening,hadFinalizeTimer);
+      return;
+    }
     if(wasListening&&voiceSessionActive&&!processingTranscript&&!isSpeaking&&!voiceSessionStoppedManually){
-      voiceDebugTrace('voice_recovery',{issue:'unexpected_end'});
-      scheduleVoiceSessionRestart(VOICE_RESTART_DEFAULT_MS);
+      run.restartIntent='normal';
+      run.cueIntent='none';
+      run.recoveryReason='unexpected_end';
+      voiceDebugTrace('voice_recovery',{issue:'unexpected_end',...tapRunTraceData(run)});
+      maybeRestartAfterTapRun(run,wasListening,hadFinalizeTimer);
     }
   };
   return r;

@@ -777,6 +777,171 @@ async function assertNoProcessingConflict(page) {
   }
 }
 
+async function assertVoiceLoopSane(page) {
+  await assertNoProcessingConflict(page);
+  const state = await page.evaluate(() => window.__sousVoiceState());
+  expect(['listening', 'restarting', 'speaking'].includes(state.state), `voice state: ${JSON.stringify(state)}`).toBe(true);
+  const activeMockRecognizers = await page.evaluate(() => window.__mockVoiceStats?.active || 0);
+  expect(activeMockRecognizers).toBeLessThanOrEqual(1);
+}
+
+async function waitForVoiceLoopToRecover(page) {
+  await expect.poll(
+    () => page.evaluate(() => {
+      const state = window.__sousVoiceState();
+      return !state.processing && ['listening', 'restarting'].includes(state.state);
+    }),
+    { timeout: 5000, intervals: [50, 100, 200, 350] }
+  ).toBe(true);
+  await expect.poll(
+    () => page.evaluate(() => window.__mockVoiceStats?.active || 0),
+    { timeout: 3000, intervals: [50, 100, 200] }
+  ).toBeLessThanOrEqual(1);
+  await assertVoiceLoopSane(page);
+}
+
+async function setupMockVoiceLifecyclePage(page, { silentMode = true } = {}) {
+  await page.route('**/favicon.ico', route => route.fulfill({ status: 204, body: '' }));
+  await page.addInitScript(({ silentMode }) => {
+    localStorage.clear();
+    localStorage.setItem('userPlan', 'free');
+    localStorage.setItem('sous_onboarding_seen', '1');
+    localStorage.setItem('sous_voice_feedback', silentMode ? '0' : '1');
+    localStorage.setItem('sous_voice_test_harness', '1');
+    navigator.mediaDevices = {
+      getUserMedia: async () => ({
+        getTracks: () => [{ stop() {} }]
+      })
+    };
+    window.__mockVoiceStats = { active: 0, starts: 0, ends: 0, stops: 0, aborts: 0, audioPlays: 0, tts: 0 };
+    class MockAudio {
+      constructor() {
+        this.onended = null;
+        this.onplaying = null;
+        this.onerror = null;
+        this.src = '';
+      }
+      play() {
+        window.__mockVoiceStats.audioPlays += 1;
+        setTimeout(() => {
+          if (this.onplaying) this.onplaying();
+          if (this.onended) this.onended();
+        }, 0);
+        return Promise.resolve();
+      }
+      pause() {}
+    }
+    window.Audio = MockAudio;
+    window.SpeechSynthesisUtterance = function SpeechSynthesisUtterance(text) {
+      this.text = text;
+    };
+    window.speechSynthesis = {
+      speaking: false,
+      cancel() {},
+      getVoices() { return []; },
+      speak(utterance) {
+        window.__mockVoiceStats.tts += 1;
+        this.speaking = true;
+        setTimeout(() => {
+          if (utterance.onstart) utterance.onstart();
+          this.speaking = false;
+          if (utterance.onend) utterance.onend();
+        }, 0);
+      }
+    };
+    class MockSpeechRecognition {
+      constructor() {
+        this.onstart = null;
+        this.onend = null;
+        this.onerror = null;
+        this.onresult = null;
+        this.onsoundstart = null;
+        this.onspeechstart = null;
+        this.onspeechend = null;
+        this.onsoundend = null;
+        this.onnomatch = null;
+        this._active = false;
+        this._ended = false;
+        window.__mockRecognizers = window.__mockRecognizers || [];
+        window.__mockRecognizers.push(this);
+      }
+      start() {
+        if (this._active) throw new DOMException('Recognition already started', 'InvalidStateError');
+        this._active = true;
+        this._ended = false;
+        window.__mockVoiceStats.active += 1;
+        window.__mockVoiceStats.starts += 1;
+        setTimeout(() => this.onstart && this.onstart(), 0);
+      }
+      __finish() {
+        if (this._ended) return;
+        this._ended = true;
+        if (this._active) {
+          this._active = false;
+          window.__mockVoiceStats.active = Math.max(0, window.__mockVoiceStats.active - 1);
+        }
+        window.__mockVoiceStats.ends += 1;
+        setTimeout(() => this.onend && this.onend(), 0);
+      }
+      stop() {
+        window.__mockVoiceStats.stops += 1;
+        this.__finish();
+      }
+      abort() {
+        window.__mockVoiceStats.aborts += 1;
+        this.__finish();
+      }
+    }
+    window.SpeechRecognition = MockSpeechRecognition;
+    window.webkitSpeechRecognition = MockSpeechRecognition;
+  }, { silentMode });
+
+  await page.goto('/?sousVoiceTest=1');
+  await page.waitForFunction(() => typeof window.__sousStartVoiceTestSession === 'function');
+  await page.evaluate(() => {
+    switchTab('log', { fresh: true, silent: true, section: 'breakfast' });
+    beginVoiceSession();
+  });
+  await page.waitForFunction(() => (window.__mockRecognizers || []).length > 0);
+  await expect.poll(
+    () => page.evaluate(() => window.__sousVoiceState().state),
+    { timeout: 5000, intervals: [50, 100, 200] }
+  ).toBe('listening');
+  return page.evaluate(() => window.sousVoiceDebug().length);
+}
+
+async function emitMockRecognitionMiss(page, phases = []) {
+  await page.evaluate(phases => {
+    const rec = window.__mockRecognizers[window.__mockRecognizers.length - 1];
+    for (const phase of phases) {
+      if (phase === 'soundstart' && rec.onsoundstart) rec.onsoundstart();
+      if (phase === 'speechstart' && rec.onspeechstart) rec.onspeechstart();
+      if (phase === 'speechend' && rec.onspeechend) rec.onspeechend();
+      if (phase === 'soundend' && rec.onsoundend) rec.onsoundend();
+      if (phase === 'nomatch' && rec.onnomatch) rec.onnomatch();
+      if (phase === 'interim' && rec.onresult) {
+        const interim = [{ transcript: 'oa', confidence: 0.35 }];
+        interim.isFinal = false;
+        rec.onresult({ resultIndex: 0, results: [interim] });
+      }
+    }
+    rec.onerror && rec.onerror({ error: 'no-speech' });
+    rec.__finish();
+  }, phases);
+}
+
+async function emitMockFinalThenNoSpeech(page, transcript) {
+  await page.evaluate(transcript => {
+    const rec = window.__mockRecognizers[window.__mockRecognizers.length - 1];
+    const primary = { transcript, confidence: 0.96 };
+    const result = [primary];
+    result.isFinal = true;
+    rec.onresult({ resultIndex: 0, results: [result] });
+    rec.onerror && rec.onerror({ error: 'no-speech' });
+    rec.__finish();
+  }, transcript);
+}
+
 async function applyInteractions(page, interactions) {
   for (let i = 0; i < 4; i++) {
     const state = await page.evaluate(() => window.__sousVoiceState());
@@ -1172,6 +1337,109 @@ test('tap recognizer start stall hard resets and accepts the next run', async ({
   const trace = await page.evaluate(() => window.sousVoiceDebug());
   expect(state.tapHardResetCount).toBeGreaterThanOrEqual(1);
   expect(trace.some(event => event.event === 'tap_recognizer_hard_reset' && event.reason === 'recognition_start_stalled')).toBe(true);
+});
+
+test('pure silence no-speech quietly keeps tap voice session alive', async ({ page }) => {
+  const offset = await setupMockVoiceLifecyclePage(page, { silentMode: true });
+
+  for (let i = 0; i < 3; i++) {
+    await emitMockRecognitionMiss(page);
+    await waitForVoiceLoopToRecover(page);
+    await expect.poll(
+      () => page.evaluate(() => window.__sousVoiceState().state),
+      { timeout: 5000, intervals: [50, 100, 200] }
+    ).toBe('listening');
+  }
+
+  const result = await snapshot(page);
+  const trace = await page.evaluate(offset => window.sousVoiceDebug().slice(offset), offset);
+  expect(result.state.sessionActive).toBe(true);
+  expect(result.visibleText.toLowerCase()).not.toContain("didn't catch");
+  expect(trace.filter(event => event.event === 'recognition_recovery' && event.reason === 'pure_silence').length).toBeGreaterThanOrEqual(3);
+  expect(trace.some(event => event.event === 'voice_feedback_requested' && event.key === 'recovery')).toBe(false);
+  await assertVoiceLoopSane(page);
+});
+
+test('speech without transcript cues once and restarts from recognizer end', async ({ page }) => {
+  const offset = await setupMockVoiceLifecyclePage(page, { silentMode: false });
+
+  await emitMockRecognitionMiss(page, ['soundstart', 'speechstart', 'speechend', 'soundend']);
+  await waitForVoiceLoopToRecover(page);
+  await expect.poll(
+    () => page.evaluate(() => window.__sousVoiceState().state),
+    { timeout: 5000, intervals: [50, 100, 200] }
+  ).toBe('listening');
+
+  const state = await page.evaluate(() => window.__sousVoiceState());
+  const trace = await page.evaluate(offset => window.sousVoiceDebug().slice(offset), offset);
+  expect(state.sessionActive).toBe(true);
+  expect(state.restartCount).toBe(1);
+  expect(trace.some(event => event.event === 'recognition_recovery' && event.reason === 'speech_without_transcript')).toBe(true);
+  expect(trace.some(event => event.event === 'voice_feedback_requested' && event.key === 'recovery')).toBe(true);
+  const recoveryIndex = trace.findIndex(event => event.event === 'recognition_recovery' && event.reason === 'speech_without_transcript');
+  const endIndex = trace.findIndex(event => event.event === 'recognizer_end');
+  const restartIndex = trace.findIndex(event => event.event === 'session_restart_requested');
+  expect(recoveryIndex).toBeGreaterThanOrEqual(0);
+  expect(endIndex).toBeGreaterThan(recoveryIndex);
+  expect(restartIndex).toBeGreaterThan(endIndex);
+  await assertVoiceLoopSane(page);
+});
+
+test('speech-without-transcript recovery cue is throttled', async ({ page }) => {
+  const offset = await setupMockVoiceLifecyclePage(page, { silentMode: false });
+
+  for (let i = 0; i < 3; i++) {
+    await emitMockRecognitionMiss(page, ['speechstart', 'speechend']);
+    await waitForVoiceLoopToRecover(page);
+    await expect.poll(
+      () => page.evaluate(() => window.__sousVoiceState().state),
+      { timeout: 5000, intervals: [50, 100, 200] }
+    ).toBe('listening');
+  }
+
+  const trace = await page.evaluate(offset => window.sousVoiceDebug().slice(offset), offset);
+  const recoveryRequests = trace.filter(event => event.event === 'voice_feedback_requested' && event.key === 'recovery');
+  expect(recoveryRequests.length).toBeLessThanOrEqual(1);
+  expect(trace.filter(event => event.event === 'recognition_recovery_cue_suppressed').length).toBeGreaterThanOrEqual(1);
+  expect(trace.filter(event => event.event === 'recognition_recovery' && event.reason === 'speech_without_transcript').length).toBeGreaterThanOrEqual(3);
+  await assertVoiceLoopSane(page);
+});
+
+test('silent mode speech-without-transcript traces recovery without audio', async ({ page }) => {
+  const offset = await setupMockVoiceLifecyclePage(page, { silentMode: true });
+
+  await emitMockRecognitionMiss(page, ['speechstart', 'speechend']);
+  await waitForVoiceLoopToRecover(page);
+
+  const trace = await page.evaluate(offset => window.sousVoiceDebug().slice(offset), offset);
+  const stats = await page.evaluate(() => window.__mockVoiceStats);
+  expect(trace.some(event => event.event === 'recognition_recovery' && event.reason === 'speech_without_transcript')).toBe(true);
+  expect(trace.some(event => event.event === 'silent_mode_skipped_feedback' && event.key === 'recovery')).toBe(true);
+  expect(trace.some(event => event.event === 'voice_feedback_requested' && event.key === 'recovery')).toBe(false);
+  expect(stats.audioPlays).toBe(0);
+  expect(stats.tts).toBe(0);
+  await assertVoiceLoopSane(page);
+});
+
+test('final transcript followed by no-speech logs once and avoids fallback', async ({ page }) => {
+  const offset = await setupMockVoiceLifecyclePage(page, { silentMode: true });
+
+  await emitMockFinalThenNoSpeech(page, 'oats 100 grams');
+  await waitUntilNotProcessing(page);
+  await expect.poll(
+    () => page.evaluate(() => window.__sousVoiceState().meal.filter(item => /oats/i.test(item.name || '')).length),
+    { timeout: 5000, intervals: [50, 100, 200] }
+  ).toBe(1);
+  await waitForVoiceLoopToRecover(page);
+
+  const result = await snapshot(page);
+  const trace = await page.evaluate(offset => window.sousVoiceDebug().slice(offset), offset);
+  expect(result.state.meal.filter(item => /oats/i.test(item.name || '')).length).toBe(1);
+  expect(result.visibleText.toLowerCase()).not.toContain("didn't catch");
+  expect(trace.some(event => event.event === 'recognition_recovery' && event.reason === 'trailing_no_speech_ignored')).toBe(true);
+  expect(trace.some(event => event.event === 'ui_updated' && event.reason === 'recognition_recovery')).toBe(false);
+  expect(trace.some(event => event.event === 'voice_recovery' && event.reason === 'trailing_no_speech_ignored')).toBe(false);
+  await assertVoiceLoopSane(page);
 });
 
 test('quantity success feedback owns restart when iOS audio fallback is blocked', async ({ page }) => {
