@@ -5,6 +5,7 @@ const APP_SHELL_ASSETS = [
   './index.html',
   './css/styles.css',
   './js/theme.js',
+  './js/utils/safety.js',
   './js/storage.js',
   './js/core/totals.js',
   './js/food-data.js',
