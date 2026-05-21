@@ -1174,6 +1174,114 @@ test('tap recognizer start stall hard resets and accepts the next run', async ({
   expect(trace.some(event => event.event === 'tap_recognizer_hard_reset' && event.reason === 'recognition_start_stalled')).toBe(true);
 });
 
+test('quantity success feedback owns restart when iOS audio fallback is blocked', async ({ page }) => {
+  await page.route('**/favicon.ico', route => route.fulfill({ status: 204, body: '' }));
+  await page.addInitScript(() => {
+    localStorage.clear();
+    localStorage.setItem('userPlan', 'free');
+    localStorage.setItem('sous_onboarding_seen', '1');
+    localStorage.setItem('sous_voice_feedback', '0');
+    localStorage.setItem('sous_voice_test_harness', '1');
+    navigator.mediaDevices = {
+      getUserMedia: async () => ({
+        getTracks: () => [{ stop() {} }]
+      })
+    };
+    class MockAudio {
+      constructor() {
+        this.onended = null;
+        this.onplaying = null;
+        this.onerror = null;
+        this.src = '';
+      }
+      play() {
+        return Promise.reject(new Error('blocked'));
+      }
+      pause() {}
+    }
+    window.Audio = MockAudio;
+    window.SpeechSynthesisUtterance = function SpeechSynthesisUtterance(text) {
+      this.text = text;
+    };
+    window.speechSynthesis = {
+      speaking: false,
+      cancel() {},
+      getVoices() { return []; },
+      speak() {}
+    };
+    class MockSpeechRecognition {
+      constructor() {
+        this.onstart = null;
+        this.onend = null;
+        this.onerror = null;
+        this.onresult = null;
+        window.__mockRecognizers = window.__mockRecognizers || [];
+        window.__mockRecognizers.push(this);
+      }
+      start() {
+        setTimeout(() => this.onstart && this.onstart(), 0);
+      }
+      stop() {
+        setTimeout(() => this.onend && this.onend(), 0);
+      }
+      abort() {
+        this.stop();
+      }
+    }
+    window.SpeechRecognition = MockSpeechRecognition;
+    window.webkitSpeechRecognition = MockSpeechRecognition;
+  });
+
+  await page.goto('/?sousVoiceTest=1');
+  await page.waitForFunction(() => typeof window.__sousStartVoiceTestSession === 'function');
+  await page.evaluate(() => {
+    switchTab('log', { fresh: true, silent: true, section: 'breakfast' });
+    beginVoiceSession();
+  });
+  await page.waitForFunction(() => window.__sousVoiceState().state === 'listening');
+
+  const eventOffset = await page.evaluate(() => {
+    const oats = { name: 'Oats', w: 100, kcal: 389, p: 17, c: 66, f: 7, fi: 10, icon: '', type: 'solid' };
+    askQuantity({ name: 'Oats', weight: 100, rawFood: oats, weightSpecified: false, confidence: 'high' });
+    localStorage.setItem('sous_voice_feedback', '1');
+    window.getCachedResponseAsync = async key => (key === 'added' ? 'Added.' : '');
+    window.getCachedAudioUrlAsync = async key => (key === 'added' ? 'mock://added.mp3' : null);
+    const offset = window.sousVoiceDebug().length;
+    commitQuantity(75);
+    return offset;
+  });
+
+  await expect.poll(
+    () => page.evaluate(() => window.sousVoiceDebug().some(event => event.event === 'voice_feedback_blocked' && event.route === 'cached_audio_play_failed')),
+    { timeout: 3000, intervals: [50, 100, 200] }
+  ).toBe(true);
+  await expect.poll(
+    () => page.evaluate(() => window.__sousVoiceState().state),
+    { timeout: 4000, intervals: [50, 100, 200] }
+  ).toBe('listening');
+
+  const trace = await page.evaluate(offset => window.sousVoiceDebug().slice(offset), eventOffset);
+  const resolvedIndex = trace.findIndex(event => event.event === 'prompt_owner_cleared' && event.reason === 'quantity_resolved');
+  const feedbackIndex = trace.findIndex(event => event.event === 'voice_feedback_requested' && event.key === 'added');
+  const restartBeforeFeedbackIndex = trace.findIndex((event, index) =>
+    index > resolvedIndex &&
+    index < feedbackIndex &&
+    event.event === 'session_restart_requested'
+  );
+  const restartAfterFeedbackIndex = trace.findIndex((event, index) =>
+    index > feedbackIndex &&
+    event.event === 'session_restart_requested'
+  );
+  expect(resolvedIndex).toBeGreaterThanOrEqual(0);
+  expect(feedbackIndex).toBeGreaterThanOrEqual(0);
+  expect(restartBeforeFeedbackIndex).toBe(-1);
+  expect(restartAfterFeedbackIndex).toBeGreaterThan(feedbackIndex);
+  expect(trace.some(event =>
+    (event.event === 'voice_error' && event.error === 'speech_start_timeout') ||
+    (event.event === 'voice_feedback_ended' && event.reason === 'speech failed')
+  )).toBe(true);
+});
+
 test('AI memory intent guardrails require confidence and local refs', async ({ page }) => {
   await page.route('**/favicon.ico', route => route.fulfill({ status: 204, body: '' }));
   await page.addInitScript(() => {
