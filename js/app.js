@@ -1839,7 +1839,7 @@ function updateHome(){ if(currentTab==='home') renderHome(); }
 // ═══════════════════════════════════════════
 // PWA — MANIFEST + SERVICE WORKER
 // ═══════════════════════════════════════════
-const SOUS_CACHE_VERSION='sous-v4';
+const SOUS_CACHE_VERSION='sous-v7';
 
 window.__sousClearCachesAndReload=async function(){
   if('serviceWorker' in navigator){
@@ -1885,11 +1885,23 @@ function initPWA(){
   if('serviceWorker' in navigator){
     try{
       const swUrl=new URL('sw.js',location.href);
+      swUrl.searchParams.set('v',SOUS_CACHE_VERSION);
       navigator.serviceWorker.register(swUrl,{scope:'./'})
-        .then(registration=>registration.update().catch(()=>{}))
-        .catch(()=>{});
-    }catch(e){}
+        .then(registration=>registration.update().catch(error=>{
+          if(isSousDevHost()) console.warn('[Sous] service worker update failed',error);
+        }))
+        .catch(error=>{
+          if(isSousDevHost()) console.warn('[Sous] service worker registration failed',error);
+        });
+    }catch(e){
+      if(isSousDevHost()) console.warn('[Sous] service worker setup failed',e);
+    }
   }
+}
+
+function isSousDevHost(){
+  const host=location.hostname;
+  return host==='localhost'||host==='127.0.0.1'||host==='[::1]'||host==='::1';
 }
 
 // ═══════════════════════════════════════════

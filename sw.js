@@ -1,4 +1,4 @@
-const CACHE_VERSION = 'sous-v6';
+const CACHE_VERSION = 'sous-v7';
 const APP_SHELL_CACHE = CACHE_VERSION;
 const APP_SHELL_ASSETS = [
   './',
@@ -26,10 +26,18 @@ self.addEventListener('install', event => {
   event.waitUntil(
     caches.open(APP_SHELL_CACHE)
       .then(cache => cache.addAll(APP_SHELL_ASSETS))
-      .catch(() => {})
+      .catch(error => {
+        if (isDevHost()) console.warn('[Sous SW] app shell cache failed', error);
+        throw error;
+      })
   );
   self.skipWaiting();
 });
+
+function isDevHost() {
+  const host = self.location && self.location.hostname;
+  return host === 'localhost' || host === '127.0.0.1' || host === '[::1]' || host === '::1';
+}
 
 self.addEventListener('activate', event => {
   event.waitUntil(
