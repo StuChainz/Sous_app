@@ -121,6 +121,44 @@ test('hold-to-talk silence returns to idle without a recovery loop', async ({ pa
   expect(trace.some(event => event.event === 'session_restart_requested')).toBe(false);
 });
 
+test('hold mode review screens use tap/type copy and do not start prompt listeners', async ({ page }) => {
+  await installHoldModePage(page);
+
+  await page.evaluate(() => {
+    const oats = parseText('oats 75')[0];
+    showConfirm(oats);
+  });
+  await expect.poll(() => page.evaluate(() => window.__sousVoiceState().activeScreen)).toBe('ls-confirm');
+  await expect.poll(() => page.evaluate(() => window.__sousVoiceState().confirmVoiceHint)).toBe('Review and tap to confirm');
+  await page.waitForTimeout(350);
+  expect(await page.evaluate(() => window.__mockVoiceStats.starts)).toBe(0);
+
+  await page.evaluate(() => {
+    const oats = parseText('oats')[0];
+    askQuantity(oats);
+  });
+  await expect.poll(() => page.evaluate(() => window.__sousVoiceState().activeScreen)).toBe('ls-quantity');
+  await expect.poll(() => page.evaluate(() => window.__sousVoiceState().quantityVoiceHint)).toBe('Enter the amount or go back and hold mic again');
+  await page.waitForTimeout(350);
+  expect(await page.evaluate(() => window.__mockVoiceStats.starts)).toBe(0);
+
+  await page.evaluate(() => {
+    showAmbiguous([findFoodByText('cheddar'), findFoodByText('mozzarella')].filter(Boolean), 30, 'cheese', 'Which cheese?');
+  });
+  await expect.poll(() => page.evaluate(() => window.__sousVoiceState().activeScreen)).toBe('ls-ambiguous');
+  await expect.poll(() => page.evaluate(() => window.__sousVoiceState().ambiguousVoiceHint)).toBe('Hold mode is off while reviewing. Tap to choose');
+  await page.waitForTimeout(350);
+  expect(await page.evaluate(() => window.__mockVoiceStats.starts)).toBe(0);
+
+  await page.evaluate(() => {
+    showMultiConfirm([parseText('oats')[0], parseText('banana')[0]].filter(Boolean));
+  });
+  await expect.poll(() => page.evaluate(() => window.__sousVoiceState().activeScreen)).toBe('ls-multi-confirm');
+  await expect.poll(() => page.evaluate(() => window.__sousVoiceState().multiConfirmVoiceHint)).toBe('Hold mode is off while reviewing. Edit below or add to meal');
+  await page.waitForTimeout(350);
+  expect(await page.evaluate(() => window.__mockVoiceStats.starts)).toBe(0);
+});
+
 test('hold-to-talk ignores stale callbacks from an old recognizer run', async ({ page }) => {
   await installHoldModePage(page);
 

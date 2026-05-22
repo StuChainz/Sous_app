@@ -744,7 +744,7 @@ html,body{height:100%;height:var(--app-height);min-height:-webkit-fill-available
           <button class="toggle-pill active" id="pill-raw">Raw</button>
           <button class="toggle-pill inactive" id="pill-cooked">Cooked</button>
         </div>
-        <div class="voice-hint-bar"><i class="ti ti-microphone"></i><span class="voice-hint-text">Say "yes" to confirm or "change" to try again</span></div>
+        <div class="voice-hint-bar"><i class="ti ti-microphone"></i><span class="voice-hint-text" id="confirm-voice-hint">Say "yes" to confirm or "change" to try again</span></div>
         <div class="action-stack">
           <button class="btn-primary" id="confirm-btn">✓ Confirm &amp; add</button>
           <div class="btn-row">
@@ -776,6 +776,7 @@ html,body{height:100%;height:var(--app-height);min-height:-webkit-fill-available
         <div style="font-size:18px;font-weight:600;color:var(--text);margin-bottom:4px;">Review ingredients</div>
         <div style="font-size:13px;color:var(--text-muted);margin-bottom:14px;">Choose each food, set amounts, then add.</div>
         <div id="mc-list" style="flex:1;overflow-y:auto;min-height:0;margin-bottom:12px;"></div>
+        <div class="voice-hint-bar" id="mc-voice-hint-bar"><i class="ti ti-microphone"></i><span class="voice-hint-text" id="mc-voice-hint">Say the missing type or amount, or edit below</span></div>
         <div class="action-stack">
           <button class="btn-primary" id="mc-add-btn">Add to meal</button>
           <button class="btn-secondary" id="mc-cancel-btn">Cancel</button>
@@ -794,7 +795,7 @@ html,body{height:100%;height:var(--app-height);min-height:-webkit-fill-available
         </div>
         <button class="btn-secondary" id="qty-default-btn" style="width:100%;margin-bottom:12px;flex:none;">Use default</button>
         <button class="btn-secondary" id="qty-usual-btn" style="width:100%;margin-bottom:12px;flex:none;display:none;">Use usual</button>
-        <div class="voice-hint-bar"><i class="ti ti-microphone"></i><span class="voice-hint-text">Say the amount, e.g. "150 grams" or "200"</span></div>
+        <div class="voice-hint-bar"><i class="ti ti-microphone"></i><span class="voice-hint-text" id="qty-voice-hint">Say the amount, e.g. "150 grams" or "200"</span></div>
       </div>
 
       <!-- SUMMARY -->

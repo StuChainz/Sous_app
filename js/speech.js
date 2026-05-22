@@ -669,6 +669,7 @@ function updateVoiceInputModeControls(){
   if(!voiceSessionActive&&!voiceCurrentlyListening&&!isRecording&&!processingTranscript&&!isSpeaking){
     setMicState('idle');
   }
+  updateReviewVoiceHints();
 }
 function setVoiceInputMode(mode){
   const next=normalizeVoiceInputMode(mode);
@@ -685,6 +686,20 @@ function setVoiceInputMode(mode){
 }
 window.setVoiceInputMode=setVoiceInputMode;
 window.getVoiceInputMode=getVoiceInputMode;
+function setVoiceHintText(id,text){
+  const el=document.getElementById(id);
+  if(el) el.textContent=text;
+}
+function reviewVoicePromptsEnabled(){
+  return !isHoldVoiceInputMode();
+}
+function updateReviewVoiceHints(){
+  const hold=isHoldVoiceInputMode();
+  setVoiceHintText('confirm-voice-hint',hold?'Review and tap to confirm':'Say "yes" to confirm or "change" to try again');
+  setVoiceHintText('qty-voice-hint',hold?'Enter the amount or go back and hold mic again':'Say the amount, e.g. "150 grams" or "200"');
+  setVoiceHintText('ambig-listen-text',hold?'Hold mode is off while reviewing. Tap to choose':'Say the name or tap to choose');
+  setVoiceHintText('mc-voice-hint',hold?'Hold mode is off while reviewing. Edit below or add to meal':'Say the missing type or amount, or edit below');
+}
 function logVoiceState(event,extra={}){
   console.log('[Sous Voice State]',{
     event,
@@ -1896,6 +1911,10 @@ function sousVoiceStateSnapshot(){
     activeScreen:document.querySelector('.log-screen.active')?.id||null,
     transcriptText:document.getElementById('transcript-text')?.textContent||'',
     listenStatus:document.getElementById('listen-status')?.textContent||'',
+    confirmVoiceHint:document.getElementById('confirm-voice-hint')?.textContent||'',
+    quantityVoiceHint:document.getElementById('qty-voice-hint')?.textContent||'',
+    ambiguousVoiceHint:document.getElementById('ambig-listen-text')?.textContent||'',
+    multiConfirmVoiceHint:document.getElementById('mc-voice-hint')?.textContent||'',
     voiceCorrectText:document.getElementById('voice-correct-bar')?.style.display!=='none'
       ?(document.getElementById('voice-correct-msg')?.textContent||'')
       :'',
@@ -2504,6 +2523,12 @@ function promptIngredientClarification(){
   voiceDebugTrace('clarification_prompt',{prompt:prompt.text,cacheKey:prompt.cacheKey,missingFields:clarificationState.missingFields||[]});
   const el=document.getElementById('transcript-text');
   if(el) el.textContent=prompt.text;
+  if(!reviewVoicePromptsEnabled()){
+    if(el) el.textContent=prompt.text+' · hold mic again to answer';
+    setVoiceSessionState('idle','hold clarification requires hold');
+    setHoldIdlePrompt('Hold to answer');
+    return;
+  }
   speakThenListen(prompt.text,handleClarification,prompt.cacheKey,prompt.data,{force:true});
 }
 function beginIngredientClarification(baseItem,fallback,context={}){
@@ -3313,6 +3338,7 @@ function addIngredientFromRecent(r){
 function showLogScreen(id){
   document.querySelectorAll('.log-screen').forEach(s=>s.classList.remove('active'));
   document.getElementById('ls-'+id).classList.add('active');
+  updateReviewVoiceHints();
   if(id==='listening'){renderCurrentMeal();renderRecentIngredients();}
   else stopSousRealtimeVoice(false);
   voiceDebugTrace('ui_updated',{screen:'ls-'+id,reason:'show_log_screen'});
@@ -3653,6 +3679,12 @@ function showConfirm(parsed){
   }
   showLogScreen('confirm');
   pauseAlwaysOn();
+  if(!reviewVoicePromptsEnabled()){
+    clearVoicePromptOwner('hold_confirm_review');
+    setVoiceSessionState('idle','hold confirm review requires tap');
+    setMicState('idle');
+    return;
+  }
   if(Date.now()<_suppressNextConfirmSpeechUntil){
     _suppressNextConfirmSpeechUntil=0;
     setTimeout(startConfirmListen,200);
@@ -3662,6 +3694,7 @@ function showConfirm(parsed){
 }
 function startConfirmListen(){
   const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+  if(!reviewVoicePromptsEnabled()) return;
   if(!SR||document.querySelector('.log-screen.active')?.id!=='ls-confirm') return;
   if(clarificationRec){
     console.log('[Sous Voice] duplicate recognizer blocked');
@@ -3731,6 +3764,11 @@ function doConfirm(){
 }
 function doChange(){
   pendingFood=null;
+  if(isHoldVoiceInputMode()){
+    showLogScreen('listening');
+    setHoldIdlePrompt('Hold and speak');
+    return;
+  }
   speak('OK, what would you like to add?',()=>{showLogScreen('listening');maybeResumeVoiceSession(300);});
 }
 
@@ -3828,6 +3866,11 @@ function askQuantity(item){
   voiceDebugTrace('quantity_prompt_shown',{item:itemSummary,prompt});
   showLogScreen('quantity');
   pauseAlwaysOn();
+  if(!reviewVoicePromptsEnabled()){
+    setVoiceSessionState('idle','hold quantity review requires input');
+    setMicState('idle');
+    return;
+  }
   speakThenListen(prompt,voiceAnswer=>{
     if(document.querySelector('.log-screen.active')?.id!=='ls-quantity') return;
     const quantityCancel=quantityPromptCancelCommand(voiceAnswer);
@@ -3862,6 +3905,11 @@ function showAmbiguous(matches,amount,label,question){
   });
   document.getElementById('ambig-confirm-btn').onclick=()=>resolveAmbig(matches[selectedIdx],amount);
   showLogScreen('ambiguous');
+  if(!reviewVoicePromptsEnabled()){
+    setVoiceSessionState('idle','hold ambiguous review requires tap');
+    setMicState('idle');
+    return;
+  }
   speakThenListen(question,voiceAnswer=>{
     const ans=voiceAnswer.toLowerCase();
     let resolved=null;
@@ -3925,6 +3973,7 @@ function _announceMultiConfirmPrompt(prompt,turnId,phase='scheduled'){
 function scheduleMultiConfirmResolutionPrompt(){
   const prompt=_multiConfirmPromptForPendingBatch();
   if(!prompt) return;
+  if(!reviewVoicePromptsEnabled()) return;
   if(!(voiceSessionActive||voiceCurrentlyListening||isRecording)) return;
   const turnId=activeVoiceTranscriptTurn||null;
   _announceMultiConfirmPrompt(prompt,turnId,'scheduled');
@@ -4089,6 +4138,7 @@ function promptMultiConfirmResolution(turnId=null){
   if(!pendingBatch.length) return;
   const prompt=_multiConfirmPromptForPendingBatch();
   if(!prompt) return;
+  if(!reviewVoicePromptsEnabled()) return;
   if(!(voiceSessionActive||voiceCurrentlyListening||isRecording)) return;
   _announceMultiConfirmPrompt(prompt,turnId||activeVoiceTranscriptTurn||null,'listening');
   speakThenListen(prompt.text,handleMultiConfirmVoiceFill,prompt.cacheKey,{}, {force:true});
@@ -4135,7 +4185,7 @@ function showMultiConfirm(results,voiceContext=null){
   renderMultiConfirm();
   showLogScreen('multi-confirm');
   if(_multiConfirmHasUnresolvedRows()) scheduleMultiConfirmResolutionPrompt();
-  else if(voiceSessionActive||voiceCurrentlyListening||isRecording) speakCachedResponse('got_it',{},null,{force:true});
+  else if(reviewVoicePromptsEnabled()&&(voiceSessionActive||voiceCurrentlyListening||isRecording)) speakCachedResponse('got_it',{},null,{force:true});
 }
 function renderMultiConfirm(){
   const list=document.getElementById('mc-list');
