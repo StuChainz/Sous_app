@@ -800,6 +800,17 @@ async function waitForVoiceLoopToRecover(page) {
   await assertVoiceLoopSane(page);
 }
 
+async function waitForNextMockRecognizer(page, previousCount) {
+  await expect.poll(
+    () => page.evaluate(() => (window.__mockRecognizers || []).length),
+    { timeout: 5000, intervals: [50, 100, 200] }
+  ).toBeGreaterThan(previousCount);
+  await expect.poll(
+    () => page.evaluate(() => window.__sousVoiceState().state),
+    { timeout: 5000, intervals: [50, 100, 200] }
+  ).toBe('listening');
+}
+
 async function setupMockVoiceLifecyclePage(page, { silentMode = true } = {}) {
   await page.route('**/favicon.ico', route => route.fulfill({ status: 204, body: '' }));
   await page.addInitScript(({ silentMode }) => {
@@ -940,6 +951,17 @@ async function emitMockFinalThenNoSpeech(page, transcript) {
     rec.onerror && rec.onerror({ error: 'no-speech' });
     rec.__finish();
   }, transcript);
+}
+
+async function emitMockFinal(page, transcript, confidence = 0.96) {
+  await page.evaluate(({ transcript, confidence }) => {
+    const rec = window.__mockRecognizers[window.__mockRecognizers.length - 1];
+    const primary = { transcript, confidence };
+    const result = [primary];
+    result.isFinal = true;
+    rec.onresult({ resultIndex: 0, results: [result] });
+    rec.__finish();
+  }, { transcript, confidence });
 }
 
 async function applyInteractions(page, interactions) {
@@ -1419,6 +1441,156 @@ test('silent mode speech-without-transcript traces recovery without audio', asyn
   expect(stats.audioPlays).toBe(0);
   expect(stats.tts).toBe(0);
   await assertVoiceLoopSane(page);
+});
+
+test('duplicate final result in one recognizer run logs one ingredient', async ({ page }) => {
+  const offset = await setupMockVoiceLifecyclePage(page, { silentMode: true });
+
+  await page.evaluate(() => {
+    const rec = window.__mockRecognizers[window.__mockRecognizers.length - 1];
+    const final = [{ transcript: 'oats 100 grams', confidence: 0.96 }];
+    final.isFinal = true;
+    rec.onresult({ resultIndex: 0, results: [final] });
+    rec.onresult({ resultIndex: 0, results: [final] });
+    rec.__finish();
+  });
+  await waitUntilNotProcessing(page);
+  await expect.poll(
+    () => page.evaluate(() => window.__sousVoiceState().meal.filter(item => /oats/i.test(item.name || '')).length),
+    { timeout: 5000, intervals: [50, 100, 200] }
+  ).toBe(1);
+
+  const trace = await page.evaluate(offset => window.sousVoiceDebug().slice(offset), offset);
+  expect(trace.filter(event => event.event === 'transcript_accepted' && event.transcript === 'oats 100 grams').length).toBe(1);
+  expect(trace.some(event => event.event === 'duplicate_transcript_ignored')).toBe(true);
+});
+
+test('same phrase in separate recognizer runs logs two deliberate ingredients', async ({ page }) => {
+  await setupMockVoiceLifecyclePage(page, { silentMode: true });
+
+  await emitMockFinalThenNoSpeech(page, 'oats 100 grams');
+  await expect.poll(
+    () => page.evaluate(() => window.__sousVoiceState().meal.filter(item => /oats/i.test(item.name || '')).length),
+    { timeout: 5000, intervals: [50, 100, 200] }
+  ).toBe(1);
+  const recognizerCount = await page.evaluate(() => (window.__mockRecognizers || []).length);
+  await waitForVoiceLoopToRecover(page);
+  await waitForNextMockRecognizer(page, recognizerCount);
+
+  await emitMockFinalThenNoSpeech(page, 'oats 100 grams');
+  await waitUntilNotProcessing(page);
+  await expect.poll(
+    () => page.evaluate(() => window.__sousVoiceState().meal.filter(item => /oats/i.test(item.name || '')).length),
+    { timeout: 5000, intervals: [50, 100, 200] }
+  ).toBe(2);
+});
+
+test('late final from replaced recognizer is ignored as stale', async ({ page }) => {
+  const offset = await setupMockVoiceLifecyclePage(page, { silentMode: true });
+
+  const recognizerCount = await page.evaluate(() => {
+    window.__oldRecognizer = window.__mockRecognizers[window.__mockRecognizers.length - 1];
+    return window.__mockRecognizers.length;
+  });
+  await emitMockRecognitionMiss(page);
+  await waitForVoiceLoopToRecover(page);
+  await waitForNextMockRecognizer(page, recognizerCount);
+
+  await page.evaluate(() => {
+    const rec = window.__oldRecognizer;
+    const final = [{ transcript: 'banana 100 grams', confidence: 0.96 }];
+    final.isFinal = true;
+    rec.onresult({ resultIndex: 0, results: [final] });
+    rec.__finish();
+  });
+
+  await expect.poll(
+    () => page.evaluate(offset => window.sousVoiceDebug().slice(offset).some(event => event.event === 'stale_callback_ignored' && event.source === 'tap' && event.owner?.recognizerRunId === -1), offset),
+    { timeout: 3000, intervals: [50, 100, 200] }
+  ).toBe(true);
+  expect(await page.evaluate(() => window.__sousVoiceState().meal.filter(item => /banana/i.test(item.name || '')).length)).toBe(0);
+});
+
+test('accepted final transcript survives recognizer restart while AI repair is pending', async ({ page }) => {
+  await setupMockVoiceLifecyclePage(page, { silentMode: true });
+  await page.evaluate(() => {
+    window.__repairCalls = 0;
+    window.__resolveRepair = null;
+    window.repairTranscriptWithAI = () => new Promise(resolve => {
+      window.__repairCalls += 1;
+      window.__resolveRepair = () => resolve([{ transcript: 'oats 100 grams', score: 0.99, reason: 'test repair' }]);
+    });
+  });
+
+  await emitMockFinal(page, 'xylophone 100 grams', 0.96);
+  await expect.poll(
+    () => page.evaluate(() => window.__repairCalls || 0),
+    { timeout: 5000, intervals: [50, 100, 200] }
+  ).toBe(1);
+
+  await page.evaluate(() => scheduleVoiceSessionRestart(10));
+  await expect.poll(
+    () => page.evaluate(() => (window.__mockRecognizers || []).length),
+    { timeout: 5000, intervals: [50, 100, 200] }
+  ).toBeGreaterThanOrEqual(2);
+
+  await page.evaluate(() => window.__resolveRepair && window.__resolveRepair());
+  await expect.poll(
+    () => page.evaluate(() => window.__sousVoiceState().meal.filter(item => /oats/i.test(item.name || '')).length),
+    { timeout: 5000, intervals: [50, 100, 200] }
+  ).toBe(1);
+});
+
+test('cancelled voice turn resolving late does not mutate meal or UI', async ({ page }) => {
+  const offset = await setupMockVoiceLifecyclePage(page, { silentMode: true });
+  await page.evaluate(() => {
+    window.__repairCalls = 0;
+    window.__resolveRepair = null;
+    window.repairTranscriptWithAI = () => new Promise(resolve => {
+      window.__repairCalls += 1;
+      window.__resolveRepair = () => resolve([{ transcript: 'oats 100 grams', score: 0.99, reason: 'test repair' }]);
+    });
+  });
+
+  await emitMockFinal(page, 'xylophone 100 grams', 0.96);
+  await expect.poll(
+    () => page.evaluate(() => window.__repairCalls || 0),
+    { timeout: 5000, intervals: [50, 100, 200] }
+  ).toBe(1);
+
+  await page.evaluate(() => endVoiceSession('Stopped'));
+  await page.evaluate(() => window.__resolveRepair && window.__resolveRepair());
+  await expect.poll(
+    () => page.evaluate(offset => window.sousVoiceDebug().slice(offset).some(event => event.event === 'stale_callback_ignored' && event.reason === 'voice_turn_invalid'), offset),
+    { timeout: 3000, intervals: [50, 100, 200] }
+  ).toBe(true);
+  expect(await page.evaluate(() => window.__sousVoiceState().meal.length)).toBe(0);
+  expect(await page.evaluate(() => window.__sousVoiceState().activeScreen)).toBe('ls-listening');
+});
+
+test('duplicate ingredient claim is scoped to one voice turn', async ({ page }) => {
+  const offset = await setupMockVoiceLifecyclePage(page, { silentMode: true });
+
+  const mealNames = await page.evaluate(() => {
+    const owner = voiceOwnerSnapshot({ source: 'voice' });
+    const turnId = beginVoiceTranscriptTurn('oats and cheddar', owner);
+    const voiceContext = { source: 'voice', sessionId: owner.sessionId, recognizerRunId: owner.recognizerRunId, turnId };
+    const makeItem = (name, grams) => {
+      const food = findFoodByText(name);
+      return { ...foodScale(food, grams), rawFood: food, weightSpecified: true, confidence: 'high', needsConfirm: false };
+    };
+    const oats = makeItem('oats', 100);
+    const cheddar = makeItem('cheddar', 50);
+    addIngredientToMeal({ ...oats }, { source: 'voice', applyOverride: true, voiceContext });
+    addIngredientToMeal({ ...oats }, { source: 'voice', applyOverride: true, voiceContext });
+    addIngredientToMeal({ ...cheddar }, { source: 'voice', applyOverride: true, voiceContext });
+    return meal.map(item => item.name);
+  });
+
+  expect(mealNames.filter(name => /oats/i.test(name)).length).toBe(1);
+  expect(mealNames.filter(name => /cheddar/i.test(name)).length).toBe(1);
+  const trace = await page.evaluate(offset => window.sousVoiceDebug().slice(offset), offset);
+  expect(trace.some(event => event.event === 'duplicate_ingredient_ignored')).toBe(true);
 });
 
 test('final transcript followed by no-speech logs once and avoids fallback', async ({ page }) => {

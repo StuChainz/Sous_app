@@ -988,8 +988,10 @@ function aiDraftToParserResults(draft){
 // Async entry point used by speech.js instead of the raw parseText→handleParsed pair.
 // Tries the parser; falls back to AI when the parser finds no food OR when the
 // parser found food(s) but meaningful unresolved words remain in the transcript.
-async function handleTranscript(transcript,rawText){
+async function handleTranscript(transcript,rawText,voiceContext=null){
   const cleanTranscript=String(transcript||'').trim();
+  const voiceTurnOk=phase=>typeof isVoiceTurnValid!=='function'||isVoiceTurnValid(voiceContext,phase);
+  if(!voiceTurnOk('handle_transcript_start')) return;
   if(handlePersonalMealMemoryCommand(cleanTranscript)) return;
   if(handleDeterministicMemoryCommand(parseDeterministicMemoryCommand(cleanTranscript),cleanTranscript)) return;
   if(cleanTranscript&&canUseAIInterpretation()&&typeof aiActionReferenceTrigger==='function'&&aiActionReferenceTrigger(cleanTranscript)&&typeof interpretMealActionWithAI==='function'){
@@ -999,6 +1001,7 @@ async function handleTranscript(transcript,rawText){
         section:typeof currentMealSection!=='undefined'?currentMealSection:null,
         countryCode:typeof currentCountry!=='undefined'?currentCountry:null
       });
+      if(!voiceTurnOk('handle_transcript_after_ai_action')) return;
       if(action&&action.type==='clarify'){
         const msg=action.message||'I need one more detail.';
         showToast(msg,3200);
@@ -1017,6 +1020,7 @@ async function handleTranscript(transcript,rawText){
             return;
           }
         } else {
+          if(!voiceTurnOk('handle_transcript_before_ai_action_apply')) return;
           const applied=applyAIActionToCurrentMeal(action);
           if(applied.ok) return;
           if(applied.message) showToast(applied.message,2600);
@@ -1053,7 +1057,8 @@ async function handleTranscript(transcript,rawText){
 
   if(escalationReason==='none'){
     console.log('[Sous] parser →',results.filter(r=>!r.command).length,'food item(s)');
-    handleParsed(results,rawText);
+    if(!voiceTurnOk('handle_transcript_parser_result')) return;
+    handleParsed(results,rawText,voiceContext);
     return;
   }
 
@@ -1063,9 +1068,11 @@ async function handleTranscript(transcript,rawText){
     if(mixedPartial){
       // Partial match: force confirmation so nothing is auto-saved
       const flagged=results.map(r=>r.command?r:{...r,needsConfirm:true,weightSpecified:false});
-      handleParsed(flagged,rawText);
+      if(!voiceTurnOk('handle_transcript_repeat_partial')) return;
+      handleParsed(flagged,rawText,voiceContext);
     } else {
-      handleParsed(results,rawText);
+      if(!voiceTurnOk('handle_transcript_repeat_result')) return;
+      handleParsed(results,rawText,voiceContext);
     }
     return;
   }
@@ -1090,6 +1097,7 @@ async function handleTranscript(transcript,rawText){
           section:typeof currentMealSection!=='undefined'?currentMealSection:null,
           countryCode:typeof currentCountry!=='undefined'?currentCountry:null
         });
+        if(!voiceTurnOk('handle_transcript_after_ai_fallback')) return;
         const aiItems=aiDraftToParserResults(draft);
         if(typeof voiceDebugTrace==='function'){
           voiceDebugTrace('ai_result',{
@@ -1111,10 +1119,12 @@ async function handleTranscript(transcript,rawText){
             // rawText spans the whole transcript and would cause splitIngredients
             // to produce segments that overlap with items already in `before`.
             const heardName=(typeof _foodChoiceDisplayName==='function'&&unknown.name?_foodChoiceDisplayName(unknown.name):null)||unknown.name||rawText||transcript;
+            if(!voiceTurnOk('handle_transcript_before_multi_food_fallback')) return;
             showMultiFoodFallback(heardName,before,after);
             return;
           }
-          handleParsed(aiItems,rawText);
+          if(!voiceTurnOk('handle_transcript_before_ai_handle_parsed')) return;
+          handleParsed(aiItems,rawText,voiceContext);
           return;
         }
       }
@@ -1132,9 +1142,11 @@ async function handleTranscript(transcript,rawText){
   if(mixedPartial){
     // Partial: force confirmation, don't auto-save incomplete interpretation
     const flagged=results.map(r=>r.command?r:{...r,needsConfirm:true,weightSpecified:false});
-    handleParsed(flagged,rawText);
+    if(!voiceTurnOk('handle_transcript_final_partial')) return;
+    handleParsed(flagged,rawText,voiceContext);
   } else {
-    handleParsed(results,rawText);
+    if(!voiceTurnOk('handle_transcript_final_result')) return;
+    handleParsed(results,rawText,voiceContext);
   }
 }
 // ═══════════════════════════════════════════

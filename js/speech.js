@@ -13,6 +13,7 @@ let voiceTestEvents=[];
 let voiceTranscriptTurn=0, activeVoiceTranscriptTurn=0, lastAcceptedTranscript='', lastAcceptedTranscriptAt=0;
 let voiceSessionId=0, voiceRecognizerRunId=0;
 let voiceOutcomeTurns=new Set();
+let voiceTranscriptClaims=new Set(), voiceValidTurns=new Map(), voiceIngredientClaims=new Set();
 let voicePromptOwner=null;
 let _voiceMode=false;
 let nextIngId=1;
@@ -748,12 +749,112 @@ function startVoiceListeningWatchdog(source='tap'){
 function resetVoiceRecovery(){
   voiceRecoveryState={issue:null,attempts:0};
 }
-function beginVoiceTranscriptTurn(transcript){
+function normalizeVoiceClaimText(text){
+  return normalizeVoiceTranscriptText(String(text||'')).toLowerCase();
+}
+function voiceContextFromOwner(owner,turnId=null){
+  if(!owner) return null;
+  return {
+    source:'voice',
+    sessionId:owner.sessionId,
+    recognizerRunId:owner.recognizerRunId,
+    turnId
+  };
+}
+function isVoiceContext(context){
+  return !!(context&&context.source==='voice'&&context.turnId);
+}
+function isVoiceTurnValid(context,source='voice_turn'){
+  if(!isVoiceContext(context)) return true;
+  const turn=voiceValidTurns.get(context.turnId);
+  const valid=!!turn&&!turn.invalidated&&turn.sessionId===context.sessionId&&turn.recognizerRunId===context.recognizerRunId;
+  if(!valid){
+    traceStaleVoiceCallback(source,context,{
+      reason:'voice_turn_invalid',
+      turnId:context.turnId,
+      sessionId:context.sessionId,
+      recognizerRunId:context.recognizerRunId
+    });
+  }
+  return valid;
+}
+function invalidateVoiceTurns(reason='voice turns invalidated'){
+  if(voiceValidTurns.size){
+    voiceDebugTrace('voice_turns_invalidated',{reason,turnIds:Array.from(voiceValidTurns.keys())});
+  }
+  voiceValidTurns=new Map();
+  voiceTranscriptClaims=new Set();
+  voiceIngredientClaims=new Set();
+}
+function claimVoiceFinalTranscript(owner,transcript){
+  if(!owner) return true;
+  const normalized=normalizeVoiceClaimText(transcript);
+  if(!normalized) return false;
+  const key=[owner.sessionId,owner.recognizerRunId,normalized].join(':');
+  if(voiceTranscriptClaims.has(key)){
+    voiceDebugTrace('duplicate_transcript_ignored',{
+      source:'tap',
+      transcript:normalized,
+      sessionId:owner.sessionId,
+      recognizerRunId:owner.recognizerRunId
+    });
+    return false;
+  }
+  voiceTranscriptClaims.add(key);
+  return true;
+}
+function attachVoiceContext(item,context){
+  if(!item||typeof item!=='object'||!isVoiceContext(context)) return item;
+  try{
+    Object.defineProperty(item,'__voiceContext',{
+      value:{...context},
+      configurable:true,
+      enumerable:false,
+      writable:true
+    });
+  }catch(e){ item.__voiceContext={...context}; }
+  return item;
+}
+function voiceContextForItem(item,options={}){
+  return options.voiceContext||item?.__voiceContext||null;
+}
+function voiceIngredientClaimKey(item,context){
+  if(!isVoiceContext(context)||!item) return null;
+  const name=normalizeVoiceClaimText(item.name||item.label||'');
+  const weight=Math.round(Number(item.weight)||0);
+  const food=item.rawFood||{};
+  const rawKey=normalizeVoiceClaimText(food.id||food.name||item.name||'');
+  if(!name&&!rawKey) return null;
+  return [context.turnId,name,weight,rawKey].join(':');
+}
+function claimVoiceIngredient(item,context){
+  const key=voiceIngredientClaimKey(item,context);
+  if(!key) return true;
+  if(voiceIngredientClaims.has(key)){
+    voiceDebugTrace('duplicate_ingredient_ignored',{
+      turnId:context.turnId,
+      sessionId:context.sessionId,
+      recognizerRunId:context.recognizerRunId,
+      item:voiceDebugResultSummary([item])[0]
+    });
+    return false;
+  }
+  voiceIngredientClaims.add(key);
+  return true;
+}
+function beginVoiceTranscriptTurn(transcript,context=null){
   const turnId=++voiceTranscriptTurn;
   activeVoiceTranscriptTurn=turnId;
   lastAcceptedTranscript=String(transcript||'').trim();
   lastAcceptedTranscriptAt=Date.now();
-  voiceDebugTrace('transcript_turn_started',{turnId,transcript:lastAcceptedTranscript});
+  if(context&&context.source==='voice'){
+    voiceValidTurns.set(turnId,{
+      sessionId:context.sessionId,
+      recognizerRunId:context.recognizerRunId,
+      startedAt:Date.now()
+    });
+  }
+  voiceDebugTrace('transcript_turn_started',{turnId,transcript:lastAcceptedTranscript,voiceContext:context||null});
   return turnId;
 }
 function isCurrentVoiceTranscriptTurn(turnId){
@@ -1140,6 +1241,7 @@ function stopAllVoiceActivity(reason){
   if(voiceSessionActive||isRecording||voiceCurrentlyListening||sousRealtime||clarificationRec){
     voiceDebugTrace('session_stop',{reason});
   }
+  invalidateVoiceTurns(reason||'stop all voice activity');
   nextVoiceSessionId(reason);
   cancelTapFinalizer(reason||'stop all voice activity');
   clearVoiceTimers();
@@ -1618,16 +1720,22 @@ async function chooseVoiceTranscriptWithAIRerank(transcript,opts={}){
   };
 }
 
-async function routeFinalVoiceTranscript(transcript,{source='tap',confidence=null,lowConfidence=null,alternatives=[],timing={}}={}){
-  const selected=await chooseVoiceTranscriptWithAIRerank(transcript,{alternatives,confidence,source,lowConfidence});
-  const clean=String(selected.transcript||'').trim();
-  if(!clean) return false;
+async function routeFinalVoiceTranscript(transcript,{source='tap',confidence=null,lowConfidence=null,alternatives=[],timing={},voiceContext=null}={}){
+  const originalClean=String(transcript||'').trim();
+  if(!originalClean) return false;
+  let routeVoiceContext=voiceContext&&voiceContext.source==='voice'?{...voiceContext}:null;
+  if(routeVoiceContext&&!isVoiceTurnValid(routeVoiceContext,'route_final_voice_transcript_start')) return false;
   if(processingTranscript){
-    voiceDebugTrace('transcript_rejected',{source,transcript:clean,reason:'processing'});
+    voiceDebugTrace('transcript_rejected',{source,transcript:originalClean,reason:'processing',turnId:routeVoiceContext?.turnId??null});
     return false;
   }
+  const turnId=routeVoiceContext?.turnId||beginVoiceTranscriptTurn(originalClean,routeVoiceContext);
+  if(routeVoiceContext) routeVoiceContext={...routeVoiceContext,turnId};
+  const selected=await chooseVoiceTranscriptWithAIRerank(transcript,{alternatives,confidence,source,lowConfidence});
+  if(routeVoiceContext&&!isVoiceTurnValid(routeVoiceContext,'route_final_voice_transcript_after_repair')) return false;
+  const clean=String(selected.transcript||'').trim();
+  if(!clean) return false;
   voiceNoSpeechRetries=0;
-  const turnId=beginVoiceTranscriptTurn(clean);
   logVoiceState('speech result received',{source,transcript:clean,originalTranscript:selected.original,confidence});
   voiceDebugTrace('transcript_heard',{source,transcript:clean,originalTranscript:selected.original,confidence,corrected:selected.changed,turnId});
   voiceDebugTrace('transcript_accepted',{source,transcript:clean,originalTranscript:selected.original,confidence,corrected:selected.changed,turnId});
@@ -1640,6 +1748,7 @@ async function routeFinalVoiceTranscript(transcript,{source='tap',confidence=nul
   console.log('[Sous Voice] processing transcript');
   logVoiceState('transcript processing started',{transcript:clean,lowConfidence:isLow,source});
   const done=(opts={})=>{
+    const turnValid=!routeVoiceContext||isVoiceTurnValid(routeVoiceContext,'route_final_voice_transcript_done');
     setVoiceProcessing(false,'transcript processing');
     logVoiceState('transcript processing finished',{source});
     voiceDebugTrace('voice_timing',{
@@ -1651,7 +1760,7 @@ async function routeFinalVoiceTranscript(transcript,{source='tap',confidence=nul
       processingMs:Math.max(0,Date.now()-routeStartedAt),
       totalMs:timing.listenStartedAt?Math.max(0,Date.now()-timing.listenStartedAt):null
     });
-    if(opts.restart!==false&&document.querySelector('.log-screen.active')?.id==='ls-listening') scheduleVoiceSessionRestart(VOICE_RESTART_DEFAULT_MS);
+    if(turnValid&&opts.restart!==false&&document.querySelector('.log-screen.active')?.id==='ls-listening') scheduleVoiceSessionRestart(VOICE_RESTART_DEFAULT_MS);
     return true;
   };
   try{
@@ -1670,7 +1779,7 @@ async function routeFinalVoiceTranscript(transcript,{source='tap',confidence=nul
       }
       const grams=typeof parseGramsFromText==='function'?parseGramsFromText(clean):null;
       if(grams&&grams>0){
-        commitQuantity(grams);
+        commitQuantity(grams,routeVoiceContext);
       } else if(pendingFood&&typeof normaliseLogText==='function'&&normaliseLogText(clean)===normaliseLogText(pendingFood.name||'')){
         voiceDebugTrace('ui_updated',{turnId,screen:'ls-quantity',reason:'quantity_repeat_prompt',prompt:'How much '+pendingFood.name+'?'});
         askQuantity(pendingFood);
@@ -1704,7 +1813,8 @@ async function routeFinalVoiceTranscript(transcript,{source='tap',confidence=nul
       return done();
     }
     voiceDebugTrace('transcript_routed',{route:'normal_parser',source,transcript:clean});
-    await Promise.resolve(handleTranscript(clean,clean));
+    await Promise.resolve(handleTranscript(clean,clean,routeVoiceContext));
+    if(routeVoiceContext&&!isVoiceTurnValid(routeVoiceContext,'route_final_voice_transcript_after_handle_transcript')) return done({restart:false});
     markVoiceOutcome(turnId,'normal_parser',{source,transcript:clean});
     return done();
   }catch(e){
@@ -1986,6 +2096,10 @@ function addIngredientToMeal(item, options = {}) {
   const skipSnapshot = !!options.skipSnapshot;
   const skipPersist = !!options.skipPersist;
   const applyOverride = !!options.applyOverride;
+  const voiceContext = voiceContextForItem(item, options);
+  if (voiceContext && !isVoiceTurnValid(voiceContext,'add_ingredient_to_meal')) return null;
+  if (voiceContext && !claimVoiceIngredient(item, voiceContext)) return null;
+  if (item.__voiceContext) delete item.__voiceContext;
 
   // Assign a stable ID if the item doesn't already have one
   if (!item.id) item.id = nextIngId++;
@@ -2014,14 +2128,14 @@ function addIngredientToMeal(item, options = {}) {
   return item;
 }
 
-function autoAddItem(item){
-  addIngredientToMeal(item, {source:'voice', applyOverride:true});
+function autoAddItem(item, voiceContext=null){
+  return addIngredientToMeal(item, {source:'voice', applyOverride:true, voiceContext});
 }
-function autoAddClearItems(items){
+function autoAddClearItems(items, voiceContext=null){
   if(!items.length) return;
   snapshotMeal();
   items.forEach(item=>{
-    addIngredientToMeal(item, {source:'voice', applyOverride:true, skipSnapshot:true, skipPersist:true});
+    addIngredientToMeal(item, {source:'voice', applyOverride:true, skipSnapshot:true, skipPersist:true, voiceContext});
   });
   _persistDraft();
   renderCurrentMeal();
@@ -2531,8 +2645,9 @@ function maybeStartIngredientClarification(results,rawText){
     if(!shouldVoiceClarifyAmbiguous(item)){
       const resolved=resolveAmbiguousDefault(item);
       if(resolved){
+        const itemVoiceContext=item.__voiceContext||null;
         voiceDebugTrace('ambiguous_default',{label:item.label,selected:resolved.name,amount:resolved.weight});
-        handleParsed([resolved],rawText);
+        handleParsed([attachVoiceContext(resolved,itemVoiceContext)],rawText,itemVoiceContext);
         return true;
       }
     }
@@ -2716,6 +2831,7 @@ function _macroPer100FromItem(item,field,foodField){
   return food?Number(food[foodField])||0:Number(item[field])||0;
 }
 function showFoodChoiceReview(state){
+  state.voiceContext=state.voiceContext||state.existingItem?.__voiceContext||null;
   _pendingFoodChoice=state;
   _ensureFoodChoiceScreen();
   const rawName=state.rawName||state.originalText||'this food';
@@ -2752,8 +2868,11 @@ function showFoodChoiceReview(state){
 function _continueFoodChoiceWith(item){
   const state=_pendingFoodChoice;
   _pendingFoodChoice=null;
+  const voiceContext=state?.voiceContext||state?.existingItem?.__voiceContext||item?.__voiceContext||null;
+  if(voiceContext&&!isVoiceTurnValid(voiceContext,'food_choice_continue')) return;
+  if(voiceContext) attachVoiceContext(item,voiceContext);
   const next=[...(state?.before||[]),item,...(state?.after||[])];
-  handleParsed(next,'');
+  handleParsed(next,'',voiceContext);
 }
 function resolveFoodChoiceExisting(){
   if(!_pendingFoodChoice||!_pendingFoodChoice.existingItem) return;
@@ -2814,8 +2933,9 @@ function showVoiceRetry(msg){
   showVoiceCorrectBar(msg||"Didn't catch that — try again");
 }
 
-function handleParsed(results,rawText=''){
-  voiceDebugTrace('handle_parsed_enter',{rawText,results:voiceDebugResultSummary(results)});
+function handleParsed(results,rawText='',voiceContext=null){
+  if(voiceContext&&!isVoiceTurnValid(voiceContext,'handle_parsed_enter')) return;
+  voiceDebugTrace('handle_parsed_enter',{rawText,results:voiceDebugResultSummary(results),turnId:voiceContext?.turnId??null});
   if(results&&results.length) resetVoiceRecovery();
   if(!results||!results.length){
     const rt=(rawText||'').trim();
@@ -2851,6 +2971,7 @@ function handleParsed(results,rawText=''){
   _voiceMode=false;
   if(results.length===1 && results[0].command && !['summary'].includes(results[0].command)){
     const handled=applyCorrectionCommand(results[0]);
+    if(handled&&results[0].command==='clear') invalidateVoiceTurns('meal cleared');
     voiceDebugTrace('final_action',{action:'command',command:results[0].command,handled});
     refreshSummaryIfVisible();
     const _activeScr=document.querySelector('.log-screen.active')?.id;
@@ -2864,16 +2985,19 @@ function handleParsed(results,rawText=''){
     if(!meal.length){showToast('Add some ingredients first!');return;}
     stopAllRec(); showSummary(); return;
   }
-  if(maybeStartIngredientClarification(results,rawText)){
+  const contextualResults=voiceContext
+    ?results.map(result=>attachVoiceContext(result&&typeof result==='object'?{...result}:result,voiceContext))
+    :results;
+  if(maybeStartIngredientClarification(contextualResults,rawText)){
     voiceDebugTrace('final_action',{action:'voice_clarification'});
     return;
   }
-  if(maybeShowFoodChoiceReview(results,rawText)){
+  if(maybeShowFoodChoiceReview(contextualResults,rawText)){
     voiceDebugTrace('final_action',{action:'food_choice_review'});
     return;
   }
-  showBatchHeard(results);
-  const foodResults=results.filter(r=>!r.command);
+  showBatchHeard(contextualResults);
+  const foodResults=contextualResults.filter(r=>!r.command);
   if(foodResults.length===1&&shouldAskQuantityBeforeReview(foodResults[0])){
     itemQueue.push(foodResults[0]);
     voiceDebugTrace('final_action',{action:'queue_quantity_prompt',queued:voiceDebugResultSummary(foodResults)});
@@ -2883,17 +3007,17 @@ function handleParsed(results,rawText=''){
   const reviewItems=foodResults.filter(r=>!isClearIngredient(r));
   if(reviewItems.length){
     const clearItems=foodResults.filter(isClearIngredient);
-    autoAddClearItems(clearItems);
+    autoAddClearItems(clearItems,voiceContext);
     voiceDebugTrace('final_action',{action:'multi_confirm',reviewItems:voiceDebugResultSummary(reviewItems),autoAdded:voiceDebugResultSummary(clearItems)});
-    showMultiConfirm(reviewItems);
+    showMultiConfirm(reviewItems,voiceContext);
     return;
   }
-  if(batchNeedsMultiConfirm(results)){
-    voiceDebugTrace('final_action',{action:'multi_confirm',reviewItems:voiceDebugResultSummary(results.filter(r=>!r.command))});
-    showMultiConfirm(results);return;
+  if(batchNeedsMultiConfirm(contextualResults)){
+    voiceDebugTrace('final_action',{action:'multi_confirm',reviewItems:voiceDebugResultSummary(contextualResults.filter(r=>!r.command))});
+    showMultiConfirm(contextualResults,voiceContext);return;
   }
-  itemQueue.push(...results);
-  voiceDebugTrace('final_action',{action:'queue',queued:voiceDebugResultSummary(results)});
+  itemQueue.push(...contextualResults);
+  voiceDebugTrace('final_action',{action:'queue',queued:voiceDebugResultSummary(contextualResults)});
   processQueue([]);
 }
 function processQueue(autoAdded=[]){
@@ -2919,8 +3043,8 @@ function processQueue(autoAdded=[]){
       askQuantity(next);
       return;
     }
-    autoAddItem(next);
-    autoAdded.push(next);
+    const added=autoAddItem(next,next.__voiceContext||null);
+    if(added) autoAdded.push(next);
     processQueue(autoAdded);
     return;
   }
@@ -3505,7 +3629,7 @@ function doConfirm(){
       }
     }
   }
-  addIngredientToMeal(pendingFood, {source:'voice'});
+  addIngredientToMeal(pendingFood, {source:'voice', voiceContext:pendingFood.__voiceContext||null});
   _confirmManualMacros=false;
   const name=pendingFood.name;
   speakSuccessCue(()=>{
@@ -3534,12 +3658,12 @@ function parseGramsFromText(text){
   const m=String(text||'').match(/(\d+(?:\.\d+)?)\s*(?:g(?:rams?)?)?/i);
   return m?parseFloat(m[1]):null;
 }
-function commitQuantity(grams){
+function commitQuantity(grams, voiceContext=null){
   if(!pendingFood||!pendingFood.rawFood) return;
   const food=pendingFood.rawFood;
   const r=grams/food.w;
   const item={name:food.name,weight:Math.round(grams),kcal:Math.round(food.kcal*r),protein:Math.round(food.p*r*10)/10,carbs:Math.round(food.c*r*10)/10,fat:Math.round(food.f*r*10)/10,fibre:Math.round((food.fi||0)*r*10)/10,icon:food.icon,type:food.type||'solid',rawFood:food};
-  addIngredientToMeal(item, {source:'voice'});
+  addIngredientToMeal(item, {source:'voice', voiceContext:voiceContext||pendingFood.__voiceContext||null});
   clearVoicePromptOwner('quantity_resolved');
   showToast('Added '+item.name+' '+Math.round(grams)+'g ✓');
   pendingFood=null;
@@ -3904,7 +4028,7 @@ function batchNeedsMultiConfirm(results){
   if(food.some(r=>!isClearIngredient(r))) return true;
   return false;
 }
-function showMultiConfirm(results){
+function showMultiConfirm(results,voiceContext=null){
   pendingBatch=results.filter(r=>!r.command).map(r=>{
     const options=_multiConfirmOptionsForItem(r);
     let entry;
@@ -3913,6 +4037,7 @@ function showMultiConfirm(results){
       const selectedIdx=Math.max(0,options.findIndex(food=>r.rawFood&&(food.name===r.rawFood.name||food.id===r.rawFood.id)));
       entry={ambiguous:false,label:r.name,options,selectedIdx,food:r.rawFood||null,weight:r.weight||r.rawFood?.w||100,weightSpecified:!!r.weightSpecified,rawItem:r,manualMacros:false,showCreate:false,customName:r.heardName||r.name||'',customKcal:'',customProtein:'',customCarbs:'',customFat:''};
     }
+    entry.voiceContext=voiceContext||r.__voiceContext||null;
     _updateEntryMacros(entry);
     return entry;
   });
@@ -4078,7 +4203,7 @@ function commitMultiConfirm(){
       const r=origW>0?w/origW:1;
       item={...ri,weight:w,kcal:Math.round((ri.kcal||0)*r),protein:Math.round((ri.protein||0)*r*10)/10,carbs:Math.round((ri.carbs||0)*r*10)/10,fat:Math.round((ri.fat||0)*r*10)/10,fibre:Math.round((ri.fibre||0)*r*10)/10};
     }
-    addIngredientToMeal(item, {source:'voice', skipSnapshot:true, skipPersist:true});
+    addIngredientToMeal(item, {source:'voice', skipSnapshot:true, skipPersist:true, voiceContext:entry.voiceContext||entry.rawItem?.__voiceContext||null});
   });
   _persistDraft();
   if(overrideCandidate){_pendingOverride=overrideCandidate;setTimeout(()=>_showOverridePrompt(overrideCandidate.name),600);}
@@ -4569,6 +4694,7 @@ function generateMealNameFromIngredients(ingredients,fallbackSection){
   return names[0]+' + '+(names.length-1)+' items';
 }
 function saveMealToLog(saveAsUsual=false){
+  invalidateVoiceTurns('meal saved');
   const date=(typeof selectedLogDate!=='undefined'?selectedLogDate:todayStr()),log=getLog();
   if(!log[date]) log[date]={meals:[],totals:{kcal:0,protein:0,carbs:0,fat:0,fibre:0}};
   const section=currentMealSection||defaultSectionFromTime();
@@ -4793,6 +4919,11 @@ function buildTapRec(){
     clearPendingTapTranscript();
     clearTapFinalizeTimer('finalizing_transcript',{transcript});
 
+    if(!claimVoiceFinalTranscript(owner,transcript)) return;
+    const voiceContext=voiceContextFromOwner(owner);
+    const turnId=beginVoiceTranscriptTurn(transcript,voiceContext);
+    voiceContext.turnId=turnId;
+
     requestTapStop('finalizing transcript');
 
     stopTapRec();
@@ -4800,7 +4931,8 @@ function buildTapRec(){
       source:'tap',
       confidence:finalConf,
       alternatives,
-      timing:{listenStartedAt:voiceListenStartedAt,firstHeardAt}
+      timing:{listenStartedAt:voiceListenStartedAt,firstHeardAt},
+      voiceContext
     });
   }
 
@@ -4889,6 +5021,15 @@ function buildTapRec(){
       voiceDebugTrace('interim_transcript',{source:'tap',transcript:heard,turnId:activeVoiceTranscriptTurn||voiceTranscriptTurn+1});
     }
     if(final){
+      const finalClean=normalizeVoiceTranscriptText(final);
+      if(finalClean&&normalizeVoiceTranscriptText(pendingTranscript)===finalClean){
+        voiceDebugTrace('duplicate_transcript_ignored',{
+          source:'tap',
+          transcript:finalClean,
+          ...tapRunTraceData(run)
+        });
+        return;
+      }
       run.hadFinal=true;
       if(!pendingTranscript) utteranceStartTime=Date.now();
       const previousTranscript=pendingTranscript;
@@ -4980,9 +5121,14 @@ function buildTapRec(){
   return r;
 }
 function stopTapRec(){
+  const rec=tapRec;
   clearVoiceListeningWatchdog();
   clearVoiceRecognizerStartTimer();
   cancelTapFinalizer('tap recognition stopped');
+  if(rec&&typeof rec.__sousSetOwner==='function'){
+    rec.__sousSetOwner({...voiceOwnerSnapshot({source:'tap'}),recognizerRunId:-1,stopped:true});
+  }
+  if(tapRec===rec) tapRec=null;
   if(isRecording||voiceCurrentlyListening) console.log('[Sous Voice] tap listen stop');
   isRecording=false;
   voiceCurrentlyListening=false;
@@ -5393,7 +5539,17 @@ function startTapRec(opts={}){
     logVoiceState('duplicate recognizer blocked');
     return;
   }
-  if(!tapRec) tapRec=buildTapRec();
+  if(tapRec){
+    const replacedRec=tapRec;
+    cancelTapFinalizer('recognizer replacement');
+    if(typeof replacedRec.__sousSetOwner==='function'){
+      replacedRec.__sousSetOwner({...voiceOwnerSnapshot({source:'tap'}),recognizerRunId:-1,replaced:true});
+    }
+    tapRec=null;
+    try{replacedRec.abort?replacedRec.abort():replacedRec.stop&&replacedRec.stop();}catch(e){}
+  }
+  tapRec=buildTapRec();
+  if(!tapRec) return;
   if(sousRealtime&&sousRealtime.active){console.log('[Sous Voice] recognizer conflict avoided');stopSousRealtimeVoice(false);}
   if(clarificationRec){console.log('[Sous Voice] recognizer conflict avoided');try{clarificationRec.stop();}catch(e){}clarificationRec=null;}
   pauseAlwaysOn();
@@ -5418,7 +5574,11 @@ function startTapRec(opts={}){
       recoverTapRecognizerStack('recognition_start_overlap',owner,{delay:VOICE_RESTART_DEFAULT_MS});
       return;
     }
+    const failedRec=tapRec;
     cancelTapFinalizer('recognizer replacement');
+    if(failedRec&&typeof failedRec.__sousSetOwner==='function'){
+      failedRec.__sousSetOwner({...owner,recognizerRunId:-1,failedStart:true});
+    }
     tapRec=buildTapRec();
     if(tapRec&&typeof tapRec.__sousSetOwner==='function') tapRec.__sousSetOwner(owner);
     tapRecStarting=true;
@@ -5676,7 +5836,7 @@ function wireLogButtons(){
   document.getElementById('qty-input').addEventListener('keydown',e=>{if(e.key==='Enter'){const g=parseFloat(e.target.value);if(g&&g>0)commitQuantity(g);}});
   document.getElementById('qty-default-btn').addEventListener('click',()=>{
     if(!pendingFood) return;
-    addIngredientToMeal({...pendingFood}, {source:'voice'});
+    addIngredientToMeal({...pendingFood}, {source:'voice', voiceContext:pendingFood.__voiceContext||null});
     showToast('Added '+pendingFood.name+' ✓');
     pendingFood=null;
     showLogScreen('listening');
