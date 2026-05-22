@@ -40,6 +40,7 @@ function switchTab(tab,opts={}){
   if(tab==='home') renderHome();
   if(tab==='history') { if(typeof renderHistoryDay==='function') renderHistoryDay(); }
   if(tab==='recipes') { if(typeof renderRecipeList==='function') renderRecipeList(); }
+  if(tab==='profile') { if(typeof renderMealMemoryManagement==='function') renderMealMemoryManagement(); }
   if(tab==='log'){
     if(opts.fresh){
       if(opts.silent&&typeof startSilentLog==='function') startSilentLog(opts.section||null,opts.quick||false);
@@ -1839,7 +1840,7 @@ function updateHome(){ if(currentTab==='home') renderHome(); }
 // ═══════════════════════════════════════════
 // PWA — MANIFEST + SERVICE WORKER
 // ═══════════════════════════════════════════
-const SOUS_CACHE_VERSION='sous-v7';
+const SOUS_CACHE_VERSION='sous-v8';
 
 window.__sousClearCachesAndReload=async function(){
   if('serviceWorker' in navigator){

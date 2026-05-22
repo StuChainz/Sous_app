@@ -209,6 +209,120 @@ function saveProfileData(){
   showToast(hasTargets?'Profile saved + targets calculated ✓':'Profile saved — add missing details for targets');
 }
 
+// ── Meal memories ───────────────────────────────
+function formatMealMemorySection(section){
+  const labels={breakfast:'Breakfast',lunch:'Lunch',dinner:'Dinner',snacks:'Snacks',supplements:'Supplements'};
+  return labels[section]||'No section';
+}
+function formatMealMemoryLastUsed(memory){
+  if(!memory?.lastUsed) return 'Never used';
+  const d=new Date(memory.lastUsed);
+  if(Number.isNaN(d.getTime())) return 'Never used';
+  return 'Last used '+d.toLocaleDateString('en-GB',{day:'numeric',month:'short'});
+}
+function mealMemoryButton(label,handler,kind='secondary'){
+  const btn=document.createElement('button');
+  btn.type='button';
+  btn.className='btn-secondary';
+  btn.textContent=label;
+  btn.style.cssText='flex:0 0 auto;width:auto;padding:7px 9px;font-size:12px;';
+  if(kind==='danger') btn.style.color='var(--red)';
+  btn.addEventListener('click',handler);
+  return btn;
+}
+function renderMealMemoryManagement(){
+  const mount=document.getElementById('meal-memory-list');
+  if(!mount) return;
+  const memories=typeof getMealMemories==='function'?getMealMemories():[];
+  mount.innerHTML='';
+  if(!memories.length){
+    const empty=document.createElement('div');
+    empty.className='form-row';
+    empty.style.borderBottom='none';
+    const body=document.createElement('div');
+    const title=document.createElement('div');
+    title.className='form-row-label';
+    title.textContent='No remembered meals yet';
+    const sub=document.createElement('div');
+    sub.className='form-row-sub';
+    sub.textContent='Saved meals will appear here';
+    body.append(title,sub);
+    empty.appendChild(body);
+    mount.appendChild(empty);
+    return;
+  }
+  memories.forEach(memory=>{
+    const row=document.createElement('div');
+    row.className='form-row';
+    row.style.alignItems='flex-start';
+    row.style.flexDirection='column';
+    row.style.gap='9px';
+
+    const top=document.createElement('div');
+    top.style.cssText='display:flex;align-items:flex-start;justify-content:space-between;gap:10px;width:100%;';
+    const body=document.createElement('div');
+    body.style.minWidth='0';
+    const title=document.createElement('div');
+    title.className='form-row-label';
+    title.textContent=memory.name||'Meal memory';
+    const sub=document.createElement('div');
+    sub.className='form-row-sub';
+    const phrases=(memory.phrases||[]).join(', ');
+    sub.textContent=formatMealMemorySection(memory.section)+' · '+(memory.ingredients?.length||0)+' ingredient'+((memory.ingredients?.length||0)===1?'':'s')+' · '+Math.round(Number(memory.totals?.kcal)||0)+' kcal';
+    const phraseLine=document.createElement('div');
+    phraseLine.className='form-row-sub';
+    phraseLine.textContent=phrases||'No phrases';
+    const useLine=document.createElement('div');
+    useLine.className='form-row-sub';
+    useLine.textContent=(memory.useCount||0)+' use'+((memory.useCount||0)===1?'':'s')+' · '+formatMealMemoryLastUsed(memory);
+    body.append(title,sub,phraseLine,useLine);
+
+    const actions=document.createElement('div');
+    actions.style.cssText='display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end;';
+    actions.append(
+      mealMemoryButton('Rename',()=>renameMealMemoryFromProfile(memory.id)),
+      mealMemoryButton('Phrases',()=>editMealMemoryPhrasesFromProfile(memory.id)),
+      mealMemoryButton('Delete',()=>deleteMealMemoryFromProfile(memory.id),'danger')
+    );
+    top.append(body,actions);
+    row.appendChild(top);
+    mount.appendChild(row);
+  });
+}
+function renameMealMemoryFromProfile(id){
+  const memory=typeof findMealMemoryById==='function'?findMealMemoryById(id):null;
+  if(!memory) return;
+  const name=window.prompt('Name',memory.name||'');
+  if(name==null) return;
+  const clean=name.trim();
+  if(!clean){showToast('Name this meal');return;}
+  updateMealMemory(id,{name:clean});
+  renderMealMemoryManagement();
+  showToast('Memory renamed');
+}
+function editMealMemoryPhrasesFromProfile(id){
+  const memory=typeof findMealMemoryById==='function'?findMealMemoryById(id):null;
+  if(!memory) return;
+  const current=(memory.phrases||[]).join('\n');
+  const value=window.prompt('Trigger phrases',current);
+  if(value==null) return;
+  const phrases=typeof normalizeMealMemoryPhrases==='function'
+    ?normalizeMealMemoryPhrases(value)
+    :value.split(/[,\n]/).map(p=>p.toLowerCase().trim()).filter(Boolean);
+  if(!phrases.length){showToast('Add a trigger phrase');return;}
+  updateMealMemory(id,{phrases});
+  renderMealMemoryManagement();
+  showToast('Phrases updated');
+}
+function deleteMealMemoryFromProfile(id){
+  const memory=typeof findMealMemoryById==='function'?findMealMemoryById(id):null;
+  if(!memory) return;
+  if(!window.confirm('Delete '+(memory.name||'this memory')+'?')) return;
+  if(typeof removeMealMemory==='function') removeMealMemory(id);
+  renderMealMemoryManagement();
+  showToast('Memory deleted');
+}
+
 // ── Bodyweight ──────────────────────────────────
 function profLogWeight(){
   const inp=document.getElementById('prof-bw-input');
@@ -313,4 +427,4 @@ function applyRecal(){
 }
 function dismissRecal(){localStorage.setItem(KEYS.recalDismissed,Date.now().toString());document.getElementById('recal-banner').classList.remove('show');}
 function closeRecalModal(){document.getElementById('recal-modal').classList.remove('show');}
-function initProfile(){loadProfileData();}
+function initProfile(){loadProfileData();renderMealMemoryManagement();}

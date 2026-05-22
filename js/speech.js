@@ -4180,6 +4180,7 @@ function saveCurrentMealMemory(){
     source:'current-meal'
   });
   closeRememberMealModal();
+  if(typeof renderMealMemoryManagement==='function') renderMealMemoryManagement();
   showToast('Remembered '+memory.name,2600);
 }
 
