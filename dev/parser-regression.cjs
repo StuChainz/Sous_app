@@ -17,6 +17,14 @@ const tests = [
   {input:'full fat greek yogurt 50g', expect:{minItems:1, names:['Full fat Greek yoghurt'], quantity:true}},
   {input:'2 slices bread', expect:{minItems:1, quantity:true, confirm:true}},
   {input:'1 slice toast', expect:{minItems:1, quantity:true}},
+  {input:'oats 75', expect:{minItems:1, names:['Oats'], quantity:true, weights:[{name:'Oats', weight:75}]}},
+  {input:'oats 75g', expect:{minItems:1, names:['Oats'], quantity:true, weights:[{name:'Oats', weight:75}]}},
+  {input:'oats 2 servings', expect:{minItems:1, names:['Oats'], quantity:true, weights:[{name:'Oats', weight:180}]}},
+  {input:'banana 2', expect:{minItems:1, names:['Banana'], quantity:true, weights:[{name:'Banana', weight:240}]}},
+  {input:'banana 100g', expect:{minItems:1, names:['Banana'], quantity:true, weights:[{name:'Banana', weight:100}]}},
+  {input:'apple 2', expect:{minItems:1, names:['Apple'], quantity:true, weights:[{name:'Apple', weight:360}]}},
+  {input:'bread 2', expect:{minItems:1, quantity:true, confirm:true, weights:[{name:'bread', weight:80}]}},
+  {input:'bread 80g', expect:{minItems:1, quantity:true, confirm:true, weights:[{name:'bread', weight:80}]}},
   {input:'spoon of olive oil', expect:{minItems:1, names:['Olive oil']}},
   {input:'tablespoon of oil', expect:{minItems:1, names:['Olive oil'], quantity:true}},
   {input:'chicken rice and veg', expect:{minItems:2, confirm:true}},
@@ -254,6 +262,7 @@ function itemSummary(item){
     confidence: item.confidence || null,
     needsConfirm: !!item.needsConfirm,
     rawFoodName: item.rawFood && item.rawFood.name ? item.rawFood.name : null,
+    serving: item.serving || null,
     customMacro: !!item.customMacro,
   };
 }
@@ -315,6 +324,16 @@ function duplicateNames(summary){
   return [...duplicates];
 }
 
+function weightForExpectedName(summary, expectedName){
+  const wanted = String(expectedName).toLowerCase();
+  const item = summary.find(candidate => {
+    const name = String(candidate.name || candidate.label || '').toLowerCase();
+    return name === wanted;
+  });
+  if(!item) return null;
+  return item.weight ?? item.amount ?? null;
+}
+
 function runOne(context, test, index){
   const started = Date.now();
   const record = {
@@ -360,6 +379,12 @@ function runOne(context, test, index){
         record.failures.push(`missing expected food "${name}"`);
       }
     }
+    for(const weightCheck of expect.weights || []){
+      const actual = weightForExpectedName(record.parsedResults, weightCheck.name);
+      if(actual !== weightCheck.weight){
+        record.failures.push(`expected ${weightCheck.name} to weigh ${weightCheck.weight}g, got ${actual == null ? 'none' : `${actual}g`}`);
+      }
+    }
     if(expect.quantity && !explicitQuantityCaptured(record.parsedResults, test.input)){
       record.failures.push('expected a quantity/weight to be captured');
     }
@@ -401,6 +426,54 @@ function runOne(context, test, index){
   return record;
 }
 
+const pendingQuantityTests = [
+  {food:'banana', answer:'2', weight:240, serving:{label:'banana', quantity:2}},
+  {food:'apple', answer:'2', weight:360, serving:{label:'apple', quantity:2}},
+  {food:'bread', answer:'2', weight:80, serving:{label:'slice', quantity:2}},
+  {food:'oats', answer:'75', weight:75},
+  {food:'oats', answer:'2', weight:null},
+];
+
+function runPendingQuantityOne(context, test, index){
+  const record = {
+    index: index + 1,
+    food: test.food,
+    answer: test.answer,
+    weight: null,
+    serving: null,
+    failures: [],
+    pass: true,
+  };
+  try{
+    const food = context.findFoodByText(test.food);
+    if(!food){
+      record.failures.push(`food not resolved: ${test.food}`);
+    } else {
+      const qty = context.extractQuantity(test.answer);
+      record.weight = context.quantityToGramsForFood(qty, food);
+      record.serving = context.quantityServingForFood(qty, food);
+      if(record.weight !== test.weight){
+        record.failures.push(`expected ${test.weight}g, got ${record.weight == null ? 'none' : `${record.weight}g`}`);
+      }
+      if(test.serving){
+        if(!record.serving){
+          record.failures.push(`expected serving ${test.serving.quantity} ${test.serving.label}, got none`);
+        } else {
+          const label = String(record.serving.label || '').toLowerCase();
+          const expectedLabel = String(test.serving.label || '').toLowerCase();
+          if(label !== expectedLabel || Number(record.serving.quantity) !== Number(test.serving.quantity)){
+            record.failures.push(`expected serving ${test.serving.quantity} ${test.serving.label}, got ${record.serving.quantity} ${record.serving.label}`);
+          }
+        }
+      }
+    }
+  }catch(error){
+    record.failures.push(error && error.stack ? error.stack : String(error));
+  }
+  record.pass = record.failures.length === 0;
+  return record;
+}
+
 function severity(record){
   let score = 0;
   if(record.errorsThrown.length) score += 1000;
@@ -426,7 +499,9 @@ function main(){
   const args = new Set(process.argv.slice(2));
   const context = createParserContext();
   const records = tests.map((test, index) => runOne(context, test, index));
+  const pendingRecords = pendingQuantityTests.map((test, index) => runPendingQuantityOne(context, test, index));
   const failed = records.filter(record => !record.pass);
+  const pendingFailed = pendingRecords.filter(record => !record.pass);
   const suspicious = records.filter(record => record.suspicious.length);
   const errors = records.filter(record => record.errorsThrown.length);
   const duplicates = records.filter(record => record.suspicious.some(item => item.includes('duplicate item name')));
@@ -441,6 +516,8 @@ function main(){
     total: records.length,
     passed: records.length - failed.length,
     failed: failed.length,
+    pendingQuantityPassed: pendingRecords.length - pendingFailed.length,
+    pendingQuantityFailed: pendingFailed.length,
     unexpectedErrors: errors.length,
     suspiciousOutputs: suspicious.length,
     duplicates: duplicates.length,
@@ -449,14 +526,15 @@ function main(){
   };
 
   if(args.has('--json')){
-    console.log(JSON.stringify({summary, worst20: worst, records}, null, 2));
-    process.exit(failed.length || errors.length ? 1 : 0);
+    console.log(JSON.stringify({summary, worst20: worst, records, pendingQuantityRecords: pendingRecords}, null, 2));
+    process.exit(failed.length || pendingFailed.length || errors.length ? 1 : 0);
   }
 
   console.log('Sous parser regression harness');
   console.log('================================');
   console.log(`Total: ${summary.total}`);
   console.log(`Pass/fail: ${summary.passed} pass, ${summary.failed} fail`);
+  console.log(`Pending quantity: ${summary.pendingQuantityPassed} pass, ${summary.pendingQuantityFailed} fail`);
   console.log(`Unexpected errors: ${summary.unexpectedErrors}`);
   console.log(`Suspicious outputs: ${summary.suspiciousOutputs}`);
   console.log(`Duplicates: ${summary.duplicates}`);
@@ -469,6 +547,16 @@ function main(){
   } else {
     worst.forEach(printRecord);
   }
+  if(pendingFailed.length){
+    console.log('\nPending quantity failures');
+    console.log('-------------------------');
+    pendingFailed.forEach(record => {
+      console.log(`#${record.index} ${record.food} + "${record.answer}"`);
+      console.log(`  Failures: ${record.failures.join(' | ')}`);
+      console.log(`  Weight: ${record.weight == null ? '?' : `${record.weight}g`}`);
+      console.log(`  Serving: ${record.serving ? `${record.serving.quantity} ${record.serving.label}` : 'none'}`);
+    });
+  }
 
   if(args.has('--all')){
     console.log('\nAll records');
@@ -478,7 +566,7 @@ function main(){
     console.log('\nTip: run with --all for every record, or --json for machine-readable output.');
   }
 
-  process.exit(failed.length || errors.length ? 1 : 0);
+  process.exit(failed.length || pendingFailed.length || errors.length ? 1 : 0);
 }
 
 main();
