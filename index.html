@@ -675,7 +675,7 @@ html,body{height:100%;height:var(--app-height);min-height:-webkit-fill-available
             <div class="pulse-ring" id="pr1"></div>
             <div class="pulse-ring" id="pr2"></div>
             <div class="pulse-ring" id="pr3"></div>
-            <div class="mic-btn" id="mic-btn"><i class="ti ti-microphone"></i></div>
+            <div class="mic-btn" id="mic-btn" role="button" tabindex="0" aria-label="Start voice logging"><i class="ti ti-microphone"></i></div>
           </div>
           <div class="listen-status" id="listen-status">Tap mic to start voice logging</div>
           <div class="waveform" id="waveform">
@@ -1134,6 +1134,19 @@ html,body{height:100%;height:var(--app-height);min-height:-webkit-fill-available
         <div class="info-box-body">
           Weigh <strong>2–3× per week</strong>, same days each week. Always <strong>first thing in the morning</strong> — before eating, after the bathroom.<br><br>
           Daily weight fluctuates 1–2 kg due to water and food. The <strong>7-day rolling average</strong> is what matters. We'll suggest a calorie recalibration every <strong>2 weeks</strong> if your trend diverges from goal.
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="section-label">Voice</div>
+        <div class="card">
+          <div class="form-row" style="border-bottom:none;">
+            <div class="form-row-label">Voice input mode</div>
+            <div class="segment" id="seg-voice-input-mode">
+              <button class="seg-btn active" data-val="continuous" onclick="setVoiceInputMode('continuous')">Continuous</button>
+              <button class="seg-btn" data-val="hold" onclick="setVoiceInputMode('hold')">Hold to talk</button>
+            </div>
+          </div>
         </div>
       </div>
 
