@@ -604,6 +604,130 @@ function handleDeterministicMemoryCommand(command,transcript){
   return true;
 }
 
+function mealMemoryDebugSummary(memory){
+  if(!memory) return null;
+  return {
+    id:memory.id||null,
+    name:memory.name||'',
+    section:memory.section||null,
+    ingredientCount:Array.isArray(memory.ingredients)?memory.ingredients.length:0,
+    useCount:Number(memory.useCount)||0
+  };
+}
+function ensureMealMemoryChoiceScreen(){
+  let screen=document.getElementById('ls-meal-memory-choice');
+  if(screen) return screen;
+  screen=document.createElement('div');
+  screen.className='log-screen';
+  screen.id='ls-meal-memory-choice';
+  screen.style.cssText='background:var(--bg);padding:16px 20px calc(var(--tab-h) + 24px);';
+  const title=document.createElement('div');
+  title.style.cssText='font-size:18px;font-weight:600;color:var(--text);margin-bottom:4px;';
+  title.textContent='Which saved meal?';
+  const sub=document.createElement('div');
+  sub.id='meal-memory-choice-sub';
+  sub.style.cssText='font-size:13px;color:var(--text-muted);margin-bottom:14px;';
+  const list=document.createElement('div');
+  list.id='meal-memory-choice-list';
+  list.style.cssText='display:flex;flex-direction:column;gap:8px;';
+  const cancel=document.createElement('button');
+  cancel.type='button';
+  cancel.id='meal-memory-choice-cancel';
+  cancel.textContent='Cancel';
+  cancel.style.cssText='margin:14px auto 0;display:block;background:none;border:none;color:var(--text-muted);font-size:13px;font-family:inherit;padding:8px 12px;cursor:pointer;';
+  screen.append(title,sub,list,cancel);
+  const confirm=document.getElementById('ls-confirm');
+  if(confirm&&confirm.parentNode) confirm.parentNode.insertBefore(screen,confirm.nextSibling);
+  else document.body.appendChild(screen);
+  return screen;
+}
+function showMealMemoryChoicePrompt(matches,transcript){
+  const safeMatches=(Array.isArray(matches)?matches:[]).filter(match=>match?.memory);
+  if(!safeMatches.length){
+    showToast('Which saved meal?',2600);
+    if(typeof maybeResumeVoiceSession==='function') maybeResumeVoiceSession(320);
+    return;
+  }
+  ensureMealMemoryChoiceScreen();
+  const sub=document.getElementById('meal-memory-choice-sub');
+  if(sub) sub.textContent='I heard "'+String(transcript||'').trim()+'". Tap the saved meal to use.';
+  const list=document.getElementById('meal-memory-choice-list');
+  if(list){
+    list.innerHTML='';
+    safeMatches.forEach(match=>{
+      const memory=match.memory;
+      const btn=document.createElement('button');
+      btn.type='button';
+      btn.style.cssText='width:100%;display:flex;align-items:center;justify-content:space-between;gap:10px;text-align:left;background:var(--card);border:.5px solid var(--border);border-radius:10px;padding:10px 12px;font-family:inherit;cursor:pointer;color:var(--text);';
+      const info=document.createElement('div');
+      const name=document.createElement('div');
+      name.style.cssText='font-size:14px;font-weight:600;';
+      name.textContent=memory.name||'Saved meal';
+      const meta=document.createElement('div');
+      meta.style.cssText='font-size:12px;color:var(--text-muted);margin-top:2px;';
+      const count=Array.isArray(memory.ingredients)?memory.ingredients.length:0;
+      meta.textContent=[memory.section||'meal',count+' item'+(count!==1?'s':'')].join(' · ');
+      info.append(name,meta);
+      const kcal=document.createElement('div');
+      kcal.style.cssText="font-size:12px;color:var(--text-muted);font-family:'Geist Mono',monospace;white-space:nowrap;";
+      kcal.textContent=Math.round(Number(memory.totals?.kcal)||0)+' kcal';
+      btn.append(info,kcal);
+      btn.addEventListener('click',()=>{
+        const applied=addMealMemoryToCurrent(memory);
+        if(!applied.ok&&applied.message) showToast(applied.message,2600);
+        if(typeof showLogScreen==='function') showLogScreen('listening');
+        if(typeof maybeResumeVoiceSession==='function') maybeResumeVoiceSession(250);
+      });
+      list.appendChild(btn);
+    });
+  }
+  const cancel=document.getElementById('meal-memory-choice-cancel');
+  if(cancel) cancel.onclick=()=>{if(typeof showLogScreen==='function') showLogScreen('listening'); if(typeof maybeResumeVoiceSession==='function') maybeResumeVoiceSession(320);};
+  if(typeof showLogScreen==='function') showLogScreen('meal-memory-choice');
+  showToast('Which saved meal?',2600);
+}
+function handlePersonalMealMemoryCommand(transcript){
+  if(typeof findBestMealMemoryMatch!=='function') return false;
+  const match=findBestMealMemoryMatch(transcript);
+  if(!match?.command) return false;
+  if(match.ambiguous){
+    if(typeof voiceDebugTrace==='function'){
+      voiceDebugTrace('parser_result',{
+        source:'personal-meal-memory',
+        transcript:String(transcript||'').trim(),
+        escalationReason:'ambiguous',
+        results:(match.matches||[]).map(item=>({command:'personal_meal_memory',ambiguous:true,score:item.score,memory:mealMemoryDebugSummary(item.memory)}))
+      });
+      voiceDebugTrace('transcript_routed',{route:'personal-meal-memory-ambiguous',source:'handleTranscript',transcript:String(transcript||'').trim()});
+    }
+    showMealMemoryChoicePrompt(match.matches,transcript);
+    return true;
+  }
+  if(!match.matched||!match.memory) return false;
+  if(typeof voiceDebugTrace==='function'){
+    voiceDebugTrace('parser_result',{
+      source:'personal-meal-memory',
+      transcript:String(transcript||'').trim(),
+      escalationReason:'none',
+      results:[{command:'personal_meal_memory',score:match.score,memory:mealMemoryDebugSummary(match.memory),transformText:match.command.transformText||''}]
+    });
+    voiceDebugTrace('transcript_routed',{route:'personal-meal-memory',source:'handleTranscript',transcript:String(transcript||'').trim()});
+  }
+  const applied=addMealMemoryToCurrent(match.memory);
+  if(!applied.ok){
+    if(applied.message) showToast(applied.message,2600);
+    if(typeof maybeResumeVoiceSession==='function') maybeResumeVoiceSession(320);
+    return true;
+  }
+  if(match.command.transformText){
+    showToast('Added meal. Check the edit.',2600);
+  }
+  if(typeof voiceDebugTrace==='function') voiceDebugTrace('final_action',{action:'personal_meal_memory_recall',memory:mealMemoryDebugSummary(match.memory),transformText:match.command.transformText||''});
+  if(typeof speakSuccessCue==='function') speakSuccessCue();
+  else if(typeof maybeResumeVoiceSession==='function') maybeResumeVoiceSession(250);
+  return true;
+}
+
 function aiActionHasSourceRef(action){
   const source=action?.source||{};
   return !!(action?.usualRef||source.ref||source.kind==='history_meal'||source.kind==='usual_meal'||source.date||source.dateOffset!=null||source.when||source.section||source.query);
@@ -787,6 +911,7 @@ function aiDraftToParserResults(draft){
 // parser found food(s) but meaningful unresolved words remain in the transcript.
 async function handleTranscript(transcript,rawText){
   const cleanTranscript=String(transcript||'').trim();
+  if(handlePersonalMealMemoryCommand(cleanTranscript)) return;
   if(handleDeterministicMemoryCommand(parseDeterministicMemoryCommand(cleanTranscript),cleanTranscript)) return;
   if(cleanTranscript&&canUseAIInterpretation()&&typeof aiActionReferenceTrigger==='function'&&aiActionReferenceTrigger(cleanTranscript)&&typeof interpretMealActionWithAI==='function'){
     try{
