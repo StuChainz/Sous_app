@@ -1404,6 +1404,8 @@ function updateDateNav(){
   const isToday=selectedLogDate===localDateStr();
   const lbl=document.getElementById('date-label');
   if(lbl) lbl.textContent=isToday?'Today':formatDisplayDate(selectedLogDate);
+  const picker=document.getElementById('date-picker');
+  if(picker) picker.value=selectedLogDate;
   const dateLbl=document.getElementById('home-date-label');
   if(dateLbl) dateLbl.textContent=isToday?'Today so far':formatDisplayDate(selectedLogDate);
   const mealsLbl=document.getElementById('home-meals-label');
@@ -1958,7 +1960,9 @@ function renderHome(){
   const t=dayData.totals||{kcal:0,protein:0,carbs:0,fat:0,fibre:0};
   const mealWindow=getJotMealWindow();
   const mealLabel=(HOME_MEAL_SECTIONS.find(s=>s.key===mealWindow)?.label)||'Snacks';
-  document.getElementById('home-greeting').textContent='Today · '+new Date().toLocaleDateString('en-GB',{weekday:'short',day:'numeric',month:'short'});
+  const selectedDateObj=new Date(selectedLogDate+'T12:00:00');
+  const selectedDateLabel=selectedDateObj.toLocaleDateString('en-GB',{weekday:'short',day:'numeric',month:'short'});
+  document.getElementById('home-greeting').textContent=(selectedLogDate===localDateStr()?'Today':'Viewing')+' · '+selectedDateLabel;
   const profileName=profile.name?'<span class="home-user">'+escapeHtml(profile.name)+'</span>':'';
   document.getElementById('home-name').innerHTML='<em>'+escapeHtml(mealLabel)+'</em>'+profileName;
   const context=document.getElementById('home-meal-context');
