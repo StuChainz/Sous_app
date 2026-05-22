@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en" data-palette="ceramic" class="theme-light">
+<html lang="en" data-mode="light" data-hl="yellow" data-palette="paper" class="theme-light">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
@@ -7,27 +7,36 @@
 <meta name="color-scheme" content="light dark">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="Sous">
-<title>Sous</title>
+<meta name="apple-mobile-web-app-title" content="Jot">
+<title>Jot</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23F4F0E6'/%3E%3Cpath d='M16 43h32v5H16zM18 16h28v5H18zM18 27h22v5H18z' fill='%2315140F'/%3E%3Cpath d='M16 34h29v6H16z' fill='%23F4C81E'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600&family=Geist+Mono:wght@400;500;600&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600;700&family=Geist+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3/dist/tabler-icons.min.css">
 <script>
 (function(){
-  const fromPalette=p=>{
-    if(p==='ember'||p==='phosphor'||p==='midnight')return{mode:'dark',palette:p};
-    if(p==='ceramic'||p==='ceramic-phosphor'||p==='ceramic-midnight')return{mode:'light',palette:p};
-    return{mode:'light',palette:'ceramic'};
+  const fromSaved=t=>{
+    const raw=typeof t==='string'?{palette:t}:t||{};
+    if(raw.mode&&raw.hl)return{mode:raw.mode==='dark'?'dark':'light',hl:['yellow','blue','pink'].includes(raw.hl)?raw.hl:'yellow'};
+    const p=raw.palette||raw.accent;
+    if(p==='midnight'||p==='ceramic-midnight')return{mode:p==='midnight'?'dark':'light',hl:'blue'};
+    if(p==='phosphor'||p==='ceramic-phosphor')return{mode:p==='phosphor'?'dark':'light',hl:'yellow'};
+    if(p==='ember')return{mode:'dark',hl:'yellow'};
+    return{mode:'light',hl:'yellow'};
   };
-  let theme=fromPalette();
+  let theme=fromSaved();
   try{
-    theme=fromPalette((JSON.parse(localStorage.getItem('sous_theme')||'{}')||{}).palette);
+    theme=fromSaved(JSON.parse(localStorage.getItem('sous_theme')||'{}')||{});
+    // Keep legacy sous_* keys for compatibility; default new installs to hold-to-talk.
+    if(!localStorage.getItem('sous_voice_input_mode'))localStorage.setItem('sous_voice_input_mode','hold');
   }catch(e){}
-  document.documentElement.setAttribute('data-palette',theme.palette);
+  document.documentElement.setAttribute('data-mode',theme.mode);
+  document.documentElement.setAttribute('data-hl',theme.hl);
+  document.documentElement.setAttribute('data-palette',theme.mode==='dark'?'ink':'paper');
   document.documentElement.classList.toggle('theme-light',theme.mode==='light');
   document.documentElement.classList.toggle('theme-dark',theme.mode==='dark');
-  document.querySelector('meta[name="theme-color"]')?.setAttribute('content',theme.mode==='light'?'#F4EFE6':'#14110D');
+  document.querySelector('meta[name="theme-color"]')?.setAttribute('content',theme.mode==='light'?'#F4F0E6':'#1A1611');
 })();
 </script>
 <style>
@@ -51,7 +60,7 @@
   --purple:var(--accent); --purple-light:var(--accent-soft);
   --purple-mid:var(--accent-2); --purple-pale:var(--accent-pale);
   --font-mono:'Geist Mono','SF Mono',ui-monospace,monospace;
-  --font-display:'Instrument Serif',Georgia,serif;
+  --font-display:'Geist',system-ui,sans-serif;
 }
 [data-palette="phosphor"]{
   --accent:#B8E84E; --accent-2:#CDF373;
@@ -186,8 +195,8 @@ html,body{height:100%;height:var(--app-height);min-height:-webkit-fill-available
 .greeting-wrap{display:flex;align-items:center;gap:8px;margin-bottom:4px;}
 .greeting-dot{width:6px;height:6px;border-radius:50%;background:var(--accent);box-shadow:0 0 8px var(--accent-glow);flex-shrink:0;animation:pulseDot 2.6s ease-in-out infinite;}
 .home-greeting{font-size:11px;color:var(--text-muted);font-weight:500;text-transform:uppercase;letter-spacing:.16em;}
-.home-name{font-family:'Instrument Serif',serif;font-size:34px;font-weight:400;letter-spacing:-0.01em;color:var(--text);line-height:1.15;margin-bottom:0;}
-.home-name em{font-style:italic;color:var(--accent);}
+.home-name{font-family:'Geist',system-ui,sans-serif;font-size:34px;font-weight:600;letter-spacing:-0.01em;color:var(--text);line-height:1.15;margin-bottom:0;}
+.home-name em{font-style:normal;color:var(--accent);}
 .home-meal-section{margin-bottom:16px;}
 .home-meal-section:last-child{margin-bottom:0;}
 .home-meal-section-header{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:8px;padding:0 2px;}
@@ -553,15 +562,16 @@ html,body{height:100%;height:var(--app-height);min-height:-webkit-fill-available
          HOME
     ══════════════════════════════════════════════════ -->
     <div class="tab-pane active" id="pane-home">
-      <div class="page-header" style="padding-bottom:8px;">
-        <div class="greeting-wrap">
-          <div class="greeting-dot"></div>
-          <div class="home-greeting" id="home-greeting">Good morning</div>
+      <div class="h-head">
+        <div>
+          <div class="home-greeting" id="home-greeting">Today</div>
+          <div class="home-name" id="home-name">Breakfast</div>
+          <div class="h-day-sub" id="home-meal-context">Jot what you ate</div>
+          <div id="home-streak" style="display:none;">
+            <span class="streak-badge" id="home-streak-text">1 day streak</span>
+          </div>
         </div>
-        <div class="home-name" id="home-name">Hello, <em>chef</em></div>
-        <div id="home-streak" style="margin-top:6px;display:none;">
-          <span class="streak-badge" id="home-streak-text">🔥 1 day streak</span>
-        </div>
+        <div class="home-avatar" id="home-avatar">J</div>
       </div>
 
       <div class="no-profile-banner" id="no-profile-banner" style="display:none;">
@@ -569,7 +579,7 @@ html,body{height:100%;height:var(--app-height);min-height:-webkit-fill-available
         <button class="btn-primary" style="font-size:13px;padding:10px;" onclick="switchTab('profile')">Set up profile →</button>
       </div>
 
-      <div class="section" style="padding-bottom:0;">
+      <div class="section home-date-nav-section" style="padding-bottom:0;">
         <div class="date-nav-row">
           <button class="date-nav-btn" id="date-prev"><i class="ti ti-arrow-left"></i></button>
           <div class="date-nav-label" id="date-label">—</div>
@@ -578,74 +588,69 @@ html,body{height:100%;height:var(--app-height);min-height:-webkit-fill-available
         </div>
       </div>
 
-      <div class="section">
-        <div class="progress-card">
-          <div class="pcrd-top">
-            <div class="pcrd-kcal">
-              <div class="pcrd-kcal-label" id="home-date-label">Today so far</div>
-              <div class="pcrd-kcal-val" id="home-kcal">0</div>
-              <div class="pcrd-kcal-goal" id="home-kcal-goal">of — kcal</div>
-            </div>
-            <svg class="kcal-ring" viewBox="0 0 80 80">
-              <circle class="ring-bg" cx="40" cy="40" r="34"/>
-              <circle class="ring-fill" id="kcal-ring-fill" cx="40" cy="40" r="34"
-                stroke-dasharray="213.628" stroke-dashoffset="213.628"
-                transform="rotate(-90 40 40)"/>
-              <text class="ring-text" x="40" y="40" id="kcal-ring-pct">0%</text>
-            </svg>
+      <div class="num-strip">
+        <div class="num-strip-card">
+          <div class="num-strip-row">
+            <div class="num-strip-l"><span id="home-kcal">0</span><span class="of" id="home-kcal-goal">/ — kcal</span></div>
+            <div class="num-strip-r"><span id="kcal-ring-pct">0%</span><b id="home-progress-state">on pace</b></div>
           </div>
-          <div class="macro-bars">
-            <div class="mbar-row">
-              <span class="mbar-name">Protein</span>
-              <div class="mbar-track"><div class="mbar-fill protein" id="bar-protein" style="width:0%"></div></div>
-              <span class="mbar-val" id="val-protein">0g</span>
-            </div>
-            <div class="mbar-row">
-              <span class="mbar-name">Carbs</span>
-              <div class="mbar-track"><div class="mbar-fill carbs" id="bar-carbs" style="width:0%"></div></div>
-              <span class="mbar-val" id="val-carbs">0g</span>
-            </div>
-            <div class="mbar-row">
-              <span class="mbar-name">Fat</span>
-              <div class="mbar-track"><div class="mbar-fill fat" id="bar-fat" style="width:0%"></div></div>
-              <span class="mbar-val" id="val-fat">0g</span>
-            </div>
-          </div>
+          <div class="kcal-pill-fill fill" id="kcal-pill-fill" style="width:0%"><span class="knob"></span></div>
         </div>
       </div>
 
-      <div class="section">
-        <div class="cta-btn" onclick="startCookingLog()">
-          <div class="cta-icon"><i class="ti ti-microphone"></i></div>
-          <div class="cta-label">Start cooking log</div>
-          <div class="cta-sub">Tap mic to start voice logging</div>
+      <div class="macro-row">
+        <div class="macro-cell">
+          <div class="k">P</div>
+          <div class="v" id="val-protein">0g</div>
+          <div class="bar"><i id="bar-protein" style="width:0%"></i></div>
         </div>
-        <div style="display:flex;gap:8px;margin-top:10px;">
-          <button class="btn-secondary" type="button" onclick="openPhotoEstimateCameraPicker()" data-testid="photo-estimate-camera-btn" style="flex:1;min-width:0;"><i class="ti ti-camera" style="margin-right:6px;"></i>Take photo</button>
-          <button class="btn-secondary" type="button" onclick="openPhotoEstimateLibraryPicker()" data-testid="photo-estimate-library-btn" style="flex:1;min-width:0;"><i class="ti ti-photo" style="margin-right:6px;"></i>Choose from photos</button>
+        <div class="macro-cell">
+          <div class="k">C</div>
+          <div class="v" id="val-carbs">0g</div>
+          <div class="bar"><i id="bar-carbs" style="width:0%"></i></div>
         </div>
-        <button class="btn-secondary" type="button" onclick="openBarcodeScannerFromHome()" style="margin-top:10px;width:100%;"><i class="ti ti-barcode" style="margin-right:6px;"></i>Scan barcode</button>
-        <input id="photo-estimate-input" type="file" accept="image/*" capture="environment" style="position:absolute;width:1px;height:1px;opacity:0;pointer-events:none;overflow:hidden;">
-        <input id="photo-estimate-library-input" type="file" accept="image/*" style="position:absolute;width:1px;height:1px;opacity:0;pointer-events:none;overflow:hidden;">
+        <div class="macro-cell">
+          <div class="k">F</div>
+          <div class="v" id="val-fat">0g</div>
+          <div class="bar"><i id="bar-fat" style="width:0%"></i></div>
+        </div>
       </div>
 
-      <div class="section">
-        <div class="section-label">Bodyweight</div>
-        <div class="card">
-          <div class="bw-row">
-            <input class="bw-input" id="home-bw-input" type="number" step="0.1" min="30" max="300" placeholder="82.5">
-            <span class="bw-unit">kg</span>
-            <button class="bw-btn" onclick="homeLogWeight()">Log</button>
+      <div class="home-scroll">
+        <div class="section">
+          <div class="section-label" id="home-meals-label">The usual</div>
+          <div id="home-meals-list">
+            <div class="empty-state"><i class="ti ti-bowl-spoon"></i>No meals logged yet today</div>
+          </div>
+        </div>
+
+        <div class="section home-entry-actions">
+          <div class="section-label"><span>Other ways to jot</span></div>
+          <div class="home-action-grid">
+            <button class="btn-secondary" type="button" onclick="openPhotoEstimateCameraPicker()" data-testid="photo-estimate-camera-btn"><i class="ti ti-camera"></i>Take photo</button>
+            <button class="btn-secondary" type="button" onclick="openPhotoEstimateLibraryPicker()" data-testid="photo-estimate-library-btn"><i class="ti ti-photo"></i>Choose photo</button>
+            <button class="btn-secondary wide" type="button" onclick="openBarcodeScannerFromHome()"><i class="ti ti-barcode"></i>Scan barcode</button>
+          </div>
+          <input id="photo-estimate-input" type="file" accept="image/*" capture="environment" style="position:absolute;width:1px;height:1px;opacity:0;pointer-events:none;overflow:hidden;">
+          <input id="photo-estimate-library-input" type="file" accept="image/*" style="position:absolute;width:1px;height:1px;opacity:0;pointer-events:none;overflow:hidden;">
+        </div>
+
+        <div class="section home-bodyweight">
+          <div class="section-label">Bodyweight</div>
+          <div class="card">
+            <div class="bw-row">
+              <input class="bw-input" id="home-bw-input" type="number" step="0.1" min="30" max="300" placeholder="82.5">
+              <span class="bw-unit">kg</span>
+              <button class="bw-btn" onclick="homeLogWeight()">Log</button>
+            </div>
           </div>
         </div>
       </div>
 
-      <div class="section">
-        <div class="section-label" id="home-meals-label">Today's meals</div>
-        <div id="home-meals-list">
-          <div class="empty-state"><i class="ti ti-bowl-spoon"></i>No meals logged yet today</div>
-        </div>
-      </div>
+      <button class="home-fab cta-btn" type="button" onclick="startCookingLog()" aria-label="Jot it, hold to speak">
+        <span class="lbl">Jot it<kbd>hold</kbd></span>
+        <span class="mic"><i class="ti ti-microphone"></i></span>
+      </button>
     </div>
 
     <!-- ══════════════════════════════════════════════════
@@ -656,15 +661,15 @@ html,body{height:100%;height:var(--app-height);min-height:-webkit-fill-available
       <!-- LISTENING -->
       <div class="log-screen active" id="ls-listening">
         <div class="listen-topbar">
-          <div class="listen-cancel" id="log-cancel-btn"><i class="ti ti-chevron-left"></i> Cancel</div>
-          <div class="listen-title">Cooking log</div>
+          <div class="listen-cancel" id="log-cancel-btn">Cancel</div>
+          <div class="listen-title"><span class="meal-chip" id="listen-meal-chip"><i class="ti ti-point-filled"></i> Breakfast</span></div>
           <div style="width:56px;"></div>
         </div>
         <div id="recent-ing-panel" style="display:none;"></div>
         <div class="perm-warn" id="perm-warn">Mic access needed — allow microphone in your browser settings and reload.</div>
         <div class="always-on-bar">
           <div class="aob-dot" id="aob-dot"></div>
-          <div class="aob-text" id="aob-text">Starting mic…</div>
+          <div class="aob-text" id="aob-text">Hold mic to log one item</div>
         </div>
         <div class="queue-bar" id="queue-bar">
           <div class="queue-label">Up next</div>
@@ -675,16 +680,16 @@ html,body{height:100%;height:var(--app-height);min-height:-webkit-fill-available
             <div class="pulse-ring" id="pr1"></div>
             <div class="pulse-ring" id="pr2"></div>
             <div class="pulse-ring" id="pr3"></div>
-            <div class="mic-btn" id="mic-btn" role="button" tabindex="0" aria-label="Start voice logging"><i class="ti ti-microphone"></i></div>
+            <div class="mic-btn" id="mic-btn" role="button" tabindex="0" aria-label="Hold to speak"><i class="ti ti-microphone"></i></div>
           </div>
-          <div class="listen-status" id="listen-status">Tap mic to start voice logging</div>
+          <div class="listen-status" id="listen-status">Hold to speak</div>
           <div class="waveform" id="waveform">
             <div class="wbar"></div><div class="wbar"></div><div class="wbar"></div><div class="wbar"></div><div class="wbar"></div>
             <div class="wbar"></div><div class="wbar"></div><div class="wbar"></div><div class="wbar"></div><div class="wbar"></div>
           </div>
         </div>
         <div class="transcript-box">
-          <div class="transcript-label">Heard</div>
+          <div class="transcript-label"><span class="log-eye-dot"></span><span id="capture-state-label">Ready</span></div>
           <div class="transcript-text" id="transcript-text">—</div>
         </div>
         <div id="voice-correct-bar">
@@ -701,16 +706,16 @@ html,body{height:100%;height:var(--app-height);min-height:-webkit-fill-available
         <div style="display:none;justify-content:flex-end;margin:6px 20px 0;" id="undo-row">
           <button id="undo-btn" style="background:none;border:none;padding:4px 8px;cursor:pointer;color:var(--text-muted);font-size:12px;display:inline-flex;align-items:center;gap:4px;"><i class="ti ti-arrow-back-up" style="font-size:14px;"></i> Undo</button>
         </div>
-        <button class="btn-secondary" id="finished-meal-btn" style="margin:12px 20px 0;width:calc(100% - 40px);">Finished meal</button>
-        <div style="text-align:center;margin:8px 20px 0;"><span id="add-custom-btn" style="font-size:13px;color:var(--text-muted);cursor:pointer;text-decoration:underline;text-underline-offset:2px;">+ Add custom ingredient</span></div>
-        <div class="listen-hint">Say ingredients + amounts · tap Finished meal when done</div>
+        <button class="btn-secondary" id="finished-meal-btn" style="margin:12px 20px 0;width:calc(100% - 40px);">Review meal</button>
+        <div class="add-custom-row" style="text-align:center;margin:8px 20px 0;"><span id="add-custom-btn" style="font-size:13px;color:var(--text-muted);cursor:pointer;text-decoration:underline;text-underline-offset:2px;">+ Add custom ingredient</span></div>
+        <div class="listen-hint">Hold to capture one item · edit rows before saving</div>
       </div>
 
       <!-- CONFIRM -->
       <div class="log-screen" id="ls-confirm">
         <div style="text-align:center;margin-bottom:12px;">
-          <div style="font-size:20px;font-weight:500;color:var(--text);margin-bottom:4px;">Got it!</div>
-          <div style="font-size:13px;color:var(--text-muted);">Does this look right?</div>
+          <div style="font-size:20px;font-weight:500;color:var(--text);margin-bottom:4px;">Review and confirm</div>
+          <div style="font-size:13px;color:var(--text-muted);">Edit before adding to the meal.</div>
         </div>
         <div class="conf-row">
           <div class="conf-dot high" id="conf-dot"></div>
@@ -744,7 +749,7 @@ html,body{height:100%;height:var(--app-height);min-height:-webkit-fill-available
           <button class="toggle-pill active" id="pill-raw">Raw</button>
           <button class="toggle-pill inactive" id="pill-cooked">Cooked</button>
         </div>
-        <div class="voice-hint-bar"><i class="ti ti-microphone"></i><span class="voice-hint-text" id="confirm-voice-hint">Say "yes" to confirm or "change" to try again</span></div>
+        <div class="voice-hint-bar"><i class="ti ti-pencil"></i><span class="voice-hint-text" id="confirm-voice-hint">Review and tap to confirm</span></div>
         <div class="action-stack">
           <button class="btn-primary" id="confirm-btn">✓ Confirm &amp; add</button>
           <div class="btn-row">
@@ -776,7 +781,7 @@ html,body{height:100%;height:var(--app-height);min-height:-webkit-fill-available
         <div style="font-size:18px;font-weight:600;color:var(--text);margin-bottom:4px;">Review ingredients</div>
         <div style="font-size:13px;color:var(--text-muted);margin-bottom:14px;">Choose each food, set amounts, then add.</div>
         <div id="mc-list" style="flex:1;overflow-y:auto;min-height:0;margin-bottom:12px;"></div>
-        <div class="voice-hint-bar" id="mc-voice-hint-bar"><i class="ti ti-microphone"></i><span class="voice-hint-text" id="mc-voice-hint">Say the missing type or amount, or edit below</span></div>
+        <div class="voice-hint-bar" id="mc-voice-hint-bar"><i class="ti ti-pencil"></i><span class="voice-hint-text" id="mc-voice-hint">Edit below or add to meal</span></div>
         <div class="action-stack">
           <button class="btn-primary" id="mc-add-btn">Add to meal</button>
           <button class="btn-secondary" id="mc-cancel-btn">Cancel</button>
@@ -795,32 +800,36 @@ html,body{height:100%;height:var(--app-height);min-height:-webkit-fill-available
         </div>
         <button class="btn-secondary" id="qty-default-btn" style="width:100%;margin-bottom:12px;flex:none;">Use default</button>
         <button class="btn-secondary" id="qty-usual-btn" style="width:100%;margin-bottom:12px;flex:none;display:none;">Use usual</button>
-        <div class="voice-hint-bar"><i class="ti ti-microphone"></i><span class="voice-hint-text" id="qty-voice-hint">Say the amount, e.g. "150 grams" or "200"</span></div>
+        <div class="voice-hint-bar"><i class="ti ti-pencil"></i><span class="voice-hint-text" id="qty-voice-hint">Enter the amount or hold mic again</span></div>
       </div>
 
       <!-- SUMMARY -->
-      <div class="log-screen" id="ls-summary">
-        <div style="font-size:22px;font-weight:500;color:var(--text);margin-bottom:2px;" id="sum-title">Meal summary</div>
-        <div style="font-size:13px;color:var(--text-muted);margin-bottom:14px;" id="sum-sub">0 ingredients</div>
-        <div style="margin-bottom:14px;">
-          <label style="font-size:12px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:.04em;display:block;margin-bottom:6px;">Meal name</label>
-          <input id="sum-meal-name" type="text" placeholder="e.g. Chicken &amp; rice" style="width:100%;box-sizing:border-box;background:var(--card);color:var(--text);border:.5px solid var(--border);border-radius:8px;padding:9px 12px;font-size:14px;font-family:inherit;">
+      <div class="log-screen review-screen" id="ls-summary">
+        <div class="rev-head">
+          <button type="button" class="back" id="summary-back-btn" onclick="showLogScreen('listening')" aria-label="Back to capture"><i class="ti ti-chevron-left"></i></button>
+          <div class="title"><small>Reviewing</small><span id="sum-review-title">Meal · Today</span></div>
+          <div class="more"><i class="ti ti-dots"></i></div>
         </div>
-        <div class="total-card">
-          <div class="total-lbl">Total calories</div>
-          <div class="total-kcal" id="sum-kcal">0</div>
-          <div class="total-macros">
-            <div class="total-macro"><div class="total-macro-val" id="sum-protein">0g</div><div class="total-macro-lbl">protein</div></div>
-            <div class="total-macro"><div class="total-macro-val" id="sum-carbs">0g</div><div class="total-macro-lbl">carbs</div></div>
-            <div class="total-macro"><div class="total-macro-val" id="sum-fat">0g</div><div class="total-macro-lbl">fat</div></div>
-            <div class="total-macro"><div class="total-macro-val" id="sum-fibre">0g</div><div class="total-macro-lbl">fibre</div></div>
-          </div>
+
+        <div class="rev-name-row">
+          <textarea id="sum-meal-name" class="rev-name-input" rows="2" placeholder="e.g. Oats, banana, whey"></textarea>
+          <div class="rev-name-meta"><span id="sum-sub">0 ingredients</span> · edit name</div>
         </div>
+
         <div class="ing-list" id="ing-list"></div>
-        <button class="add-more-btn" id="add-more-btn"><i class="ti ti-plus"></i> Add another ingredient</button>
-        <div style="display:flex;align-items:center;justify-content:space-between;margin:8px 0 4px;">
-          <span style="font-size:13px;color:var(--text-muted);">Meal section</span>
-          <select id="sum-section-select" style="background:var(--card);color:var(--text);border:.5px solid var(--border);border-radius:8px;padding:5px 10px;font-size:13px;font-family:inherit;">
+        <button class="add-ing-btn add-more-btn" id="add-more-btn"><i class="ti ti-plus"></i> Add ingredient</button>
+
+        <div class="rev-totals total-card">
+          <div class="cell kcal"><div class="k">kcal</div><div class="v" id="sum-kcal">0</div></div>
+          <div class="cell"><div class="k">Protein</div><div class="v" id="sum-protein">0g</div></div>
+          <div class="cell"><div class="k">Carbs</div><div class="v" id="sum-carbs">0g</div></div>
+          <div class="cell"><div class="k">Fat</div><div class="v" id="sum-fat">0g</div></div>
+          <div class="total-fibre" id="sum-fibre">0g</div>
+        </div>
+
+        <div class="rev-section-row">
+          <span>Meal section</span>
+          <select id="sum-section-select">
             <option value="breakfast">Breakfast</option>
             <option value="lunch">Lunch</option>
             <option value="dinner">Dinner</option>
@@ -828,12 +837,15 @@ html,body{height:100%;height:var(--app-height);min-height:-webkit-fill-available
             <option value="supplements">Supplements</option>
           </select>
         </div>
-        <label style="display:flex;align-items:flex-start;gap:9px;margin:12px 0 10px;font-size:13px;color:var(--text-muted);line-height:1.35;">
+        <label class="rev-save-usual-check">
           <input id="sum-save-usual" type="checkbox" style="margin-top:2px;accent-color:var(--accent);">
           <span>Save as custom meal for quick add</span>
         </label>
-        <button class="btn-secondary" id="remember-meal-btn" style="width:100%;margin:0 0 10px;flex:none;"><i class="ti ti-bookmark" style="vertical-align:-2px;font-size:14px;"></i> Remember meal</button>
-        <button class="btn-primary" id="save-meal-btn">Log meal</button>
+        <button class="btn-secondary" id="remember-meal-btn" style="display:none;"><i class="ti ti-bookmark" style="vertical-align:-2px;font-size:14px;"></i> Remember meal</button>
+        <div class="rev-save">
+          <button class="save btn-primary" id="save-meal-btn"><i class="ti ti-check"></i> Save meal</button>
+          <button class="save-as" type="button" id="save-usual-btn"><i class="ti ti-bookmark"></i> Usual</button>
+        </div>
       </div>
 
     </div>
@@ -849,13 +861,13 @@ html,body{height:100%;height:var(--app-height);min-height:-webkit-fill-available
           <div style="display:flex;justify-content:space-between;align-items:center;">
             <div>
               <div class="page-title">Recipes</div>
-              <div class="page-sub">Your saved recipes</div>
+              <div class="page-sub">Saved meal guides, kept out of the main flow</div>
             </div>
             <button onclick="showRsScreen('add')" style="background:var(--accent);color:#fff;border:none;border-radius:10px;padding:9px 14px;font-size:13px;font-weight:500;cursor:pointer;font-family:'Geist',sans-serif;display:flex;align-items:center;gap:5px;"><i class="ti ti-plus"></i>New</button>
           </div>
         </div>
         <div class="section" id="rs-list-content">
-          <div class="empty-state"><i class="ti ti-chef-hat"></i>No recipes yet — tap New to add one</div>
+          <div class="empty-state"><i class="ti ti-notebook"></i>No recipes yet — tap New to add one</div>
         </div>
       </div>
 
@@ -866,7 +878,7 @@ html,body{height:100%;height:var(--app-height);min-height:-webkit-fill-available
             <button onclick="showRsScreen('list')" style="background:none;border:none;cursor:pointer;color:var(--accent);font-size:22px;padding:0;line-height:1;"><i class="ti ti-arrow-left"></i></button>
             <div class="page-title">Add recipe</div>
           </div>
-          <div class="page-sub">Paste any recipe text and Sous will parse it</div>
+          <div class="page-sub">Paste meal prep notes and Jot will parse the basics</div>
         </div>
         <div class="section">
           <div class="section-label">Recipe name</div>
@@ -878,7 +890,7 @@ html,body{height:100%;height:var(--app-height);min-height:-webkit-fill-available
         </div>
         <div class="section">
           <div class="section-label">Paste recipe (optional)</div>
-          <textarea class="import-textarea" id="recipe-paste" placeholder="Paste ingredients &amp; steps here — any format works. Sous will find ingredients with amounts, and numbered/bulleted steps."></textarea>
+          <textarea class="import-textarea" id="recipe-paste" placeholder="Paste ingredients and steps here. Jot will find ingredients with amounts, plus numbered or bulleted steps."></textarea>
         </div>
         <div class="section">
           <button class="btn-primary" onclick="importRecipe()">Parse &amp; save →</button>
@@ -907,7 +919,7 @@ html,body{height:100%;height:var(--app-height);min-height:-webkit-fill-available
         <div class="section">
           <div class="btn-row">
             <button class="btn-secondary" id="rd-delete-btn" style="color:var(--red);border-color:var(--red);">Delete</button>
-            <button class="btn-primary" id="rd-cook-btn">Start cooking →</button>
+            <button class="btn-primary" id="rd-cook-btn">Open steps</button>
           </div>
         </div>
       </div>
@@ -1144,8 +1156,8 @@ html,body{height:100%;height:var(--app-height);min-height:-webkit-fill-available
           <div class="form-row" style="border-bottom:none;">
             <div class="form-row-label">Voice input mode</div>
             <div class="segment" id="seg-voice-input-mode">
-              <button class="seg-btn active" data-val="continuous" onclick="setVoiceInputMode('continuous')">Continuous</button>
-              <button class="seg-btn" data-val="hold" onclick="setVoiceInputMode('hold')">Hold to talk</button>
+              <button class="seg-btn active" data-val="hold" onclick="setVoiceInputMode('hold')">Hold to talk</button>
+              <button class="seg-btn" data-val="continuous" onclick="setVoiceInputMode('continuous')">Continuous</button>
             </div>
           </div>
         </div>
@@ -1162,22 +1174,22 @@ html,body{height:100%;height:var(--app-height);min-height:-webkit-fill-available
             </div>
           </div>
           <div class="form-row" style="border-bottom:none;flex-direction:column;align-items:stretch;gap:8px;">
-            <div class="form-row-label">Accent</div>
+            <div class="form-row-label">Highlight pen</div>
             <div class="accent-grid" id="accent-grid">
-              <div class="accent-swatch active" data-accent="ember" onclick="setThemeAccent('ember')">
-                <div class="accent-dot" style="background:#FF6B3D;"></div>
-                <div class="accent-bar" style="background:linear-gradient(90deg,#FF6B3D,#FF8A5C);"></div>
-                <div class="accent-name">Ember</div>
+              <div class="accent-swatch active" data-accent="yellow" onclick="setThemeAccent('yellow')">
+                <div class="accent-dot" style="background:#F4C81E;"></div>
+                <div class="accent-bar" style="background:linear-gradient(90deg,#F4C81E,#FFD93A);"></div>
+                <div class="accent-name">Yellow</div>
               </div>
-              <div class="accent-swatch" data-accent="phosphor" onclick="setThemeAccent('phosphor')">
-                <div class="accent-dot" style="background:#B8E84E;"></div>
-                <div class="accent-bar" style="background:linear-gradient(90deg,#B8E84E,#CDF373);"></div>
-                <div class="accent-name">Phosphor</div>
+              <div class="accent-swatch" data-accent="blue" onclick="setThemeAccent('blue')">
+                <div class="accent-dot" style="background:#9DBDEB;"></div>
+                <div class="accent-bar" style="background:linear-gradient(90deg,#9DBDEB,#B8D0F4);"></div>
+                <div class="accent-name">Blue</div>
               </div>
-              <div class="accent-swatch" data-accent="midnight" onclick="setThemeAccent('midnight')">
-                <div class="accent-dot" style="background:#7DB7FF;"></div>
-                <div class="accent-bar" style="background:linear-gradient(90deg,#7DB7FF,#9BC8FF);"></div>
-                <div class="accent-name">Midnight</div>
+              <div class="accent-swatch" data-accent="pink" onclick="setThemeAccent('pink')">
+                <div class="accent-dot" style="background:#F4B2C4;"></div>
+                <div class="accent-bar" style="background:linear-gradient(90deg,#F4B2C4,#FFD0DB);"></div>
+                <div class="accent-name">Pink</div>
               </div>
             </div>
           </div>
@@ -1195,7 +1207,7 @@ html,body{height:100%;height:var(--app-height);min-height:-webkit-fill-available
           <div class="form-row" style="border-bottom:none;">
             <div>
               <div class="form-row-label">First-run guide</div>
-              <div class="form-row-sub">Replay the quick Sous basics</div>
+              <div class="form-row-sub">Replay the quick Jot basics</div>
             </div>
             <button class="btn-secondary" type="button" onclick="window.__sousShowOnboarding()" style="flex:0 0 auto;width:auto;padding:8px 12px;">Open</button>
           </div>
@@ -1211,7 +1223,7 @@ html,body{height:100%;height:var(--app-height);min-height:-webkit-fill-available
   <div class="bottom-tabs">
     <div class="tab active" data-tab="home" onclick="switchTab('home')"><i class="ti ti-home"></i><span>Home</span></div>
     <div class="tab" data-tab="log" onclick="switchTab('log')"><i class="ti ti-microphone"></i><span>Log</span></div>
-    <div class="tab" data-tab="recipes" onclick="switchTab('recipes')"><i class="ti ti-chef-hat"></i><span>Recipes</span></div>
+    <div class="tab" data-tab="recipes" onclick="switchTab('recipes')"><i class="ti ti-notebook"></i><span>Recipes</span></div>
     <div class="tab" data-tab="history" onclick="switchTab('history')"><i class="ti ti-chart-line"></i><span>History</span></div>
     <div class="tab" data-tab="profile" onclick="switchTab('profile')"><i class="ti ti-user"></i><span>Profile</span></div>
   </div>
@@ -1228,7 +1240,7 @@ html,body{height:100%;height:var(--app-height);min-height:-webkit-fill-available
       <span class="modal-title" id="bug-report-title">What went wrong?</span>
       <button class="modal-close" type="button" id="bug-report-close" aria-label="Close bug report">x</button>
     </div>
-    <textarea class="bug-report-textarea" id="bug-report-note" placeholder="What did you say or tap? What did Sous do instead?"></textarea>
+    <textarea class="bug-report-textarea" id="bug-report-note" placeholder="What did you say or tap? What did Jot do instead?"></textarea>
     <div class="modal-btns">
       <button class="modal-btn primary" type="button" id="bug-report-copy">Copy bug report</button>
       <button class="modal-btn secondary" type="button" id="bug-report-cancel">Cancel</button>
@@ -1241,7 +1253,7 @@ html,body{height:100%;height:var(--app-height);min-height:-webkit-fill-available
 <div class="onboarding-overlay" id="onboarding-overlay" role="dialog" aria-modal="true" aria-labelledby="onboarding-title" aria-describedby="onboarding-body" aria-hidden="true" data-testid="onboarding-overlay">
   <div class="onboarding-dialog">
     <div class="onboarding-top">
-      <div class="onboarding-brand"><span class="onboarding-brand-dot"></span><span>Sous basics</span></div>
+      <div class="onboarding-brand"><span class="onboarding-brand-dot"></span><span>Jot basics</span></div>
       <button class="onboarding-skip" type="button" id="onboarding-skip" aria-label="Skip onboarding">Skip</button>
     </div>
     <div class="onboarding-cards" id="onboarding-cards">
@@ -1255,25 +1267,25 @@ html,body{height:100%;height:var(--app-height);min-height:-webkit-fill-available
         <div class="onboarding-icon"><i class="ti ti-user-circle"></i></div>
         <div class="onboarding-step">2 / 5</div>
         <h2 class="onboarding-title">Set up Profile</h2>
-        <p class="onboarding-body">Open the Profile tab first. Add your basics, goal, activity level, and bodyweight so Sous can show useful targets while you test.</p>
+        <p class="onboarding-body">Open the Profile tab first. Add your basics, goal, activity level, and bodyweight so Jot can show useful targets while you test.</p>
       </section>
       <section class="onboarding-card" data-onboarding-card>
         <div class="onboarding-icon"><i class="ti ti-microphone"></i></div>
         <div class="onboarding-step">3 / 5</div>
-        <h2 class="onboarding-title">Tap once, speak normally</h2>
-        <p class="onboarding-body">Start voice logging and try phrases like “oats, banana and whey” or “200ml milk”. Sous returns to listening after each item.</p>
+        <h2 class="onboarding-title">Hold, speak, release</h2>
+        <p class="onboarding-body">Hold the mic and try phrases like “oats, banana and whey” or “200ml milk”. Release to review what Jot heard.</p>
       </section>
       <section class="onboarding-card" data-onboarding-card>
         <div class="onboarding-icon"><i class="ti ti-adjustments"></i></div>
         <div class="onboarding-step">4 / 5</div>
         <h2 class="onboarding-title">Review and correct</h2>
         <p class="onboarding-body">Everything is editable before saving. Say “make that 150g”, “remove banana”, or tap any item to change it.</p>
-        <p class="onboarding-note">AI helps interpret unclear food logging intent, but Sous does not invent nutrition or save meals without review.</p>
+        <p class="onboarding-note">AI helps interpret unclear food logging intent, but Jot does not invent nutrition or save meals without review.</p>
       </section>
       <section class="onboarding-card" data-onboarding-card>
         <div class="onboarding-icon"><i class="ti ti-bolt"></i></div>
         <div class="onboarding-step">5 / 5</div>
-        <h2 class="onboarding-title">Sous gets faster over time</h2>
+        <h2 class="onboarding-title">Jot gets faster over time</h2>
         <p class="onboarding-body">Use recent, usual, and repeated meals to log your real food in seconds.</p>
       </section>
     </div>

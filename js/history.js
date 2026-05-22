@@ -201,20 +201,23 @@ function renderCharts(){
     wtAvgVals.push(slice.length?Math.round(slice.reduce((a,b)=>a+b,0)/slice.length*10)/10:null);
   });
 
-  const profile=getProfile();
-  const gridColor='rgba(0,0,0,0.06)';
-  const tickFont={family:'DM Sans',size:10};
-  const baseOpts={responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{callbacks:{}}},scales:{x:{grid:{color:gridColor},ticks:{font:tickFont,color:'#888',maxRotation:0,maxTicksLimit:chartRange<=14?chartRange:8}},y:{grid:{color:gridColor},ticks:{font:{...tickFont,family:'DM Mono'},color:'#888'}}}};
+  const style=getComputedStyle(document.documentElement);
+  const ink=style.getPropertyValue('--ink').trim()||'#15140F';
+  const muted=style.getPropertyValue('--muted').trim()||'#6F6759';
+  const hlWash=style.getPropertyValue('--hl-pale').trim()||'rgba(244,200,30,.12)';
+  const gridColor=style.getPropertyValue('--border').trim()||'rgba(21,20,15,0.08)';
+  const tickFont={family:'Geist',size:10};
+  const baseOpts={responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{callbacks:{}}},scales:{x:{grid:{color:gridColor},ticks:{font:tickFont,color:muted,maxRotation:0,maxTicksLimit:chartRange<=14?chartRange:8}},y:{grid:{color:gridColor},ticks:{font:{...tickFont,family:'Geist Mono'},color:muted}}}};
 
   // Calories
   if(calChart) calChart.destroy();
-  calChart=new Chart(document.getElementById('chart-calories'),{type:'line',data:{labels,datasets:[{data:calVals,borderColor:'#533ab7',backgroundColor:'rgba(83,58,183,.08)',fill:true,tension:.3,pointRadius:3,pointBackgroundColor:'#533ab7',spanGaps:true}]},options:{...baseOpts,scales:{...baseOpts.scales,y:{...baseOpts.scales.y,beginAtZero:true}}}});
+  calChart=new Chart(document.getElementById('chart-calories'),{type:'line',data:{labels,datasets:[{data:calVals,borderColor:ink,backgroundColor:hlWash,fill:true,tension:.3,pointRadius:3,pointBackgroundColor:ink,spanGaps:true}]},options:{...baseOpts,scales:{...baseOpts.scales,y:{...baseOpts.scales.y,beginAtZero:true}}}});
 
   // Protein
   if(proteinChart) proteinChart.destroy();
-  proteinChart=new Chart(document.getElementById('chart-protein'),{type:'line',data:{labels,datasets:[{data:protVals,borderColor:'#639922',backgroundColor:'rgba(99,153,34,.08)',fill:true,tension:.3,pointRadius:3,pointBackgroundColor:'#639922',spanGaps:true}]},options:{...baseOpts,scales:{...baseOpts.scales,y:{...baseOpts.scales.y,beginAtZero:true}}}});
+  proteinChart=new Chart(document.getElementById('chart-protein'),{type:'line',data:{labels,datasets:[{data:protVals,borderColor:ink,backgroundColor:hlWash,fill:true,tension:.3,pointRadius:3,pointBackgroundColor:ink,spanGaps:true}]},options:{...baseOpts,scales:{...baseOpts.scales,y:{...baseOpts.scales.y,beginAtZero:true}}}});
 
   // Weight
   if(weightChart) weightChart.destroy();
-  weightChart=new Chart(document.getElementById('chart-weight'),{type:'line',data:{labels,datasets:[{data:wtVals,borderColor:'#ba7517',backgroundColor:'transparent',fill:false,tension:.2,pointRadius:3,pointBackgroundColor:'#ba7517',spanGaps:true,label:'Daily'},{data:wtAvgVals,borderColor:'#533ab7',backgroundColor:'transparent',fill:false,tension:.4,pointRadius:0,borderDash:[4,4],spanGaps:true,label:'7d avg'}]},options:{...baseOpts,plugins:{legend:{display:true,position:'top',labels:{font:{family:'DM Sans',size:10},boxWidth:20,color:'#888'}}}}});
+  weightChart=new Chart(document.getElementById('chart-weight'),{type:'line',data:{labels,datasets:[{data:wtVals,borderColor:muted,backgroundColor:'transparent',fill:false,tension:.2,pointRadius:3,pointBackgroundColor:muted,spanGaps:true,label:'Daily'},{data:wtAvgVals,borderColor:ink,backgroundColor:'transparent',fill:false,tension:.4,pointRadius:0,borderDash:[4,4],spanGaps:true,label:'7d avg'}]},options:{...baseOpts,plugins:{legend:{display:true,position:'top',labels:{font:{family:'Geist',size:10},boxWidth:20,color:muted}}}}});
 }

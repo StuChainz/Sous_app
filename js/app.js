@@ -1878,6 +1878,11 @@ function editCopyUsualMeal(section,idx){
   addMealToCurrent(u);
 }
 
+function getJotMealWindow(){
+  const h=new Date().getHours();
+  return h<11?'breakfast':h<16?'lunch':h<21?'dinner':'snacks';
+}
+
 function renderHomeMealSections(meals){
   const esc=s=>escapeHtml(s);
   const jsEsc=s=>String(s).replace(/\\/g,'\\\\').replace(/'/g,"\\'");
@@ -1888,50 +1893,45 @@ function renderHomeMealSections(meals){
     (buckets[sk]||buckets.snacks).push(m);
   });
   Object.keys(buckets).forEach(k=>buckets[k].sort((a,b)=>new Date(a.time)-new Date(b.time)));
-  return HOME_MEAL_SECTIONS.map(({key,label})=>{
+  const activeKey=getJotMealWindow();
+  const activeLabel=(HOME_MEAL_SECTIONS.find(s=>s.key===activeKey)?.label||activeKey).toLowerCase();
+  let html='';
+  const usuals=(typeof getUsualMealsForSection==='function'?getUsualMealsForSection(activeKey):(usualsBySection[activeKey]||[])).slice(0,3);
+  if(usuals.length){
+    const cards=usuals.map((u,i)=>{
+      const cls=i===0?'usual-card most-used':'usual-card';
+      const mt=sumMacros(u.ingredients||[]);
+      const kcal=Math.round(mt.kcal||0);
+      const useCount=Number(u.useCount)||Number(u.count)||0;
+      const macroBits=[Math.round(mt.protein||0)+'P',Math.round(mt.carbs||0)+'C',Math.round(mt.fat||0)+'F'].join(' ');
+      return`<div role="button" tabindex="0" class="${cls}" onclick="logUsualMealByIndex('${activeKey}',${i})"><div class="usual-card-copy"><div class="usual-card-name">${esc(u.name)}</div><div class="usual-card-meta">${useCount?`<span class="x">x${useCount}</span>`:''}<span class="kcal">${kcal} kcal · ${macroBits}</span></div></div><button type="button" class="usual-add-btn" onclick="event.stopPropagation();logUsualMealByIndex('${activeKey}',${i})" aria-label="Add ${esc(u.name)}"><i class="ti ti-plus"></i></button><button type="button" class="usual-card-menu-btn" onclick="event.stopPropagation();openUsualMealMenu('${jsEsc(activeKey)}',${i})" aria-label="Manage usual meal">⋯</button></div>`;
+    }).join('');
+    html+=`<div class="home-usuals">${cards}</div>`;
+  } else {
+    html+=`<div class="home-section-repeat-card" onclick="startLogWithSection('${activeKey}')"><div class="home-section-repeat-row"><div class="home-section-last-meal"><strong>No usual ${esc(activeLabel)} yet</strong> · log one and save it as usual</div><i class="ti ti-chevron-right repeat-chevron"></i></div></div>`;
+  }
+
+  const last=getLastMealBySection(activeKey);
+  if(last){
+    const nm=esc((last.name||'').trim()||'Unnamed meal');
+    const sourceDate=formatQuickLogSourceDate(last._historyDate);
+    html+=`<div class="home-section-repeat-card" onclick="repeatLastMealForSection('${activeKey}')"><div class="home-section-repeat-row"><div class="home-section-last-meal">${sourceDate?esc(sourceDate):'Last'} · <strong>${nm}</strong></div><i class="ti ti-chevron-right repeat-chevron"></i></div></div>`;
+  }
+
+  const sectionRecent=getRecentIngredientsForSection(activeKey);
+  if(sectionRecent.length){
+    const chips=sectionRecent.slice(0,8).map(r=>`<button type="button" class="recent-chip" onclick="startLogWithRecentIngredientByName('${esc(jsEsc(r.name))}','${activeKey}')">+ ${esc(r.name)}</button>`).join('');
+    html+=`<div class="section-label"><span>Recent · tap to add</span></div><div class="recent-chips">${chips}</div>`;
+  }
+
+  html+='<div class="today-meals-label">Today’s meals</div>';
+  html+=HOME_MEAL_SECTIONS.map(({key,label})=>{
     const arr=buckets[key];
     const inner=arr.length?arr.map(homeMealRowHtml).join(''):'<div class="home-meal-empty">Nothing logged yet</div>';
-    const hasLogged=hasMealForSectionOnSelectedDate(key,meals);
-
-    let quickBlocks='';
-    if(!hasLogged){
-      // 1. Usual meals grid (up to 3)
-      const usuals=(typeof getUsualMealsForSection==='function'?getUsualMealsForSection(key):(usualsBySection[key]||[])).slice(0,3);
-      if(usuals.length){
-        const cards=usuals.map((u,i)=>{
-          const span=usuals.length===3&&i===2?' style="grid-column:1/-1;min-height:auto;"':'';
-          const cls=i===0?'usual-card most-used':'usual-card';
-          const mt=sumMacros(u.ingredients||[]);
-          const kcal=Math.round(mt.kcal||0);
-          const ingredients=u.ingredients||[];
-          const ingCount=ingredients.length;
-          const preview=ingredients.slice(0,2).map(ingLabel).join(', ')+(ingredients.length>2?' +' +(ingredients.length-2):'');
-          const meta=preview||`${ingCount} ingredient${ingCount!==1?'s':''}`;
-          return`<div role="button" tabindex="0" class="${cls}"${span} onclick="logUsualMealByIndex('${key}',${i})"><div class="usual-card-name">${esc(u.name)}</div><div class="usual-card-meta">${esc(meta)} · <span class="kcal">${kcal} kcal</span></div><button type="button" class="usual-card-menu-btn" onclick="event.stopPropagation();openUsualMealMenu('${jsEsc(key)}',${i})" aria-label="Manage usual meal">⋯</button></div>`;
-        }).join('');
-        quickBlocks+=`<div class="usuals-grid">${cards}</div>`;
-      }
-
-      // 2. Repeat last meal
-      const last=getLastMealBySection(key);
-      if(last){
-        const nm=esc((last.name||'').trim()||'Unnamed meal');
-        const sourceDate=formatQuickLogSourceDate(last._historyDate);
-        const details=(last.ingredients||[]).slice(0,2).map(ingLabel).join(', ');
-        quickBlocks+=`<div class="home-section-repeat-card" onclick="repeatLastMealForSection('${key}')"><div class="home-section-repeat-row"><div class="home-section-last-meal">↻ ${sourceDate?esc(sourceDate)+': ':'Last: '}<strong>${nm}</strong>${details?' · '+esc(details):''}</div><i class="ti ti-chevron-right repeat-chevron"></i></div></div>`;
-      }
-
-      // 3. Per-section recent ingredient chips
-      const sectionRecent=getRecentIngredientsForSection(key);
-      if(sectionRecent.length){
-        const chips=sectionRecent.map(r=>`<button type="button" class="recent-chip" onclick="startLogWithRecentIngredientByName('${esc(jsEsc(r.name))}','${key}')">${esc(r.name)}</button>`).join('');
-        quickBlocks+=`<div class="recent-chips">${chips}</div>`;
-      }
-    }
-
     const loggedBlock=`<div class="home-meal-logged-block"><div class="home-meal-logged-hint">Logged</div>${inner}</div>`;
-    return`<div class="home-meal-section"><div class="home-meal-section-header"><div class="home-meal-section-title">${label}</div><button type="button" class="home-meal-section-add" onclick="startLogWithSection('${key}')">+ Add</button></div>${quickBlocks}${loggedBlock}</div>`;
+    return`<div class="home-meal-section"><div class="home-meal-section-header"><div class="home-meal-section-title">${label}</div><button type="button" class="home-meal-section-add" onclick="startLogWithSection('${key}')">+ Add</button></div>${loggedBlock}</div>`;
   }).join('');
+  return html;
 }
 
 function ensureHomeRecentIngredientsMount(){
@@ -1956,29 +1956,45 @@ function renderHome(){
   const log=getLog();
   const dayData=log[selectedLogDate]||{meals:[],totals:{kcal:0,protein:0,carbs:0,fat:0,fibre:0}};
   const t=dayData.totals||{kcal:0,protein:0,carbs:0,fat:0,fibre:0};
-  const h=new Date().getHours();
-  document.getElementById('home-greeting').textContent=h<12?'Good morning':h<18?'Good afternoon':'Good evening';
-  document.getElementById('home-name').innerHTML='Hello, <em>'+escapeHtml(profile.name||'chef')+'</em>';
+  const mealWindow=getJotMealWindow();
+  const mealLabel=(HOME_MEAL_SECTIONS.find(s=>s.key===mealWindow)?.label)||'Snacks';
+  document.getElementById('home-greeting').textContent='Today · '+new Date().toLocaleDateString('en-GB',{weekday:'short',day:'numeric',month:'short'});
+  const profileName=profile.name?'<span class="home-user">'+escapeHtml(profile.name)+'</span>':'';
+  document.getElementById('home-name').innerHTML='<em>'+escapeHtml(mealLabel)+'</em>'+profileName;
+  const context=document.getElementById('home-meal-context');
+  if(context){
+    const mealsLeft=HOME_MEAL_SECTIONS.filter(s=>!hasMealForSectionOnSelectedDate(s.key,dayData.meals||[])).length;
+    context.textContent=`${mealsLeft} meal${mealsLeft!==1?'s':''} to log`;
+  }
+  const avatar=document.getElementById('home-avatar');
+  if(avatar) avatar.textContent=(profile.name||'J').trim().charAt(0).toUpperCase()||'J';
   const hasProfile=!!(profile.targetKcal||profile.name);
   document.getElementById('no-profile-banner').style.display=hasProfile?'none':'block';
   const streak=calcStreak();
   const sEl=document.getElementById('home-streak');
-  if(streak>0){sEl.style.display='block';document.getElementById('home-streak-text').textContent=`🔥 ${streak} day streak`;}
+  if(streak>0){sEl.style.display='block';document.getElementById('home-streak-text').textContent=`${streak} day streak`;}
   else sEl.style.display='none';
   const kcal=Math.round(t.kcal||0);
   document.getElementById('home-kcal').textContent=kcal.toLocaleString();
   const tk=profile.targetKcal||null;
-  document.getElementById('home-kcal-goal').textContent=tk?`of ${tk.toLocaleString()} kcal goal`:'Set up profile for targets';
+  document.getElementById('home-kcal-goal').textContent=tk?`/ ${tk.toLocaleString()} kcal`:'/ — kcal';
   const CIRC=213.628,pct=tk?Math.min(1,kcal/tk):0;
-  document.getElementById('kcal-ring-fill').style.strokeDashoffset=CIRC*(1-pct);
-  document.getElementById('kcal-ring-pct').textContent=Math.round(pct*100)+'%';
+  const ring=document.getElementById('kcal-ring-fill');
+  if(ring) ring.style.strokeDashoffset=CIRC*(1-pct);
+  document.getElementById('kcal-ring-pct').textContent=tk?Math.round(pct*100)+'%':'0%';
+  const progressState=document.getElementById('home-progress-state');
+  if(progressState) progressState.textContent=!tk?'set target':pct>1?'over':pct>.88?'near cap':'on pace';
+  const pill=document.getElementById('kcal-pill-fill');
+  if(pill) pill.style.width=Math.round(pct*100)+'%';
   [['protein',t.protein||0,profile.targetProtein],['carbs',t.carbs||0,profile.targetCarbs],['fat',t.fat||0,profile.targetFat]].forEach(([id,val,tgt])=>{
     const v=Math.round(val),p=tgt?Math.min(100,Math.round(v/tgt*100)):0;
     document.getElementById('bar-'+id).style.width=p+'%';
-    document.getElementById('val-'+id).textContent=tgt?`${v} / ${tgt}g`:`${v}g`;
+    document.getElementById('val-'+id).textContent=`${v}g`;
   });
   const meals=dayData.meals||[];
   const listEl=document.getElementById('home-meals-list');
+  const label=document.getElementById('home-meals-label');
+  if(label) label.innerHTML=`<span>The usual · ${escapeHtml(mealLabel.toLowerCase())}</span><button type="button" class="home-meal-section-add" onclick="startLogWithSection('${mealWindow}')">+ Add</button>`;
   listEl.innerHTML=renderHomeMealSections(meals);
   renderHomeRecentIngredients();
 }
@@ -1998,6 +2014,74 @@ function homeLogWeight(){
   recalcTDEE();
   renderHome();
   showToast('Weight logged + targets updated ✓');
+}
+
+function renderCurrentMeal(){
+  const container=document.getElementById('current-meal-list');
+  if(!container) return;
+  if(!meal.length){container.style.display='none';container.innerHTML='';return;}
+  meal.forEach(i=>{if(!i.id)i.id=nextIngId++;});
+  const t=sumMacros(meal);
+  container.style.display='block';
+  container.innerHTML='';
+
+  const header=document.createElement('div');
+  header.className='capture-meal-header';
+  header.innerHTML=`<span>Recognised</span><span>${Math.round(t.kcal)} kcal · ${Math.round(t.protein)}g P</span>`;
+  container.appendChild(header);
+
+  meal.forEach(i=>{
+    const row=document.createElement('div');
+    row.className='capture-row meal-item';
+    row.dataset.id=i.id;
+    const qty=i.weight||i.serving?itemWeightLabel(i):'item';
+    row.innerHTML=`<span class="capture-qty">${escapeHtml(qty)}</span><span class="capture-name">${escapeHtml(i.name||'Item')}</span><span class="capture-kcal">${Math.round(Number(i.kcal)||0)} kcal</span><button type="button" title="Edit" class="capture-edit"><i class="ti ti-pencil"></i></button><button type="button" title="Remove" class="capture-remove">x</button>`;
+    row.querySelector('.capture-edit')?.addEventListener('click',e=>{e.stopPropagation();openEditModal(i.id);});
+    row.querySelector('.capture-remove')?.addEventListener('click',e=>{e.stopPropagation();deleteFromCurrentMeal(i.id);});
+    row.addEventListener('click',()=>openEditModal(i.id));
+    container.appendChild(row);
+  });
+  if(typeof voiceDebugTrace==='function') voiceDebugTrace('ui_updated',{screen:document.querySelector('.log-screen.active')?.id||null,reason:'render_current_meal_jot',mealCount:meal.length});
+}
+
+function updateJotReviewChrome(){
+  const section=document.getElementById('sum-section-select')?.value||currentMealSection||getJotMealWindow();
+  const label=HOME_MEAL_SECTIONS.find(s=>s.key===section)?.label||'Meal';
+  const title=document.getElementById('sum-review-title');
+  if(title) title.textContent=label+' · '+new Date().toLocaleDateString('en-GB',{weekday:'short',day:'numeric',month:'short'});
+  const name=document.getElementById('sum-meal-name');
+  if(name&&name.tagName==='TEXTAREA'){
+    name.style.height='auto';
+    name.style.height=Math.max(74,name.scrollHeight)+'px';
+  }
+  const chip=document.getElementById('listen-meal-chip');
+  if(chip) chip.innerHTML='<i class="ti ti-point-filled"></i> '+escapeHtml(HOME_MEAL_SECTIONS.find(s=>s.key===(currentMealSection||section))?.label||label);
+}
+
+function initJotStructuralUi(){
+  if(typeof showLogScreen==='function'&&!showLogScreen.__jotWrapped){
+    const baseShowLogScreen=showLogScreen;
+    showLogScreen=function(id){
+      const ret=baseShowLogScreen(id);
+      if(id==='summary') setTimeout(updateJotReviewChrome,0);
+      if(id==='listening') setTimeout(updateJotReviewChrome,0);
+      return ret;
+    };
+    showLogScreen.__jotWrapped=true;
+  }
+  document.getElementById('save-usual-btn')?.addEventListener('click',()=>{
+    const chk=document.getElementById('sum-save-usual');
+    if(chk) chk.checked=true;
+    document.getElementById('save-meal-btn')?.click();
+  });
+  document.getElementById('ing-list')?.addEventListener('click',e=>{
+    const row=e.target.closest?.('.ing-item');
+    if(!row) return;
+    document.querySelectorAll('#ing-list .ing-item.selected').forEach(el=>el.classList.remove('selected'));
+    row.classList.add('selected');
+  },true);
+  document.getElementById('sum-section-select')?.addEventListener('change',updateJotReviewChrome);
+  document.getElementById('sum-meal-name')?.addEventListener('input',updateJotReviewChrome);
 }
 
 function startCookingLog(){ currentEditMealId=null; currentEditMealDate=null; switchTab('log',{fresh:true}); }
@@ -2116,15 +2200,15 @@ function initPWA(){
   console.log(`[Sous] active cache version: ${SOUS_CACHE_VERSION}`);
 
   // Inject inline manifest via blob URL (enables Add to Home Screen / install prompt)
-  const icon=`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><rect width="512" height="512" rx="112" fill="%23533ab7"/><text x="256" y="360" font-size="300" text-anchor="middle" fill="%23fff" font-family="sans-serif">🍴</text></svg>`;
+  const icon=`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><rect width="512" height="512" rx="112" fill="%23F4F0E6"/><circle cx="372" cy="354" r="34" fill="%23F4C81E"/><text x="256" y="330" font-size="210" text-anchor="middle" fill="%2315140F" font-family="Geist,Arial,sans-serif" font-weight="700">J</text></svg>`;
   const manifest={
-    name:'Sous — Voice Calorie Counter',
-    short_name:'Sous',
-    description:'Track meals with your voice',
+    name:'Jot — Voice Food Log',
+    short_name:'Jot',
+    description:'Log meals quickly with your voice',
     start_url:location.href,
     display:'standalone',
-    background_color:'#f4f2ee',
-    theme_color:'#533ab7',
+    background_color:'#F4F0E6',
+    theme_color:'#1A1611',
     orientation:'portrait-primary',
     categories:['health','fitness'],
     icons:[
@@ -2197,6 +2281,7 @@ function init(){
   updateClock(); setInterval(updateClock,10000);
   initDateNav();
   initPhotoEstimate();
+  initJotStructuralUi();
   renderHome();
   wireLogButtons();
   initProfile();
