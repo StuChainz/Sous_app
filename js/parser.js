@@ -5,7 +5,7 @@ const UNIT_TO_GRAMS={
   g:1,kg:1000,ml:1,l:1000,oz:28.35,tbsp:15,tsp:5,cup:240
 };
 const UNIT_PATTERN='g\\b|kg\\b|ml\\b|l\\b|oz\\b|tbsp\\b|tsp\\b|cups?\\b';
-const COUNT_UNIT_PATTERN='pieces?|slices?|servings?|portions?|cans?|tins?|scoops?|rashers?|fillets?|breasts?|eggs?|wraps?|rolls?|pots?|biscuits?|crumpets?|muffins?';
+const COUNT_UNIT_PATTERN='pieces?|slices?|servings?|portions?|cans?|tins?|scoops?|rashers?|fillets?|breasts?|thighs?|drumsticks?|eggs?|sausages?|wraps?|rolls?|pots?|biscuits?|crumpets?|muffins?|cakes?';
 const SPOKEN_NUMBERS={
   a:1,an:1,one:1,two:2,three:3,four:4,five:5,six:6,seven:7,eight:8,nine:9,ten:10,
   eleven:11,twelve:12,couple:2
@@ -19,6 +19,7 @@ const NATURAL_QUANTITY_UNITS={
   pat:{solid:10,liquid:10},
   spoon:{solid:15,liquid:15}
 };
+const BARE_NUMBER_GRAMS_MIN=20;
 function normalizeUnit(unit){
   return String(unit||'g').toLowerCase().replace(/s$/,'');
 }
@@ -27,13 +28,17 @@ function normalizeCountUnit(unit){
   if(u==='rasher') return 'rasher';
   if(u==='fillet') return 'fillet';
   if(u==='breast') return 'breast';
+  if(u==='thigh') return 'thigh';
+  if(u==='drumstick') return 'drumstick';
   if(u==='egg') return 'egg';
+  if(u==='sausage') return 'sausage';
   if(u==='wrap') return 'wrap';
   if(u==='roll') return 'roll';
   if(u==='pot') return 'pot';
   if(u==='biscuit') return 'biscuit';
   if(u==='crumpet') return 'crumpet';
   if(u==='muffin') return 'muffin';
+  if(u==='cake') return 'cake';
   if(u==='scoop') return 'scoop';
   if(u==='slice') return 'slice';
   if(u==='can') return 'tin';
@@ -89,6 +94,41 @@ function findServingUnit(food,label){
   const wanted=normalizeCountUnit(label);
   return food.units.find(unit=>normalizeCountUnit(unit.label)===wanted)||null;
 }
+function defaultServingUnit(food){
+  if(!food||!Array.isArray(food.units)) return null;
+  if(food.defaultUnit){
+    const unit=findServingUnit(food,food.defaultUnit);
+    if(unit) return unit;
+  }
+  return food.units.find(unit=>!['g','gram','ml','l'].includes(normalizeCountUnit(unit.label)))||null;
+}
+function foodQuantityMode(food){
+  const explicit=String(food?.quantityMode||'').toLowerCase().trim();
+  if(['grams','count','slice','serving'].includes(explicit)) return explicit;
+  const unit=normalizeCountUnit(food?.defaultUnit||'');
+  if(unit==='slice') return 'slice';
+  if(unit&&unit!=='serving'&&!['g','gram','ml','l'].includes(unit)) return 'count';
+  return null;
+}
+function quantityServingForFood(qty,food){
+  if(!qty||!food) return null;
+  if(qty.count!=null){
+    const serving=findServingUnit(food,qty.unit);
+    if(serving&&serving.grams) return {label:serving.label,quantity:qty.count,grams:serving.grams};
+    return null;
+  }
+  if(qty.bareNumber!=null){
+    const mode=foodQuantityMode(food);
+    if(!['count','slice','serving'].includes(mode)) return null;
+    const unit=mode==='slice'
+      ?findServingUnit(food,'slice')||defaultServingUnit(food)
+      :mode==='serving'
+        ?findServingUnit(food,'serving')||defaultServingUnit(food)
+        :defaultServingUnit(food);
+    if(unit&&unit.grams) return {label:unit.label,quantity:qty.bareNumber,grams:unit.grams};
+  }
+  return null;
+}
 function quantityToGramsForFood(qty,food){
   if(!qty) return null;
   if(qty.grams!=null) return qty.grams;
@@ -106,6 +146,18 @@ function quantityToGramsForFood(qty,food){
     const serving=findServingUnit(food,qty.unit);
     if(serving&&serving.grams) return Math.round(Number(serving.grams)*qty.count);
     return food?Math.round((food.w||100)*qty.count):null;
+  }
+  if(qty.bareNumber!=null){
+    const num=qty.bareNumber;
+    const mode=foodQuantityMode(food);
+    if(mode==='grams') return num>=BARE_NUMBER_GRAMS_MIN?Math.round(num):null;
+    if(mode==='count'||mode==='slice'||mode==='serving'){
+      const serving=quantityServingForFood(qty,food);
+      if(serving&&serving.grams) return Math.round(Number(serving.grams)*num);
+      return food?Math.round((food.w||100)*num):null;
+    }
+    if(num>=BARE_NUMBER_GRAMS_MIN) return Math.round(num);
+    return null;
   }
   return null;
 }
@@ -133,6 +185,9 @@ function extractQuantity(seg){
   // Number + count word → count ("1 slice bread"); caller scales by food.w
   m=s.match(new RegExp('\\b('+numberPattern+')\\s*(?:of\\s+)?('+COUNT_UNIT_PATTERN+')\\b','i'));
   if(m){const num=parseSpokenNumber(m[1]);if(num!=null)return{count:num,unit:normalizeCountUnit(m[2])};}
+  // Countable food phrase with the unit after descriptors: "two chicken thighs".
+  m=s.match(new RegExp('\\b('+numberPattern+')\\s+(?:[a-z]+\\s+){0,3}?('+COUNT_UNIT_PATTERN+')\\b','i'));
+  if(m){const num=parseSpokenNumber(m[1]);if(num!=null)return{count:num,unit:normalizeCountUnit(m[2])};}
   // "a handful of nuts", "small splash of milk"
   m=s.match(/\b(?:(small|large|big)\s+)?(?:a\s+|an\s+)?(handful|splash|drizzle|pinch|knob|pat|spoon)\b/i);
   if(m) return{naturalUnit:m[2].toLowerCase(),size:m[1]||null,count:1};
@@ -142,9 +197,9 @@ function extractQuantity(seg){
   // Unit alone, no leading number → implied 1 of that unit ("tablespoon olive oil")
   m=s.match(new RegExp('\\b('+UNIT_PATTERN+')','i'));
   if(m){const unit=normalizeUnit(m[1]);return{grams:UNIT_TO_GRAMS[unit]};}
-  // Bare integer, no unit → count ("2 eggs"); caller scales by food.w
+  // Bare number, no unit. Food-specific quantity mode decides grams/count/slices.
   m=s.match(new RegExp('\\b('+numberPattern+')\\b','i'));
-  if(m){const num=parseSpokenNumber(m[1]);if(num!=null)return{count:num};}
+  if(m){const num=parseSpokenNumber(m[1]);if(num!=null)return{bareNumber:num};}
   return null;
 }
 function foodScale(food,grams){
@@ -575,7 +630,8 @@ function parseExactFoodPhrase(seg){
   const exact=match.matchType==='exact-name'||match.matchType==='exact-alias'||match.matchType==='covered-alias'||match.key===searchText;
   if(!exact) return null;
   const grams=qty?quantityToGramsForFood(qty,match.food):null;
-  return{...foodScale(match.food,grams),rawFood:match.food,confidence:'high',needsConfirm:false,weightSpecified:grams!==null,heardName:seg};
+  const serving=qty?quantityServingForFood(qty,match.food):null;
+  return{...foodScale(match.food,grams),rawFood:match.food,confidence:'high',needsConfirm:false,weightSpecified:grams!==null,heardName:seg,...(serving?{serving}: {})};
 }
 function parseBareFoodListSegment(seg){
   const s=cleanSegment(stripSegmentPrefix(normaliseLogText(seg)));
@@ -631,7 +687,8 @@ function parseSingleSegment(seg){
   if(grams==null&&qty){
     grams=quantityToGramsForFood(qty,bestFood);
   }
-  return{...foodScale(bestFood,grams),rawFood:bestFood,confidence:'high',needsConfirm:false,weightSpecified:grams!==null,heardName:seg};
+  const serving=qty?quantityServingForFood(qty,bestFood):null;
+  return{...foodScale(bestFood,grams),rawFood:bestFood,confidence:'high',needsConfirm:false,weightSpecified:grams!==null,heardName:seg,...(serving?{serving}: {})};
 }
 function parseText(text){
   text=normaliseLogText(text);

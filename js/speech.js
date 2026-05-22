@@ -2246,10 +2246,13 @@ function extractClarificationQuantityInfo(text,food){
     ?quantityToGramsForFood(qty,food||null)
     :qty.grams;
   if(grams==null) return {known:false,grams:null,unit:null};
+  const serving=typeof quantityServingForFood==='function'
+    ?quantityServingForFood(qty,food||null)
+    :null;
   const raw=String(text||'').toLowerCase();
   const unitMatch=raw.match(/\b(?:\d+(?:[.,]\d+)?|a|an|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|couple)\s*(g|grams?|kg|kilograms?|ml|millilit(?:re|er)s?|l|lit(?:re|er)s?|oz|ounces?|tbsp|tablespoons?|tsp|teaspoons?|cups?|slices?|pieces?|servings?|portions?|cans?|tins?|scoops?|pots?)\b/i);
   const unit=unitMatch?normaliseClarificationInput(unitMatch[1]).replace(/s$/,''):null;
-  return {known:true,grams:Math.max(1,Math.round(grams)),unit};
+  return {known:true,grams:Math.max(1,Math.round(grams)),unit,serving};
 }
 function clarificationQuantityText(grams,unit){
   if(grams==null) return '';
@@ -2305,6 +2308,7 @@ function clarificationPromptForState(state=clarificationState){
   }
   const needsType=missing.includes('type');
   const needsQuantity=missing.includes('quantity');
+  if(needsQuantity&&state?.quantityPromptHint) return {text:state.quantityPromptHint,cacheKey:'clarify_amount',data:{}};
   if(needsType&&needsQuantity) return {text:`What type and how much?`,cacheKey:'clarify_type_quantity',data:{}};
   if(needsType) return {text:`What type of ${label}?`,cacheKey:'clarify_type',data:{}};
   if(needsQuantity) return {text:`How much ${label}?`,cacheKey:'clarify_quantity',data:{}};
@@ -2342,6 +2346,7 @@ function beginIngredientClarification(baseItem,fallback,context={}){
     family:context.family||base,
     knownQuantity:quantityInfo.known?quantityInfo.grams:null,
     knownUnit:quantityInfo.known?quantityInfo.unit:null,
+    knownServing:quantityInfo.known?quantityInfo.serving:null,
     missingFields,
     candidateFood:context.candidateFood||null,
     defaultFood,
@@ -2411,7 +2416,18 @@ function clarificationAnswerQuantityInfo(answer,state){
   const food=state?.candidateFood||state?.defaultFood||null;
   return extractClarificationQuantityInfo(answer,food);
 }
-function scaleClarifiedFoodItem(item,grams){
+function clarificationBareQuantityPrompt(answer,state){
+  const food=state?.candidateFood||state?.defaultFood||null;
+  if(!food||typeof foodQuantityMode!=='function'||foodQuantityMode(food)!=='grams') return null;
+  if(typeof findServingUnit!=='function'||!findServingUnit(food,'serving')) return null;
+  const text=typeof normaliseLogText==='function'?normaliseLogText(answer):String(answer||'').toLowerCase().trim();
+  if(!/^(?:\d+(?:\.\d+)?|one|two|three|four|five|six|seven|eight|nine|ten)$/.test(text)) return null;
+  const n=typeof parseSpokenNumber==='function'?parseSpokenNumber(text):parseFloat(text);
+  if(!Number.isFinite(n)||n<1||n>10) return null;
+  const label=String(Math.round(n*10)/10).replace(/\.0$/,'');
+  return `Did you mean ${label} grams or ${label} servings?`;
+}
+function scaleClarifiedFoodItem(item,grams,serving=null){
   if(!item||item.command||!item.rawFood||grams==null) return item;
   const scaled=typeof foodScale==='function'?foodScale(item.rawFood,grams):{
     name:item.rawFood.name,
@@ -2430,14 +2446,16 @@ function scaleClarifiedFoodItem(item,grams){
     rawFood:item.rawFood,
     confidence:item.confidence||'high',
     needsConfirm:false,
-    weightSpecified:true
+    weightSpecified:true,
+    ...(serving?{serving}: {})
   };
 }
 function mergeClarificationQuantity(results,state,answer){
   const answerQty=clarificationAnswerQuantityInfo(answer,state);
   const grams=answerQty.known?answerQty.grams:state?.knownQuantity;
+  const serving=answerQty.known?answerQty.serving:state?.knownServing;
   if(grams==null) return results;
-  return (results||[]).map(item=>scaleClarifiedFoodItem(item,grams));
+  return (results||[]).map(item=>scaleClarifiedFoodItem(item,grams,serving));
 }
 function repairClarificationAnswer(answer,state){
   const text=String(answer||'').trim();
@@ -2634,10 +2652,15 @@ function handleClarification(transcript){
   const repairedAnswer=repairClarificationAnswer(answer,clarificationState);
   if(repairedAnswer!==answer) voiceDebugTrace('clarification_answer_repaired',{from:answer,to:repairedAnswer});
   const answerQty=clarificationAnswerQuantityInfo(repairedAnswer,clarificationState);
+  const quantityPromptHint=answerQty.known?null:clarificationBareQuantityPrompt(repairedAnswer,clarificationState);
   if(answerQty.known){
     clarificationState.knownQuantity=answerQty.grams;
     clarificationState.knownUnit=answerQty.unit;
+    clarificationState.knownServing=answerQty.serving;
+    clarificationState.quantityPromptHint=null;
     clarificationState.missingFields=missing.filter(field=>field!=='quantity'&&field!=='confirm_intent');
+  } else if(quantityPromptHint){
+    clarificationState.quantityPromptHint=quantityPromptHint;
   }
 
   const parsed=parseClarificationInput(clarificationState.baseItem,repairedAnswer,clarificationState);
