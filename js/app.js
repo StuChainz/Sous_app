@@ -614,6 +614,72 @@ function mealMemoryDebugSummary(memory){
     useCount:Number(memory.useCount)||0
   };
 }
+function mealMemoryTransformTarget(items,target){
+  const q=normalizeAIActionText(target);
+  if(!q) return {index:items.length===1?0:-1,ambiguous:false,score:items.length===1?500:0};
+  const matches=[];
+  items.forEach((item,index)=>{
+    const haystack=normalizeAIActionText([item.name,item.rawFood?.name].filter(Boolean).join(' '));
+    let score=0;
+    if(haystack===q) score=1000;
+    else if(haystack.includes(q)) score=760+q.length;
+    else if(q.includes(haystack)&&haystack.length>2) score=700+haystack.length;
+    else q.split(/\s+/).filter(token=>token.length>2).forEach(token=>{if(haystack.includes(token)) score+=token.length;});
+    if(score>0) matches.push({index,score});
+  });
+  matches.sort((a,b)=>b.score-a.score);
+  if(!matches.length) return {index:-1,ambiguous:false,score:0};
+  const tied=matches.filter(match=>Math.abs(match.score-matches[0].score)<20);
+  return {index:matches[0].index,ambiguous:tied.length>1,score:matches[0].score};
+}
+function parseMealMemoryTransform(transformText){
+  const text=typeof normalizeMealMemoryPhrase==='function'
+    ?normalizeMealMemoryPhrase(transformText)
+    :normalizeAIActionText(transformText);
+  if(!text) return null;
+  let m=text.match(/^(?:no|without|remove|delete)\s+(?:the\s+)?(.+)$/);
+  if(m) return {op:'remove',target:m[1].trim()};
+  m=text.match(/^(?:half|halve)\s+(?:the\s+)?(.+)$/);
+  if(m) return {op:'scale',factor:0.5,target:m[1].trim()};
+  m=text.match(/^double\s+(?:the\s+)?(.+)$/);
+  if(m) return {op:'scale',factor:2,target:m[1].trim()};
+  const quantityStart='(?:about\\s+|around\\s+|roughly\\s+)?(?:\\d+(?:\\.\\d+)?|one|two|three|four|five|six|seven|eight|nine|ten|half|quarter)\\b.*';
+  m=text.match(new RegExp('^(?:make|set|change)\\s+(?:the\\s+)?(.+?)\\s+(?:to\\s+)?('+quantityStart+')$'));
+  if(m) return {op:'set_quantity',target:m[1].trim(),quantityText:m[2].trim()};
+  m=text.match(/^(?:add|with|plus)\s+(.+)$/);
+  if(m) return {op:'add',addText:m[1].trim(),target:m[1].trim()};
+  return {op:'unsupported',target:text};
+}
+function applyMealMemoryTransformToItems(items,transformText){
+  const transform=parseMealMemoryTransform(transformText);
+  if(!transform) return {ok:true,items,transform:null};
+  if(transform.op==='unsupported') return {ok:false,items,transform,reason:'unsupported_transform',target:transform.target};
+  if(transform.op==='add'){
+    const parsed=typeof parseText==='function'?parseText(transform.addText):[];
+    const foodItems=(Array.isArray(parsed)?parsed:[]).filter(item=>item&&!item.command);
+    if(!foodItems.length) return {ok:false,items,transform,reason:'add_parse_failed',target:transform.addText};
+    foodItems.forEach((item,index)=>{
+      const copy=cloneMealMemoryIngredientForRecall(item,index);
+      if(copy) items.push(copy);
+    });
+    return {ok:true,items,transform};
+  }
+  const target=mealMemoryTransformTarget(items,transform.target);
+  if(target.ambiguous) return {ok:false,items,transform,reason:'ambiguous_target',target:transform.target};
+  if(target.index<0) return {ok:false,items,transform,reason:'target_not_found',target:transform.target};
+  const change={
+    op:transform.op,
+    targetRef:'meal-memory:item:'+target.index,
+    from:items[target.index]?.name||transform.target,
+    food:transform.target,
+    quantityText:transform.quantityText,
+    factor:transform.factor
+  };
+  const result=applyAIChangeToClonedItems(items,change);
+  if(!result.ok) return {ok:false,items,transform,reason:'change_failed',target:transform.target,message:result.message};
+  if(!items.length) return {ok:false,items,transform,reason:'empty_after_transform',target:transform.target};
+  return {ok:true,items,transform};
+}
 function ensureMealMemoryChoiceScreen(){
   let screen=document.getElementById('ls-meal-memory-choice');
   if(screen) return screen;
@@ -713,16 +779,29 @@ function handlePersonalMealMemoryCommand(transcript){
     });
     voiceDebugTrace('transcript_routed',{route:'personal-meal-memory',source:'handleTranscript',transcript:String(transcript||'').trim()});
   }
-  const applied=addMealMemoryToCurrent(match.memory);
+  let transformed=null;
+  let applied=null;
+  if(match.command.transformText){
+    const items=match.memory.ingredients.map(cloneMealMemoryIngredientForRecall).filter(Boolean);
+    transformed=applyMealMemoryTransformToItems(items,match.command.transformText);
+    if(transformed.ok){
+      applied=addMealMemoryToCurrent(match.memory,{ingredients:transformed.items,silentToast:true});
+      if(typeof voiceDebugTrace==='function') voiceDebugTrace('meal_memory_transform_applied',{transcript:String(transcript||'').trim(),memory:mealMemoryDebugSummary(match.memory),transform:transformed.transform});
+      if(applied.ok) showToast('Added '+(match.memory.name||'meal'),2600);
+    } else {
+      applied=addMealMemoryToCurrent(match.memory,{silentToast:true});
+      if(typeof voiceDebugTrace==='function') voiceDebugTrace('meal_memory_transform_rejected',{transcript:String(transcript||'').trim(),memory:mealMemoryDebugSummary(match.memory),transform:transformed.transform,reason:transformed.reason,target:transformed.target});
+      if(applied.ok) showToast('I added the meal. Check the edit for '+(transformed.target||'that item')+'.',3200);
+    }
+  } else {
+    applied=addMealMemoryToCurrent(match.memory);
+  }
   if(!applied.ok){
     if(applied.message) showToast(applied.message,2600);
     if(typeof maybeResumeVoiceSession==='function') maybeResumeVoiceSession(320);
     return true;
   }
-  if(match.command.transformText){
-    showToast('Added meal. Check the edit.',2600);
-  }
-  if(typeof voiceDebugTrace==='function') voiceDebugTrace('final_action',{action:'personal_meal_memory_recall',memory:mealMemoryDebugSummary(match.memory),transformText:match.command.transformText||''});
+  if(typeof voiceDebugTrace==='function') voiceDebugTrace('final_action',{action:'personal_meal_memory_recall',memory:mealMemoryDebugSummary(match.memory),transformText:match.command.transformText||'',transformApplied:!!(transformed&&transformed.ok)});
   if(typeof speakSuccessCue==='function') speakSuccessCue();
   else if(typeof maybeResumeVoiceSession==='function') maybeResumeVoiceSession(250);
   return true;
@@ -1944,7 +2023,8 @@ function cloneMealMemoryIngredientForRecall(item,index=0){
 }
 function addMealMemoryToCurrent(memory,options={}){
   if(!memory||!Array.isArray(memory.ingredients)||!memory.ingredients.length) return {ok:false,message:"That memory doesn't have ingredients yet."};
-  const items=memory.ingredients.map(cloneMealMemoryIngredientForRecall).filter(Boolean);
+  const sourceIngredients=Array.isArray(options.ingredients)?options.ingredients:memory.ingredients;
+  const items=sourceIngredients.map(cloneMealMemoryIngredientForRecall).filter(Boolean);
   if(!items.length) return {ok:false,message:"That memory doesn't have ingredients yet."};
   snapshotMeal();
   items.forEach(item=>{
@@ -1972,6 +2052,8 @@ function useMealMemoryFromProfile(id){
 }
 window.addMealMemoryToCurrent=addMealMemoryToCurrent;
 window.useMealMemoryFromProfile=useMealMemoryFromProfile;
+window.parseMealMemoryTransform=parseMealMemoryTransform;
+window.applyMealMemoryTransformToItems=applyMealMemoryTransformToItems;
 
 function deleteMealFromHome(id){
   const log=getLog();
