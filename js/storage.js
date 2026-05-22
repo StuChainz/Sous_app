@@ -1,7 +1,7 @@
 // ═══════════════════════════════════════════
 // STORAGE
 // ═══════════════════════════════════════════
-const KEYS={profile:'sous_profile',weights:'sous_weights',log:'sous_log',recipes:'sous_recipes',recalDismissed:'sous_recal_dismissed',recentIngredients:'sous_recent_ingredients',usualMeals:'sous_usual_meals',draft:'sous_draft',customServingUnits:'sous_custom_serving_units',userCountry:'userCountry'};
+const KEYS={profile:'sous_profile',weights:'sous_weights',log:'sous_log',recipes:'sous_recipes',recalDismissed:'sous_recal_dismissed',recentIngredients:'sous_recent_ingredients',usualMeals:'sous_usual_meals',mealMemories:'sous_meal_memories_v1',draft:'sous_draft',customServingUnits:'sous_custom_serving_units',userCountry:'userCountry'};
 const getProfile=()=>{try{return JSON.parse(localStorage.getItem(KEYS.profile)||'null')||{};}catch(e){return{};}};
 const getWeights=()=>{try{return JSON.parse(localStorage.getItem(KEYS.weights)||'[]');}catch(e){return[];}};
 const getLog=()=>{try{return JSON.parse(localStorage.getItem(KEYS.log)||'{}');}catch(e){return{};}};
@@ -132,6 +132,137 @@ window.updateUsualMeals=updateUsualMeals;
 window.usualMealFingerprint=usualMealFingerprint;
 window.renameUsualMeal=renameUsualMeal;
 window.removeUsualMeal=removeUsualMeal;
+
+// ═══════════════════════════════════════════
+// PERSONAL MEAL MEMORIES
+// ═══════════════════════════════════════════
+const MEAL_MEMORY_VERSION=1;
+const MEAL_MEMORY_SECTIONS=new Set(['breakfast','lunch','dinner','snacks','supplements']);
+const MEAL_MEMORY_SOURCES=new Set(['current-meal','history-meal','usual-meal','manual']);
+function mealMemoryId(){
+  if(window.crypto&&typeof window.crypto.randomUUID==='function') return window.crypto.randomUUID();
+  return 'memory_'+Date.now()+'_'+Math.random().toString(36).slice(2,10);
+}
+function mealMemorySafeParse(value,fallback){
+  if(typeof safeJsonParse==='function') return safeJsonParse(value,fallback);
+  try{return JSON.parse(value||'')||fallback;}catch(e){return fallback;}
+}
+function cloneMealMemoryValue(value){
+  if(value==null) return value;
+  if(typeof structuredClone==='function'){
+    try{return structuredClone(value);}catch(e){}
+  }
+  try{return JSON.parse(JSON.stringify(value));}catch(e){return Array.isArray(value)?value.slice():{...value};}
+}
+function normalizeMealMemoryPhraseValue(value){
+  return String(value||'').toLowerCase().replace(/\s+/g,' ').trim();
+}
+function normalizeMealMemoryPhrases(phrases){
+  const source=Array.isArray(phrases)?phrases:String(phrases||'').split(/[,\n]/);
+  const seen=new Set();
+  const out=[];
+  source.forEach(phrase=>{
+    const normalized=normalizeMealMemoryPhraseValue(phrase);
+    if(!normalized||seen.has(normalized)) return;
+    seen.add(normalized);
+    out.push(normalized);
+  });
+  return out;
+}
+function normalizeMealMemorySection(section){
+  const normalized=String(section||'').toLowerCase().trim();
+  return MEAL_MEMORY_SECTIONS.has(normalized)?normalized:null;
+}
+function normalizeMealMemoryNumber(value){
+  const n=Number(value);
+  return Number.isFinite(n)?n:0;
+}
+function mealMemoryTotalsFromIngredients(ingredients){
+  return (ingredients||[]).reduce((totals,item)=>({
+    kcal:totals.kcal+normalizeMealMemoryNumber(item?.kcal),
+    protein:totals.protein+normalizeMealMemoryNumber(item?.protein),
+    carbs:totals.carbs+normalizeMealMemoryNumber(item?.carbs),
+    fat:totals.fat+normalizeMealMemoryNumber(item?.fat),
+    fibre:totals.fibre+normalizeMealMemoryNumber(item?.fibre)
+  }),{kcal:0,protein:0,carbs:0,fat:0,fibre:0});
+}
+function normalizeMealMemoryTotals(totals,ingredients){
+  const source=totals&&typeof totals==='object'?totals:mealMemoryTotalsFromIngredients(ingredients);
+  return {
+    kcal:Math.round(normalizeMealMemoryNumber(source.kcal)),
+    protein:Math.round(normalizeMealMemoryNumber(source.protein)*10)/10,
+    carbs:Math.round(normalizeMealMemoryNumber(source.carbs)*10)/10,
+    fat:Math.round(normalizeMealMemoryNumber(source.fat)*10)/10,
+    fibre:Math.round(normalizeMealMemoryNumber(source.fibre)*10)/10
+  };
+}
+function cloneMealMemoryIngredients(ingredients){
+  return (Array.isArray(ingredients)?ingredients:[]).map(item=>cloneMealMemoryValue(item)).filter(Boolean);
+}
+function sanitizeMealMemory(memory={},existing={}){
+  const now=Date.now();
+  const ingredients=cloneMealMemoryIngredients(memory.ingredients!=null?memory.ingredients:existing.ingredients);
+  const name=String(memory.name!=null?memory.name:existing.name||'Meal memory').replace(/\s+/g,' ').trim()||'Meal memory';
+  return {
+    id:String(existing.id||memory.id||mealMemoryId()),
+    version:MEAL_MEMORY_VERSION,
+    name,
+    section:normalizeMealMemorySection(memory.section!=null?memory.section:existing.section),
+    phrases:normalizeMealMemoryPhrases(memory.phrases!=null?memory.phrases:existing.phrases||[name]),
+    ingredients,
+    totals:normalizeMealMemoryTotals(memory.totals!=null?memory.totals:existing.totals,ingredients),
+    source:MEAL_MEMORY_SOURCES.has(memory.source)?memory.source:(MEAL_MEMORY_SOURCES.has(existing.source)?existing.source:'manual'),
+    createdAt:normalizeMealMemoryNumber(existing.createdAt||memory.createdAt||now)||now,
+    updatedAt:normalizeMealMemoryNumber(memory.updatedAt||now)||now,
+    useCount:Math.max(0,Math.round(normalizeMealMemoryNumber(memory.useCount!=null?memory.useCount:existing.useCount))),
+    lastUsed:memory.lastUsed!=null?normalizeMealMemoryNumber(memory.lastUsed):(existing.lastUsed!=null?normalizeMealMemoryNumber(existing.lastUsed):null)
+  };
+}
+function getMealMemories(){
+  const parsed=mealMemorySafeParse(localStorage.getItem(KEYS.mealMemories),[]);
+  if(!Array.isArray(parsed)) return [];
+  return parsed.map(memory=>sanitizeMealMemory(memory,memory)).filter(memory=>memory.ingredients.length||memory.name||memory.phrases.length);
+}
+function saveMealMemories(memories){
+  const clean=(Array.isArray(memories)?memories:[]).map(memory=>sanitizeMealMemory(memory,memory));
+  localStorage.setItem(KEYS.mealMemories,JSON.stringify(clean));
+  return clean;
+}
+function addMealMemory(memory){
+  const list=getMealMemories();
+  const clean=sanitizeMealMemory(memory);
+  list.push(clean);
+  saveMealMemories(list);
+  return clean;
+}
+function updateMealMemory(id,patch){
+  const list=getMealMemories();
+  const idx=list.findIndex(memory=>memory.id===id);
+  if(idx<0) return null;
+  const updated=sanitizeMealMemory({...list[idx],...(patch||{}),updatedAt:Date.now()},list[idx]);
+  list[idx]=updated;
+  saveMealMemories(list);
+  return updated;
+}
+function removeMealMemory(id){
+  const list=getMealMemories();
+  const next=list.filter(memory=>memory.id!==id);
+  if(next.length===list.length) return false;
+  saveMealMemories(next);
+  return true;
+}
+function findMealMemoryById(id){
+  return getMealMemories().find(memory=>memory.id===id)||null;
+}
+window.normalizeMealMemoryPhraseValue=normalizeMealMemoryPhraseValue;
+window.normalizeMealMemoryPhrases=normalizeMealMemoryPhrases;
+window.cloneMealMemoryIngredients=cloneMealMemoryIngredients;
+window.getMealMemories=getMealMemories;
+window.saveMealMemories=saveMealMemories;
+window.addMealMemory=addMealMemory;
+window.updateMealMemory=updateMealMemory;
+window.removeMealMemory=removeMealMemory;
+window.findMealMemoryById=findMealMemoryById;
 
 // ═══════════════════════════════════════════
 // USER FOOD OVERRIDES
