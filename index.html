@@ -707,7 +707,10 @@ html,body{height:100%;height:var(--app-height);min-height:-webkit-fill-available
           <button id="undo-btn" style="background:none;border:none;padding:4px 8px;cursor:pointer;color:var(--text-muted);font-size:12px;display:inline-flex;align-items:center;gap:4px;"><i class="ti ti-arrow-back-up" style="font-size:14px;"></i> Undo</button>
         </div>
         <button class="btn-secondary" id="finished-meal-btn" style="margin:12px 20px 0;width:calc(100% - 40px);">Review meal</button>
-        <div class="add-custom-row" style="text-align:center;margin:8px 20px 0;"><span id="add-custom-btn" style="font-size:13px;color:var(--text-muted);cursor:pointer;text-decoration:underline;text-underline-offset:2px;">+ Add custom ingredient</span></div>
+        <div class="add-custom-row">
+          <button class="manual-add-btn" type="button" id="manual-add-btn" onclick="openAddModal()"><i class="ti ti-plus"></i> Add food manually</button>
+          <span id="add-custom-btn">Custom food</span>
+        </div>
         <div class="listen-hint">Hold to capture one item · edit rows before saving</div>
       </div>
 
