@@ -4109,6 +4109,8 @@ function showSummary(announce=true){
   if(nameInput&&(announce||!nameInput.value.trim())) nameInput.value=generateMealNameFromIngredients(meal,currentMealSection);
   const saveUsual=document.getElementById('sum-save-usual');
   if(saveUsual&&announce) saveUsual.checked=false;
+  const rememberBtn=document.getElementById('remember-meal-btn');
+  if(rememberBtn) rememberBtn.style.display=meal.length?'block':'none';
   const t=sumMacros(meal);
   document.getElementById('sum-kcal').textContent=Math.round(t.kcal);
   document.getElementById('sum-protein').textContent=Math.round(t.protein)+'g';
@@ -4127,6 +4129,58 @@ function showSummary(announce=true){
   });
   showLogScreen('summary');
   if(announce) speakCachedResponse('done');
+}
+
+function defaultMealMemoryPhrases(name){
+  const base=typeof normalizeMealMemoryPhrase==='function'
+    ?normalizeMealMemoryPhrase(name)
+    :String(name||'').toLowerCase().replace(/\s+/g,' ').trim();
+  if(!base) return '';
+  if(/^(?:my|usual|saved)\s+/.test(base)) return base;
+  return 'my '+base+'\nusual '+base;
+}
+function closeRememberMealModal(){
+  document.getElementById('remember-meal-modal')?.classList.remove('show');
+}
+function openRememberMealModal(){
+  if(!meal.length){showToast('Add ingredients first!');return;}
+  const section=currentMealSection||document.getElementById('sum-section-select')?.value||defaultSectionFromTime();
+  const nameInput=document.getElementById('sum-meal-name');
+  const name=(nameInput?.value||'').trim()||generateMealNameFromIngredients(meal,section);
+  const memoryName=document.getElementById('memory-name-input');
+  const memorySection=document.getElementById('memory-section-select');
+  const memoryPhrases=document.getElementById('memory-phrases-input');
+  if(memoryName) memoryName.value=name;
+  if(memorySection) memorySection.value=section||'';
+  if(memoryPhrases) memoryPhrases.value=defaultMealMemoryPhrases(name);
+  document.getElementById('remember-meal-modal')?.classList.add('show');
+  setTimeout(()=>memoryName?.focus(),80);
+}
+function saveCurrentMealMemory(){
+  if(!meal.length){closeRememberMealModal();showToast('Add ingredients first!');return;}
+  if(typeof addMealMemory!=='function'){showToast('Memory storage unavailable');return;}
+  const name=(document.getElementById('memory-name-input')?.value||'').trim();
+  if(!name){showToast('Name this meal');return;}
+  const sectionValue=document.getElementById('memory-section-select')?.value||null;
+  const phraseText=document.getElementById('memory-phrases-input')?.value||defaultMealMemoryPhrases(name);
+  const phrases=typeof normalizeMealMemoryPhrases==='function'
+    ?normalizeMealMemoryPhrases(phraseText)
+    :phraseText.split(/[,\n]/).map(p=>p.toLowerCase().trim()).filter(Boolean);
+  if(!phrases.length){showToast('Add a trigger phrase');return;}
+  const ingredients=typeof cloneMealMemoryIngredients==='function'
+    ?cloneMealMemoryIngredients(meal)
+    :meal.map(item=>JSON.parse(JSON.stringify(item)));
+  const totals=typeof sumMacros==='function'?sumMacros(ingredients):{kcal:0,protein:0,carbs:0,fat:0,fibre:0};
+  const memory=addMealMemory({
+    name,
+    section:sectionValue||null,
+    phrases,
+    ingredients,
+    totals,
+    source:'current-meal'
+  });
+  closeRememberMealModal();
+  showToast('Remembered '+memory.name,2600);
 }
 
 // ═══════════════════════════════════════════
@@ -5582,6 +5636,10 @@ function wireLogButtons(){
   document.getElementById('mc-cancel-btn').addEventListener('click',()=>{pendingBatch=[];clearVoicePromptOwner('multi_confirm_cancelled');showLogScreen('listening');maybeResumeVoiceSession(400);});
   document.getElementById('add-custom-btn').addEventListener('click',()=>openCustomEntry());
   document.getElementById('add-more-btn').addEventListener('click',()=>openAddModal());
+  document.getElementById('remember-meal-btn')?.addEventListener('click',openRememberMealModal);
+  document.getElementById('remember-meal-close-btn')?.addEventListener('click',closeRememberMealModal);
+  document.getElementById('remember-meal-cancel-btn')?.addEventListener('click',closeRememberMealModal);
+  document.getElementById('remember-meal-save-btn')?.addEventListener('click',saveCurrentMealMemory);
   document.getElementById('sum-section-select').addEventListener('change',e=>{currentMealSection=e.target.value;});
   document.getElementById('save-meal-btn').addEventListener('click',()=>{
     const saveAsUsual=!!document.getElementById('sum-save-usual')?.checked;

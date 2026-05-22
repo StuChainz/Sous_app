@@ -831,6 +831,7 @@ html,body{height:100%;height:var(--app-height);min-height:-webkit-fill-available
           <input id="sum-save-usual" type="checkbox" style="margin-top:2px;accent-color:var(--accent);">
           <span>Save as custom meal for quick add</span>
         </label>
+        <button class="btn-secondary" id="remember-meal-btn" style="width:100%;margin:0 0 10px;flex:none;"><i class="ti ti-bookmark" style="vertical-align:-2px;font-size:14px;"></i> Remember meal</button>
         <button class="btn-primary" id="save-meal-btn">Log meal</button>
       </div>
 
@@ -1289,6 +1290,42 @@ html,body{height:100%;height:var(--app-height);min-height:-webkit-fill-available
       <button class="modal-btn secondary" onclick="doRenameUsualMeal()">Rename</button>
       <button class="modal-btn secondary usual-meal-remove-btn" onclick="doRemoveUsualMeal()">Remove from usuals</button>
       <button class="modal-btn secondary" onclick="closeUsualMealMenu()">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<div id="remember-meal-modal" class="modal-overlay" onclick="if(event.target===this)closeRememberMealModal()">
+  <div class="modal-sheet">
+    <div class="modal-header">
+      <span class="modal-title">Remember meal</span>
+      <button class="modal-close" type="button" id="remember-meal-close-btn">✕</button>
+    </div>
+    <div class="modal-panel">
+      <div class="custom-form">
+        <div class="custom-field-group" style="margin-bottom:10px;">
+          <div class="custom-field-label">Name</div>
+          <input type="text" class="custom-input" id="memory-name-input" placeholder="Oats">
+        </div>
+        <div class="custom-field-group" style="margin-bottom:10px;">
+          <div class="custom-field-label">Section</div>
+          <select class="custom-input" id="memory-section-select">
+            <option value="">None</option>
+            <option value="breakfast">Breakfast</option>
+            <option value="lunch">Lunch</option>
+            <option value="dinner">Dinner</option>
+            <option value="snacks">Snacks</option>
+            <option value="supplements">Supplements</option>
+          </select>
+        </div>
+        <div class="custom-field-group">
+          <div class="custom-field-label">Trigger phrases</div>
+          <textarea class="custom-input" id="memory-phrases-input" rows="3" placeholder="my oats&#10;usual oats" style="resize:vertical;line-height:1.35;"></textarea>
+        </div>
+      </div>
+    </div>
+    <div class="btn-row" style="margin-top:14px;">
+      <button class="btn-secondary" type="button" id="remember-meal-cancel-btn">Cancel</button>
+      <button class="btn-primary" type="button" id="remember-meal-save-btn" style="flex:2;">Save memory</button>
     </div>
   </div>
 </div>
