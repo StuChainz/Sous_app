@@ -1808,6 +1808,45 @@ function addMealToCurrent(sourceMeal){
   if(typeof _persistDraft==='function') _persistDraft();
   renderCurrentMeal();
 }
+function cloneMealMemoryIngredientForRecall(item,index=0){
+  const copy=typeof cloneMealMemoryIngredients==='function'
+    ?cloneMealMemoryIngredients([item])[0]
+    :JSON.parse(JSON.stringify(item||{}));
+  if(!copy) return null;
+  delete copy.id;
+  if(!copy.name) copy.name='Item '+(index+1);
+  return copy;
+}
+function addMealMemoryToCurrent(memory,options={}){
+  if(!memory||!Array.isArray(memory.ingredients)||!memory.ingredients.length) return {ok:false,message:"That memory doesn't have ingredients yet."};
+  const items=memory.ingredients.map(cloneMealMemoryIngredientForRecall).filter(Boolean);
+  if(!items.length) return {ok:false,message:"That memory doesn't have ingredients yet."};
+  snapshotMeal();
+  items.forEach(item=>{
+    addIngredientToMeal(item,{source:'meal-memory',skipSnapshot:true,skipPersist:true});
+  });
+  if(memory.section) currentMealSection=memory.section;
+  else currentMealSection=currentMealSection||defaultSectionFromTime();
+  if(typeof _persistDraft==='function') _persistDraft();
+  if(typeof renderCurrentMeal==='function') renderCurrentMeal();
+  if(typeof updateHome==='function') updateHome();
+  if(!options.skipUsage&&typeof updateMealMemory==='function'&&memory.id){
+    updateMealMemory(memory.id,{useCount:(Number(memory.useCount)||0)+1,lastUsed:Date.now()});
+    if(typeof renderMealMemoryManagement==='function') renderMealMemoryManagement();
+  }
+  if(!options.silentToast) showToast('Added '+(memory.name||'meal'),2600);
+  return {ok:true,items};
+}
+function useMealMemoryFromProfile(id){
+  const memory=typeof findMealMemoryById==='function'?findMealMemoryById(id):null;
+  if(!memory) return;
+  currentEditMealId=null; currentEditMealDate=null;
+  switchTab('log',{fresh:true,silent:true,section:memory.section||null,quick:true});
+  const applied=addMealMemoryToCurrent(memory);
+  if(!applied.ok&&applied.message) showToast(applied.message,2600);
+}
+window.addMealMemoryToCurrent=addMealMemoryToCurrent;
+window.useMealMemoryFromProfile=useMealMemoryFromProfile;
 
 function deleteMealFromHome(id){
   const log=getLog();

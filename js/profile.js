@@ -280,6 +280,7 @@ function renderMealMemoryManagement(){
     const actions=document.createElement('div');
     actions.style.cssText='display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end;';
     actions.append(
+      mealMemoryButton('Use',()=>useMealMemoryFromProfile(memory.id)),
       mealMemoryButton('Rename',()=>renameMealMemoryFromProfile(memory.id)),
       mealMemoryButton('Phrases',()=>editMealMemoryPhrasesFromProfile(memory.id)),
       mealMemoryButton('Delete',()=>deleteMealMemoryFromProfile(memory.id),'danger')
