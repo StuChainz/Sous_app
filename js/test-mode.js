@@ -220,6 +220,34 @@
     return [];
   }
 
+  function getPhotoTimingTrace(){
+    try{
+      if(typeof window.__sousPhotoTimingTrace==='function') return clonePlain(window.__sousPhotoTimingTrace().slice(-100));
+    }catch(e){}
+    return [];
+  }
+
+  function getBarcodeTimingTrace(){
+    try{
+      if(typeof window.__sousBarcodeTimingTrace==='function') return clonePlain(window.__sousBarcodeTimingTrace().slice(-80));
+    }catch(e){}
+    return [];
+  }
+
+  function getLastPhotoError(){
+    try{
+      if(typeof window.__sousLastPhotoError==='function') return clonePlain(window.__sousLastPhotoError());
+    }catch(e){}
+    return null;
+  }
+
+  function getLastBarcodeError(){
+    try{
+      if(typeof window.__sousLastBarcodeError==='function') return clonePlain(window.__sousLastBarcodeError());
+    }catch(e){}
+    return null;
+  }
+
   function buildBugReport(note=''){
     let appVersion=null;
     try{
@@ -243,6 +271,10 @@
       voiceTrace:getVoiceTrace(),
       voiceDecisionTrace:getVoiceDecisionTrace(),
       voiceTestEvents:getVoiceTestEvents(),
+      photoTimingTrace:getPhotoTimingTrace(),
+      barcodeTimingTrace:getBarcodeTimingTrace(),
+      lastPhotoEstimateError:getLastPhotoError(),
+      lastBarcodeError:getLastBarcodeError(),
       recentConsoleErrors:consoleErrors.slice(-20)
     };
   }

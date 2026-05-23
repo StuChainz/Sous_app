@@ -331,6 +331,7 @@ html,body{height:100%;height:var(--app-height);min-height:-webkit-fill-available
 #ls-listening .add-custom-row{order:11;}
 #ls-listening #add-custom-btn{color:var(--paper-soft)!important;opacity:.72;}
 #ls-listening .text-input-row{order:20;margin:12px 20px 10px;}
+#ls-listening .log-entry-actions{order:21;}
 #ls-listening > button[onclick="openBarcodeScanner()"]{order:21;color:var(--paper-soft);background:rgba(244,240,230,.06);border-color:rgba(244,240,230,.12);}
 #ls-listening .listen-hint{order:22;color:rgba(244,240,230,.54);padding-bottom:8px;}
 #ls-listening .mic-area{
@@ -829,6 +830,10 @@ html,body{height:100%;height:var(--app-height);min-height:-webkit-fill-available
   grid-template-columns:1fr 1fr;
   gap:8px;
 }
+.photo-pick-combo{
+  position:relative;
+  min-width:0;
+}
 .home-action-grid .btn-secondary{
   width:100%;
   min-height:46px;
@@ -839,6 +844,30 @@ html,body{height:100%;height:var(--app-height);min-height:-webkit-fill-available
   background:var(--card);
   color:var(--ink);
   border:1px solid var(--border);
+}
+.photo-pick-combo .photo-main-btn{
+  padding-right:42px;
+}
+.photo-gallery-btn{
+  position:absolute;
+  right:5px;
+  bottom:5px;
+  width:34px;
+  height:34px;
+  border:0;
+  border-radius:50%;
+  background:var(--ink-fill);
+  color:var(--paper-soft);
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  font-size:17px;
+  cursor:pointer;
+  z-index:2;
+}
+.photo-gallery-btn:focus-visible{
+  outline:2px solid var(--hl);
+  outline-offset:2px;
 }
 .home-action-grid .wide{grid-column:1/-1;}
 .home-bodyweight{padding-top:2px;}
@@ -961,6 +990,40 @@ html,body{height:100%;height:var(--app-height);min-height:-webkit-fill-available
 #ls-listening > button[onclick="openBarcodeScanner()"],
 #ls-listening .listen-hint{
   display:none!important;
+}
+#ls-listening .log-entry-actions{
+  order:5;
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:8px;
+  margin:0 22px 14px;
+}
+#ls-listening .log-entry-actions .btn-secondary{
+  width:100%;
+  min-height:44px;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  gap:7px;
+  border-radius:999px;
+  border:1px solid var(--hairline-paper);
+  background:rgba(239,233,216,.07);
+  color:var(--paper-soft);
+  font-family:var(--font-mono);
+  font-size:10px;
+  letter-spacing:.06em;
+  text-transform:uppercase;
+}
+#ls-listening .log-entry-actions .photo-main-btn{
+  padding-right:38px;
+}
+#ls-listening .log-entry-actions .photo-gallery-btn{
+  right:5px;
+  bottom:5px;
+  width:34px;
+  height:34px;
+  background:var(--hl);
+  color:var(--ink);
 }
 #ls-listening .transcript-box{
   order:2;

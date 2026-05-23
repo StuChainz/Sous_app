@@ -12,8 +12,49 @@ let barcodeState = {
   currentCode: '',
   product: null,
   lookingUp: false,
-  zxingLoading: null
+  zxingLoading: null,
+  trace: [],
+  traceStart: 0,
+  lastError: null
 };
+
+function barcodeSafeMeta(meta = {}) {
+  try {
+    return JSON.parse(JSON.stringify(meta));
+  } catch (e) {
+    return { note: String(meta) };
+  }
+}
+
+function barcodeResetTrace() {
+  barcodeState.traceStart = performance?.now ? performance.now() : Date.now();
+  barcodeState.trace = [];
+  barcodeState.lastError = null;
+}
+
+function barcodeTrace(event, meta = {}) {
+  if (!barcodeState.traceStart) barcodeResetTrace();
+  const now = performance?.now ? performance.now() : Date.now();
+  const entry = {
+    event,
+    t: new Date().toISOString(),
+    ms: Math.round(now - barcodeState.traceStart),
+    ...barcodeSafeMeta(meta)
+  };
+  barcodeState.trace.push(entry);
+  if (barcodeState.trace.length > 80) barcodeState.trace.splice(0, barcodeState.trace.length - 80);
+  try { console.info('[Sous Barcode Timing]', entry); } catch (e) {}
+  return entry;
+}
+
+function barcodeRememberError(error, context = '') {
+  barcodeState.lastError = {
+    t: new Date().toISOString(),
+    context,
+    message: String(error?.message || error || 'Unknown barcode error').slice(0, 240)
+  };
+  barcodeTrace('barcode_error', barcodeState.lastError);
+}
 
 function barcodeCleanCode(value) {
   return String(value || '').replace(/\D/g, '').slice(0, 18);
@@ -113,6 +154,11 @@ function openBarcodeScannerFromHome() {
 async function openBarcodeScanner() {
   const modal = barcodeModal();
   if (!modal) return;
+  barcodeResetTrace();
+  barcodeTrace('scanner_opened', {
+    nativeDetector: 'BarcodeDetector' in window,
+    zxingLoaded: !!window.ZXingBrowser
+  });
   if (typeof stopAllVoiceActivity === 'function') stopAllVoiceActivity('barcode scan');
   barcodeState.currentCode = '';
   barcodeState.product = null;
@@ -128,6 +174,7 @@ async function openBarcodeScanner() {
 async function barcodeStartCamera() {
   const video = document.getElementById('barcode-video');
   if (!video || !navigator.mediaDevices?.getUserMedia) {
+    barcodeRememberError('Camera API unavailable', 'camera_start');
     barcodeSetStatus('Camera is not available. Enter the barcode instead.', 'warn');
     barcodeShowManualEntry();
     return;
@@ -143,6 +190,11 @@ async function barcodeStartCamera() {
     video.srcObject = stream;
     video.setAttribute('playsinline', '');
     await video.play();
+    await barcodeWaitForCameraReady(video);
+    barcodeTrace('camera_ready', {
+      width: video.videoWidth || null,
+      height: video.videoHeight || null
+    });
     if ('BarcodeDetector' in window) {
       await barcodeStartNativeLoop(video);
     } else {
@@ -150,9 +202,28 @@ async function barcodeStartCamera() {
     }
   } catch (e) {
     console.warn('[Sous Barcode] camera error', e);
+    barcodeRememberError(e, 'camera_start');
     barcodeSetStatus('Camera could not start. Enter the barcode instead.', 'warn');
     barcodeShowManualEntry();
   }
+}
+
+function barcodeWaitForCameraReady(video) {
+  if (video.readyState >= 2 && video.videoWidth) return Promise.resolve();
+  return new Promise(resolve => {
+    let done = false;
+    const finish = () => {
+      if (done) return;
+      done = true;
+      video.removeEventListener('loadedmetadata', finish);
+      video.removeEventListener('canplay', finish);
+      clearTimeout(timer);
+      resolve();
+    };
+    const timer = setTimeout(finish, 1600);
+    video.addEventListener('loadedmetadata', finish, { once: true });
+    video.addEventListener('canplay', finish, { once: true });
+  });
 }
 
 async function barcodeStartNativeLoop(video) {
@@ -193,12 +264,24 @@ async function barcodeDetectNative(video) {
 function barcodeLoadZxing() {
   if (window.ZXingBrowser) return Promise.resolve(window.ZXingBrowser);
   if (barcodeState.zxingLoading) return barcodeState.zxingLoading;
+  barcodeTrace('scanner_library_load_started', { library: 'zxing' });
   barcodeState.zxingLoading = new Promise((resolve, reject) => {
     const script = document.createElement('script');
     script.src = BARCODE_ZXING_URL;
     script.async = true;
-    script.onload = () => window.ZXingBrowser ? resolve(window.ZXingBrowser) : reject(new Error('Barcode scanner library did not load.'));
-    script.onerror = () => reject(new Error('Barcode scanner library failed to load.'));
+    script.onload = () => {
+      barcodeTrace('scanner_library_load_finished', { library: 'zxing', ok: !!window.ZXingBrowser });
+      if (window.ZXingBrowser) resolve(window.ZXingBrowser);
+      else {
+        barcodeState.zxingLoading = null;
+        reject(new Error('Barcode scanner library did not load.'));
+      }
+    };
+    script.onerror = () => {
+      barcodeTrace('scanner_library_load_finished', { library: 'zxing', ok: false });
+      barcodeState.zxingLoading = null;
+      reject(new Error('Barcode scanner library failed to load.'));
+    };
     document.head.appendChild(script);
   });
   return barcodeState.zxingLoading;
@@ -217,20 +300,28 @@ async function barcodeStartZxing(video) {
     barcodeSetStatus('Point the camera at the barcode.');
   } catch (e) {
     console.warn('[Sous Barcode] zxing unavailable', e);
+    barcodeRememberError(e, 'zxing_start');
     barcodeSetStatus('Scanner is not available here. Enter the barcode instead.', 'warn');
     barcodeShowManualEntry();
   }
 }
 
-async function barcodeHandleDetected(code) {
+async function barcodeHandleDetected(code, source = 'camera') {
   code = barcodeCleanCode(code);
-  if (!code || code.length < 6 || barcodeState.lookingUp) return;
+  if (!code || code.length < 6) return;
+  if (barcodeState.lookingUp) {
+    barcodeTrace('duplicate_barcode_ignored', { barcode: code, currentCode: barcodeState.currentCode || null });
+    return;
+  }
   barcodeState.lookingUp = true;
   barcodeState.currentCode = code;
+  barcodeTrace('barcode_detected', { barcode: code, source });
   barcodeStopScanning();
-  barcodeSetStatus('Looking up ' + code + '...');
+  barcodeSetStatus('Looking up product...');
   const cached = barcodeCacheGet(code);
+  barcodeTrace('lookup_started', { barcode: code, cacheHit: !!cached });
   if (cached) {
+    barcodeTrace('lookup_finished', { barcode: code, cacheHit: true, ok: true });
     barcodeRenderReview(cached, true);
     return;
   }
@@ -242,9 +333,12 @@ async function barcodeHandleDetected(code) {
     const data = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(data.error || 'Product lookup failed.');
     barcodeCacheSet(code, data);
+    barcodeTrace('lookup_finished', { barcode: code, cacheHit: false, ok: true, status: res.status });
     barcodeRenderReview(data, false);
   } catch (e) {
     barcodeState.lookingUp = false;
+    barcodeRememberError(e, 'lookup');
+    barcodeTrace('lookup_finished', { barcode: code, cacheHit: false, ok: false });
     barcodeSetStatus(String(e.message || 'Product lookup failed.'), 'warn');
     barcodeShowManualEntry(code);
   }
@@ -268,7 +362,7 @@ function barcodeLookupManual() {
     barcodeSetStatus('Enter at least 6 barcode digits.', 'warn');
     return;
   }
-  barcodeHandleDetected(code);
+  barcodeHandleDetected(code, 'manual');
 }
 
 function barcodeRenderReview(product, cached) {
@@ -293,6 +387,11 @@ function barcodeRenderReview(product, cached) {
   }
   barcodeUpdatePreview();
   barcodeSetStatus('Review before adding.');
+  barcodeTrace('product_rendered', {
+    barcode: product.barcode || barcodeState.currentCode || null,
+    cached: !!cached,
+    hasImage: !!product.imageUrl
+  });
 }
 
 function barcodeNutrition() {
@@ -397,7 +496,18 @@ function initBarcode() {
   barcodeModal()?.addEventListener('click', event => {
     if (event.target === barcodeModal()) closeBarcodeScanner();
   });
+  barcodeWarmScannerLibrary();
 }
+
+function barcodeWarmScannerLibrary() {
+  if ('BarcodeDetector' in window || window.ZXingBrowser) return;
+  const warm = () => barcodeLoadZxing().catch(error => barcodeRememberError(error, 'zxing_preload'));
+  if ('requestIdleCallback' in window) requestIdleCallback(warm, { timeout: 2500 });
+  else setTimeout(warm, 1200);
+}
+
+window.__sousBarcodeTimingTrace = () => barcodeState.trace.slice(-80);
+window.__sousLastBarcodeError = () => barcodeState.lastError ? { ...barcodeState.lastError } : null;
 
 if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initBarcode);
 else initBarcode();

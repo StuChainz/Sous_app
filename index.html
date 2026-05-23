@@ -622,9 +622,11 @@ html,body{height:100%;height:var(--app-height);min-height:-webkit-fill-available
         <div class="section home-entry-actions">
           <div class="section-label"><span>Other ways to jot</span></div>
           <div class="home-action-grid">
-            <button class="btn-secondary" type="button" onclick="openPhotoEstimateCameraPicker()" data-testid="photo-estimate-camera-btn"><i class="ti ti-camera"></i>Take photo</button>
-            <button class="btn-secondary" type="button" onclick="openPhotoEstimateLibraryPicker()" data-testid="photo-estimate-library-btn"><i class="ti ti-photo"></i>Choose photo</button>
-            <button class="btn-secondary wide" type="button" onclick="openBarcodeScannerFromHome()"><i class="ti ti-barcode"></i>Scan barcode</button>
+            <div class="photo-pick-combo">
+              <button class="btn-secondary photo-main-btn" type="button" onclick="openPhotoEstimateCameraPicker()" data-testid="photo-estimate-camera-btn"><i class="ti ti-camera"></i>Add from photo</button>
+              <button class="photo-gallery-btn" type="button" onclick="openPhotoEstimateLibraryPicker()" data-testid="photo-estimate-library-btn" aria-label="Choose photo from gallery"><i class="ti ti-photo"></i></button>
+            </div>
+            <button class="btn-secondary" type="button" onclick="openBarcodeScannerFromHome()"><i class="ti ti-barcode"></i>Add from barcode</button>
           </div>
           <input id="photo-estimate-input" type="file" accept="image/*" capture="environment" style="position:absolute;width:1px;height:1px;opacity:0;pointer-events:none;overflow:hidden;">
           <input id="photo-estimate-library-input" type="file" accept="image/*" style="position:absolute;width:1px;height:1px;opacity:0;pointer-events:none;overflow:hidden;">
@@ -696,7 +698,13 @@ html,body{height:100%;height:var(--app-height);min-height:-webkit-fill-available
           <input class="voice-text-input" id="text-input" type="text" placeholder='e.g. "150g chicken and 80g rice" or "casserole 600 cal 45g protein"'>
           <button class="send-btn" id="send-btn"><i class="ti ti-send"></i></button>
         </div>
-        <button class="btn-secondary" type="button" onclick="openBarcodeScanner()" style="margin:10px 20px 0;width:calc(100% - 40px);"><i class="ti ti-barcode" style="margin-right:6px;"></i>Scan barcode</button>
+        <div class="log-entry-actions">
+          <div class="photo-pick-combo">
+            <button class="btn-secondary photo-main-btn" type="button" onclick="openPhotoEstimateCameraPicker()"><i class="ti ti-camera"></i>Add from photo</button>
+            <button class="photo-gallery-btn" type="button" onclick="openPhotoEstimateLibraryPicker()" aria-label="Choose photo from gallery"><i class="ti ti-photo"></i></button>
+          </div>
+          <button class="btn-secondary" type="button" onclick="openBarcodeScanner()"><i class="ti ti-barcode"></i>Add from barcode</button>
+        </div>
         <div id="current-meal-list" style="display:none;margin:12px 20px 0;background:var(--card);border:.5px solid var(--border);border-radius:var(--radius-sm);overflow:visible;"></div>
         <div style="display:none;justify-content:flex-end;margin:6px 20px 0;" id="undo-row">
           <button id="undo-btn" style="background:none;border:none;padding:4px 8px;cursor:pointer;color:var(--text-muted);font-size:12px;display:inline-flex;align-items:center;gap:4px;"><i class="ti ti-arrow-back-up" style="font-size:14px;"></i> Undo</button>
@@ -1424,6 +1432,7 @@ html,body{height:100%;height:var(--app-height);min-height:-webkit-fill-available
     </div>
     <div class="modal-panel">
       <div id="photo-estimate-status" class="modal-body" style="display:none;margin-bottom:12px;"></div>
+      <img id="photo-estimate-preview" alt="" style="display:none;width:100%;max-height:180px;object-fit:cover;border-radius:12px;margin-bottom:12px;background:var(--bg);border:.5px solid var(--border);">
       <div id="photo-estimate-form" style="display:none;">
         <div class="custom-field-group" style="margin-bottom:10px;">
           <div class="custom-field-label">Meal name</div>
@@ -1725,10 +1734,10 @@ window.sousApiUrl=path=>`${window.SOUS_API_BASE}${path}`;
 <script src="js/profile.js?v=8"></script>
 <script src="js/recipes.js?v=8"></script>
 <script src="js/onboarding.js?v=1"></script>
-<script src="js/test-mode.js?v=2"></script>
-<script src="js/app.js?v=17"></script>
+<script src="js/test-mode.js?v=3"></script>
+<script src="js/app.js?v=18"></script>
 <script src="js/ai-interpreter.js?v=3"></script>
-<script src="js/barcode.js?v=1"></script>
+<script src="js/barcode.js?v=2"></script>
 
 </body>
 </html>

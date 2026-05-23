@@ -334,6 +334,7 @@ app.post('/api/realtime/session', async (req, res) => {
 });
 
 app.post('/api/photo-estimate', async (req, res) => {
+  const receivedAt = Date.now();
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) {
     return res.status(500).json({ error: 'OPENAI_API_KEY is not set on the server.' });
@@ -354,6 +355,7 @@ app.post('/api/photo-estimate', async (req, res) => {
   ].join('\n');
 
   try {
+    const aiStartedAt = Date.now();
     const upstream = await fetch('https://api.openai.com/v1/responses', {
       method: 'POST',
       headers: {
@@ -417,6 +419,7 @@ app.post('/api/photo-estimate', async (req, res) => {
         }
       })
     });
+    const aiFinishedAt = Date.now();
 
     const text = await upstream.text();
     let data = null;
@@ -448,7 +451,17 @@ app.post('/api/photo-estimate', async (req, res) => {
       return res.status(502).json(errorBody('Invalid JSON returned by OpenAI.', 'raw', rawText));
     }
 
-    res.json(normalisePhotoEstimate(parsed));
+    res.json({
+      ...normalisePhotoEstimate(parsed),
+      _timings: {
+        receivedAt,
+        aiStartedAt,
+        aiFinishedAt,
+        aiMs: aiFinishedAt - aiStartedAt,
+        totalMs: Date.now() - receivedAt,
+        imageBytesApprox: Math.round((image.length * 3) / 4)
+      }
+    });
   } catch (err) {
     console.error('[Sous Photo Estimate] error', err.message);
     res.status(500).json(errorBody('Photo estimate request failed.', 'detail', err.message));

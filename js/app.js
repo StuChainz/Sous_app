@@ -1525,6 +1525,85 @@ function logUsualMealByIndex(section,idx){
 
 let _photoEstimateDraft=null;
 let _photoEstimatePortion=1;
+let _photoEstimateTrace=[];
+let _photoEstimateTraceStart=0;
+let _photoEstimateLastError=null;
+let _photoEstimatePreviewUrl=null;
+let _photoEstimateSlowTimer=null;
+const PHOTO_ESTIMATE_MAX_DIMENSION=1024;
+const PHOTO_ESTIMATE_JPEG_QUALITY=0.75;
+
+function photoEstimateSafeMeta(meta={}){
+  const safe={};
+  Object.entries(meta||{}).forEach(([key,value])=>{
+    if(/image|base64|dataUrl|src/i.test(key)) return;
+    safe[key]=value;
+  });
+  try{return JSON.parse(JSON.stringify(safe));}
+  catch(e){return {note:String(meta)};}
+}
+function resetPhotoEstimateTrace(){
+  _photoEstimateTraceStart=performance?.now?performance.now():Date.now();
+  _photoEstimateTrace=[];
+  _photoEstimateLastError=null;
+}
+function photoEstimateTrace(event,meta={}){
+  if(!_photoEstimateTraceStart) resetPhotoEstimateTrace();
+  const now=performance?.now?performance.now():Date.now();
+  const entry={
+    event,
+    t:new Date().toISOString(),
+    ms:Math.round(now-_photoEstimateTraceStart),
+    ...photoEstimateSafeMeta(meta)
+  };
+  _photoEstimateTrace.push(entry);
+  if(_photoEstimateTrace.length>100) _photoEstimateTrace.splice(0,_photoEstimateTrace.length-100);
+  try{console.info('[Sous Photo Timing]',entry);}catch(e){}
+  return entry;
+}
+function rememberPhotoEstimateError(error,context=''){
+  _photoEstimateLastError={
+    t:new Date().toISOString(),
+    context,
+    message:String(error?.message||error||'Unknown photo estimate error').slice(0,240)
+  };
+  photoEstimateTrace('photo_error',_photoEstimateLastError);
+}
+function setPhotoEstimateStatus(message){
+  const statusEl=document.getElementById('photo-estimate-status');
+  if(!statusEl) return;
+  statusEl.style.display=message?'block':'none';
+  statusEl.textContent=message||'';
+}
+function clearPhotoEstimateSlowTimer(){
+  if(_photoEstimateSlowTimer){
+    clearTimeout(_photoEstimateSlowTimer);
+    _photoEstimateSlowTimer=null;
+  }
+}
+function startPhotoEstimateSlowTimer(){
+  clearPhotoEstimateSlowTimer();
+  _photoEstimateSlowTimer=setTimeout(()=>{
+    photoEstimateTrace('photo_slow_state_shown');
+    setPhotoEstimateStatus('Still working — you can keep logging manually');
+  },12000);
+}
+function setPhotoEstimatePreview(file){
+  const img=document.getElementById('photo-estimate-preview');
+  if(_photoEstimatePreviewUrl){
+    URL.revokeObjectURL(_photoEstimatePreviewUrl);
+    _photoEstimatePreviewUrl=null;
+  }
+  if(!img) return;
+  if(!file){
+    img.removeAttribute('src');
+    img.style.display='none';
+    return;
+  }
+  _photoEstimatePreviewUrl=URL.createObjectURL(file);
+  img.src=_photoEstimatePreviewUrl;
+  img.style.display='block';
+}
 
 function photoEstimateSectionDefault(){
   return typeof getDefaultQuickAddSection==='function'
@@ -1536,19 +1615,17 @@ function showPhotoEstimateModal({status='',showForm=false}={}){
   if(!modal) return;
   modal.style.display='flex';
   requestAnimationFrame(()=>modal.classList.add('show'));
-  const statusEl=document.getElementById('photo-estimate-status');
   const formEl=document.getElementById('photo-estimate-form');
   const saveBtn=document.getElementById('photo-estimate-save-btn');
-  if(statusEl){
-    statusEl.style.display=status?'block':'none';
-    statusEl.textContent=status;
-  }
+  setPhotoEstimateStatus(status);
   if(formEl) formEl.style.display=showForm?'block':'none';
   if(saveBtn) saveBtn.style.display=showForm?'block':'none';
 }
 function closePhotoEstimateModal(){
   const modal=document.getElementById('photo-estimate-modal');
   if(!modal) return;
+  clearPhotoEstimateSlowTimer();
+  setPhotoEstimatePreview(null);
   modal.classList.remove('show');
   setTimeout(()=>{modal.style.display='none';},200);
   ['photo-estimate-input','photo-estimate-library-input'].forEach(id=>{
@@ -1557,35 +1634,105 @@ function closePhotoEstimateModal(){
   });
 }
 function openPhotoEstimateCameraPicker(){
+  resetPhotoEstimateTrace();
+  photoEstimateTrace('photo_picker_opened',{source:'camera'});
   document.getElementById('photo-estimate-input')?.click();
 }
 function openPhotoEstimateLibraryPicker(){
+  resetPhotoEstimateTrace();
+  photoEstimateTrace('photo_picker_opened',{source:'library'});
   document.getElementById('photo-estimate-library-input')?.click();
 }
 function openPhotoEstimatePicker(){
   openPhotoEstimateCameraPicker();
 }
-function resizePhotoForEstimate(file){
+async function decodePhotoForEstimate(file){
+  photoEstimateTrace('image_decode_started',{
+    fileType:file.type||'unknown',
+    fileSizeKb:Math.round((file.size||0)/1024)
+  });
+  if(typeof createImageBitmap==='function'){
+    try{
+      const bitmap=await createImageBitmap(file,{imageOrientation:'from-image'});
+      photoEstimateTrace('image_decode_finished',{route:'createImageBitmap',width:bitmap.width,height:bitmap.height});
+      return {image:bitmap,width:bitmap.width,height:bitmap.height,close:()=>bitmap.close?.()};
+    }catch(e){
+      const bitmap=await createImageBitmap(file);
+      photoEstimateTrace('image_decode_finished',{route:'createImageBitmap_fallback',width:bitmap.width,height:bitmap.height});
+      return {image:bitmap,width:bitmap.width,height:bitmap.height,close:()=>bitmap.close?.()};
+    }
+  }
+  const url=URL.createObjectURL(file);
+  try{
+    const img=new Image();
+    img.decoding='async';
+    img.src=url;
+    if(typeof img.decode==='function') await img.decode();
+    else await new Promise((resolve,reject)=>{img.onload=resolve;img.onerror=reject;});
+    photoEstimateTrace('image_decode_finished',{route:'image_element',width:img.naturalWidth||img.width,height:img.naturalHeight||img.height});
+    return {image:img,width:img.naturalWidth||img.width,height:img.naturalHeight||img.height,close:()=>{}};
+  }finally{
+    URL.revokeObjectURL(url);
+  }
+}
+function canvasToJpegBlob(canvas,quality){
+  return new Promise((resolve,reject)=>{
+    if(canvas.toBlob){
+      canvas.toBlob(blob=>blob?resolve(blob):reject(new Error('Could not compress photo.')),'image/jpeg',quality);
+      return;
+    }
+    try{
+      const dataUrl=canvas.toDataURL('image/jpeg',quality);
+      const [header,data]=dataUrl.split(',');
+      const binary=atob(data||'');
+      const bytes=new Uint8Array(binary.length);
+      for(let i=0;i<binary.length;i++) bytes[i]=binary.charCodeAt(i);
+      resolve(new Blob([bytes],{type:(header.match(/data:([^;]+)/)||[])[1]||'image/jpeg'}));
+    }catch(e){reject(e);}
+  });
+}
+function blobToDataUrl(blob){
   return new Promise((resolve,reject)=>{
     const reader=new FileReader();
-    reader.onerror=()=>reject(new Error('Could not read photo.'));
-    reader.onload=()=>{
-      const img=new Image();
-      img.onerror=()=>reject(new Error('Could not load photo.'));
-      img.onload=()=>{
-        const maxW=1024;
-        const scale=Math.min(1,maxW/img.width);
-        const canvas=document.createElement('canvas');
-        canvas.width=Math.max(1,Math.round(img.width*scale));
-        canvas.height=Math.max(1,Math.round(img.height*scale));
-        const ctx=canvas.getContext('2d');
-        ctx.drawImage(img,0,0,canvas.width,canvas.height);
-        resolve(canvas.toDataURL('image/jpeg',0.7));
-      };
-      img.src=reader.result;
-    };
-    reader.readAsDataURL(file);
+    reader.onerror=()=>reject(new Error('Could not read compressed photo.'));
+    reader.onload=()=>resolve(reader.result);
+    reader.readAsDataURL(blob);
   });
+}
+async function resizePhotoForEstimate(file){
+  const decoded=await decodePhotoForEstimate(file);
+  try{
+    photoEstimateTrace('image_resize_started',{
+      width:decoded.width,
+      height:decoded.height,
+      maxDimension:PHOTO_ESTIMATE_MAX_DIMENSION,
+      jpegQuality:PHOTO_ESTIMATE_JPEG_QUALITY
+    });
+    const longest=Math.max(decoded.width,decoded.height)||1;
+    const scale=Math.min(1,PHOTO_ESTIMATE_MAX_DIMENSION/longest);
+    const width=Math.max(1,Math.round(decoded.width*scale));
+    const height=Math.max(1,Math.round(decoded.height*scale));
+    const canvas=document.createElement('canvas');
+    canvas.width=width;
+    canvas.height=height;
+    const ctx=canvas.getContext('2d');
+    if(!ctx) throw new Error('Could not prepare photo for upload.');
+    ctx.drawImage(decoded.image,0,0,width,height);
+    const blob=await canvasToJpegBlob(canvas,PHOTO_ESTIMATE_JPEG_QUALITY);
+    const dataUrl=await blobToDataUrl(blob);
+    photoEstimateTrace('image_resize_finished',{
+      originalWidth:decoded.width,
+      originalHeight:decoded.height,
+      width,
+      height,
+      originalBytes:file.size||0,
+      resizedBytes:blob.size||0,
+      resizedKb:Math.round((blob.size||0)/1024)
+    });
+    return {image:dataUrl,bytes:blob.size,width,height};
+  }finally{
+    decoded.close?.();
+  }
 }
 function roundMacro(n){
   const val=Number(n);
@@ -1748,32 +1895,58 @@ function renderPhotoEstimateReview(estimate){
   const portion=document.getElementById('photo-portion-select');
   if(portion) portion.value='1';
   renderPhotoEstimateItemRows();
+  photoEstimateTrace('review_rows_rendered',{itemCount:_photoEstimateDraft.items.length});
   showPhotoEstimateModal({showForm:true});
 }
 async function handlePhotoEstimateFile(file){
   if(!file) return;
-  showPhotoEstimateModal({status:'Estimating from photo...',showForm:false});
+  if(!_photoEstimateTraceStart) resetPhotoEstimateTrace();
+  photoEstimateTrace('photo_selected',{
+    fileType:file.type||'unknown',
+    fileSizeKb:Math.round((file.size||0)/1024)
+  });
+  _photoEstimateDraft=null;
+  setPhotoEstimatePreview(file);
+  showPhotoEstimateModal({status:'Loading photo',showForm:false});
+  startPhotoEstimateSlowTimer();
   try{
-    const image=await resizePhotoForEstimate(file);
+    setPhotoEstimateStatus('Compressing image');
+    const resized=await resizePhotoForEstimate(file);
     const photoEstimateUrl=typeof window.sousApiUrl==='function'?window.sousApiUrl('/api/photo-estimate'):'/api/photo-estimate';
+    setPhotoEstimateStatus('Estimating meal');
+    photoEstimateTrace('upload_started',{
+      resizedBytes:resized.bytes||0,
+      width:resized.width||null,
+      height:resized.height||null
+    });
+    photoEstimateTrace('ai_started',{route:'server'});
     const res=await fetch(photoEstimateUrl,{
       method:'POST',
       headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({image})
+      body:JSON.stringify({image:resized.image})
     });
     const data=await res.json().catch(()=>({}));
+    photoEstimateTrace('upload_finished',{status:res.status,ok:res.ok});
+    photoEstimateTrace('ai_finished',{
+      serverAiMs:data?._timings?.aiMs??null,
+      serverTotalMs:data?._timings?.totalMs??null
+    });
     if(!res.ok){
       const detail=data.detail||data.error||'Photo estimate failed.';
       throw new Error(detail);
     }
+    setPhotoEstimateStatus('Building editable rows');
     renderPhotoEstimateReview(data);
   }catch(e){
     console.warn('[Sous Photo Estimate]',e);
+    rememberPhotoEstimateError(e,'estimate');
     const detail=String(e&&e.message||'').trim();
     const message=detail
       ? `Could not estimate this photo: ${detail}`
       : 'Could not estimate this photo. Please try another photo or log the meal manually.';
     showPhotoEstimateModal({status:message,showForm:false});
+  }finally{
+    clearPhotoEstimateSlowTimer();
   }
 }
 function saveReviewedPhotoEstimate(){
@@ -2281,6 +2454,9 @@ function initPhotoEstimate(){
   document.getElementById('photo-estimate-save-btn')?.addEventListener('click',saveReviewedPhotoEstimate);
   document.getElementById('photo-portion-select')?.addEventListener('change',e=>setPhotoEstimatePortion(e.target.value));
 }
+
+window.__sousPhotoTimingTrace=()=>_photoEstimateTrace.slice(-100);
+window.__sousLastPhotoError=()=>_photoEstimateLastError?{..._photoEstimateLastError}:null;
 
 function init(){
   setCurrentCountry(typeof getUserCountry==='function'?getUserCountry():'GLOBAL');
