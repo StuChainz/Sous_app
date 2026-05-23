@@ -7,6 +7,12 @@ const cors = require('cors');
 const rateLimit = require('express-rate-limit');
 const fs = require('fs');
 const path = require('path');
+const {
+  getConsumablePresets,
+  findConsumablePresetByText,
+  createConsumablePresetRow,
+  createCustomConsumableEstimate
+} = require('./js/consumable-presets.js');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -77,6 +83,7 @@ app.use('/api', apiLimiter);
 app.use([
   '/api/photo-estimate',
   '/api/photo-estimate-adjust',
+  '/api/menu-scan',
   '/api/realtime/session',
   '/api/interpret',
   '/api/repair-transcript',
@@ -192,6 +199,385 @@ function normalisePhotoAdjustEstimate(parsed) {
     warnings: Array.isArray(parsed && parsed.warnings)
       ? parsed.warnings.map(warning => String(warning || '').trim()).filter(Boolean).slice(0, 5)
       : []
+  };
+}
+
+const MENU_MACRO_KEYS = ['kcal', 'protein', 'carbs', 'fat'];
+
+function recoverableError(error, detailKey, detailValue) {
+  return { ...errorBody(error, detailKey, detailValue), recoverable: true };
+}
+
+function roundSignedMacro(value, key) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return 0;
+  return key === 'kcal'
+    ? Math.round(number)
+    : Math.round(number * 10) / 10;
+}
+
+function cleanMenuKcal(value) {
+  const number = Number(value);
+  return Number.isFinite(number) && number >= 0 ? Math.round(number) : 0;
+}
+
+function cleanMenuMacro(value) {
+  return cleanMacro(value);
+}
+
+function normaliseMenuMacroSet(value, { requireTargets = false } = {}) {
+  const source = value && typeof value === 'object' ? value : {};
+  const out = {};
+
+  for (const key of MENU_MACRO_KEYS) {
+    const raw = source[key];
+    if (raw === undefined || raw === null || raw === '') {
+      if (requireTargets) return null;
+      out[key] = 0;
+      continue;
+    }
+
+    const number = Number(raw);
+    if (!Number.isFinite(number) || number < 0 || (key === 'kcal' && number <= 0)) {
+      return null;
+    }
+
+    out[key] = key === 'kcal' ? Math.round(number) : Math.round(number * 10) / 10;
+  }
+
+  return out;
+}
+
+function subtractMenuMacros(left, right) {
+  return MENU_MACRO_KEYS.reduce((out, key) => {
+    out[key] = roundSignedMacro((left && left[key] || 0) - (right && right[key] || 0), key);
+    return out;
+  }, {});
+}
+
+function sumMenuRows(rows) {
+  return (Array.isArray(rows) ? rows : []).reduce((totals, row) => {
+    totals.kcal += Number(row && (row.kcal ?? row.calories)) || 0;
+    totals.protein += Number(row && row.protein) || 0;
+    totals.carbs += Number(row && row.carbs) || 0;
+    totals.fat += Number(row && row.fat) || 0;
+    return totals;
+  }, { kcal: 0, protein: 0, carbs: 0, fat: 0 });
+}
+
+function remainingAfterMenuRows(remaining, rows) {
+  return subtractMenuMacros(remaining, sumMenuRows(rows));
+}
+
+function cleanMenuText(value, maxLength = 800) {
+  return String(value || '').replace(/\s+/g, ' ').trim().slice(0, maxLength);
+}
+
+function escapeRegExp(value) {
+  return String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function removePresetPhrases(text, presetItem) {
+  let next = String(text || '');
+  const phrases = [presetItem && presetItem.name, ...(presetItem && presetItem.aliases || [])]
+    .map(phrase => String(phrase || '').trim())
+    .filter(Boolean)
+    .sort((a, b) => b.length - a.length);
+
+  phrases.forEach(phrase => {
+    const pattern = escapeRegExp(phrase).replace(/\s+/g, '\\s+');
+    next = next.replace(new RegExp(`\\b${pattern}\\b`, 'ig'), ' ');
+  });
+
+  return next.replace(/\s+/g, ' ').trim();
+}
+
+function normaliseReservedConsumableRow(row) {
+  return {
+    id: String(row && row.id || '').trim() || `reserved_${Date.now()}`,
+    presetId: row && row.presetId ? String(row.presetId) : null,
+    name: String(row && row.name || 'Reserved item').trim() || 'Reserved item',
+    quantity: Number.isFinite(Number(row && row.quantity)) ? Number(row.quantity) : null,
+    unit: String(row && row.unit || 'serving').trim() || 'serving',
+    kcal: cleanMenuKcal(row && (row.kcal ?? row.calories)),
+    calories: cleanMenuKcal(row && (row.calories ?? row.kcal)),
+    protein: cleanMenuMacro(row && row.protein),
+    carbs: cleanMenuMacro(row && row.carbs),
+    fat: cleanMenuMacro(row && row.fat),
+    source: String(row && row.source || 'consumable_preset'),
+    confidence: clampConfidence(row && row.confidence),
+    editable: row && row.editable !== undefined ? !!row.editable : true,
+    loggable: row && row.loggable !== undefined ? !!row.loggable : true,
+    reservable: row && row.reservable !== undefined ? !!row.reservable : true,
+    notes: String(row && row.notes || '')
+  };
+}
+
+function resolveReservedConsumables(requestText) {
+  let remainingText = cleanMenuText(requestText, 1000);
+  const knownPresetIds = new Set(getConsumablePresets().map(item => item.id));
+  const seen = new Set();
+  const rows = [];
+
+  for (let i = 0; i < 12 && remainingText; i += 1) {
+    const presetItem = findConsumablePresetByText(remainingText);
+    if (!presetItem || !knownPresetIds.has(presetItem.id)) break;
+
+    if (!seen.has(presetItem.id)) {
+      const row = createConsumablePresetRow(presetItem);
+      if (row) rows.push(normaliseReservedConsumableRow(row));
+      seen.add(presetItem.id);
+    }
+
+    const nextText = removePresetPhrases(remainingText, presetItem);
+    if (nextText === remainingText) break;
+    remainingText = nextText;
+  }
+
+  return rows;
+}
+
+function removeReservedConsumablesFromRequestText(requestText, reservedItems) {
+  let text = cleanMenuText(requestText, 1000);
+  const presetsById = new Map(getConsumablePresets().map(item => [item.id, item]));
+
+  (Array.isArray(reservedItems) ? reservedItems : []).forEach(row => {
+    const presetItem = row && row.presetId ? presetsById.get(row.presetId) : null;
+    if (presetItem) text = removePresetPhrases(text, presetItem);
+  });
+
+  return text;
+}
+
+function cleanMenuWarnings(value) {
+  return Array.isArray(value)
+    ? value.map(warning => String(warning || '').trim()).filter(Boolean).slice(0, 5)
+    : [];
+}
+
+function normaliseMenuRange(value, key) {
+  const source = value && typeof value === 'object' ? value : {};
+  const likelyRaw = source.likely ?? source.high ?? source.low ?? 0;
+  const likely = key === 'kcal' ? cleanMenuKcal(likelyRaw) : cleanMenuMacro(likelyRaw);
+  let low = key === 'kcal' ? cleanMenuKcal(source.low ?? likely) : cleanMenuMacro(source.low ?? likely);
+  let high = key === 'kcal' ? cleanMenuKcal(source.high ?? likely) : cleanMenuMacro(source.high ?? likely);
+
+  low = Math.min(low, likely);
+  high = Math.max(high, likely);
+
+  return { low, likely, high };
+}
+
+function normaliseMenuEstimate(value) {
+  return {
+    kcal: normaliseMenuRange(value && value.kcal, 'kcal'),
+    protein: normaliseMenuRange(value && value.protein, 'protein'),
+    carbs: normaliseMenuRange(value && value.carbs, 'carbs'),
+    fat: normaliseMenuRange(value && value.fat, 'fat')
+  };
+}
+
+function slugifyMenuId(value) {
+  return String(value || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 50) || 'item';
+}
+
+function normaliseMenuRows(rows, suggestion, index) {
+  const rawRows = Array.isArray(rows) ? rows : [];
+  const sourceRows = rawRows.length ? rawRows : [{
+    name: suggestion && (suggestion.suggestedName || suggestion.menuText) || `Menu option ${index + 1}`,
+    quantity: 1,
+    unit: 'serving',
+    kcal: suggestion && suggestion.estimate && suggestion.estimate.kcal && suggestion.estimate.kcal.likely,
+    protein: suggestion && suggestion.estimate && suggestion.estimate.protein && suggestion.estimate.protein.likely,
+    carbs: suggestion && suggestion.estimate && suggestion.estimate.carbs && suggestion.estimate.carbs.likely,
+    fat: suggestion && suggestion.estimate && suggestion.estimate.fat && suggestion.estimate.fat.likely
+  }];
+
+  return sourceRows
+    .filter(row => row && typeof row === 'object')
+    .slice(0, 8)
+    .map(row => ({
+      name: String(row.name || 'Menu item').trim() || 'Menu item',
+      quantity: row.quantity === null || row.quantity === undefined || row.quantity === ''
+        ? null
+        : cleanMenuMacro(row.quantity),
+      unit: String(row.unit || 'serving').trim() || 'serving',
+      kcal: cleanMenuKcal(row.kcal ?? row.calories),
+      protein: cleanMenuMacro(row.protein),
+      carbs: cleanMenuMacro(row.carbs),
+      fat: cleanMenuMacro(row.fat),
+      source: 'menu_scan'
+    }))
+    .filter(row => row.name);
+}
+
+function normaliseCustomReservedItems(items) {
+  const seen = new Set();
+  return (Array.isArray(items) ? items : [])
+    .filter(item => item && typeof item === 'object')
+    .map(item => {
+      const name = cleanMenuText(item.name, 120);
+      if (!name) return null;
+      const dedupeKey = name.toLowerCase();
+      if (seen.has(dedupeKey)) return null;
+      seen.add(dedupeKey);
+      const customPreset = createCustomConsumableEstimate({
+        name,
+        kcal: item.kcal,
+        protein: item.protein,
+        carbs: item.carbs,
+        fat: item.fat,
+        quantity: item.quantity,
+        unit: item.unit || 'serving'
+      });
+      return normaliseReservedConsumableRow(createConsumablePresetRow(customPreset, {
+        notes: cleanMenuWarnings(item.warnings).join(' ') || String(item.reason || '')
+      }));
+    })
+    .filter(Boolean)
+    .slice(0, 5);
+}
+
+function normaliseMenuScanResult(parsed, context) {
+  const knownReservedItems = Array.isArray(context.reservedItems) ? context.reservedItems : [];
+  const customReservedItems = normaliseCustomReservedItems(parsed && parsed.customReservedItems);
+  const reservedItems = [...knownReservedItems, ...customReservedItems];
+  const remainingAfterReserved = remainingAfterMenuRows(context.remainingBefore, reservedItems);
+  const rawSuggestions = Array.isArray(parsed && parsed.suggestions) ? parsed.suggestions : [];
+
+  const suggestions = rawSuggestions
+    .filter(item => item && typeof item === 'object')
+    .slice(0, 8)
+    .map((item, index) => {
+      const estimate = normaliseMenuEstimate(item.estimate || {});
+      const provisional = { ...item, estimate };
+      const rows = normaliseMenuRows(item.rows, provisional, index);
+      const suggestedName = cleanMenuText(item.suggestedName || rows[0] && rows[0].name || item.menuText || `Menu option ${index + 1}`, 120);
+      const id = cleanMenuText(item.id, 80) || `menu_${index + 1}_${slugifyMenuId(suggestedName)}`;
+      return {
+        id,
+        menuText: cleanMenuText(item.menuText || suggestedName, 240),
+        suggestedName,
+        rank: Math.max(1, Math.round(Number(item.rank) || index + 1)),
+        fitScore: Math.max(0, Math.min(100, Math.round(Number(item.fitScore) || 0))),
+        confidence: clampConfidence(item.confidence),
+        reason: cleanMenuText(item.reason, 280),
+        portionAssumptions: cleanMenuText(item.portionAssumptions, 280),
+        warnings: cleanMenuWarnings(item.warnings),
+        estimate,
+        rows
+      };
+    })
+    .filter(item => item.suggestedName && item.rows.length)
+    .sort((a, b) => a.rank - b.rank || b.fitScore - a.fitScore)
+    .slice(0, 5)
+    .map((item, index) => ({ ...item, rank: index + 1 }));
+
+  return {
+    requestSummary: cleanMenuText(parsed && parsed.requestSummary || context.requestText || 'Menu scan', 240),
+    reservedItems,
+    remainingBefore: context.remainingBefore,
+    remainingAfterReserved,
+    suggestions
+  };
+}
+
+function menuScanSchema() {
+  const rangeSchema = {
+    type: 'object',
+    additionalProperties: false,
+    properties: {
+      low: { type: 'number' },
+      likely: { type: 'number' },
+      high: { type: 'number' }
+    },
+    required: ['low', 'likely', 'high']
+  };
+
+  return {
+    type: 'object',
+    additionalProperties: false,
+    properties: {
+      requestSummary: { type: 'string' },
+      customReservedItems: {
+        type: 'array',
+        items: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            name: { type: 'string' },
+            quantity: { type: ['number', 'null'] },
+            unit: { type: 'string' },
+            kcal: { type: 'number' },
+            protein: { type: 'number' },
+            carbs: { type: 'number' },
+            fat: { type: 'number' },
+            reason: { type: 'string' },
+            warnings: {
+              type: 'array',
+              items: { type: 'string' }
+            }
+          },
+          required: ['name', 'quantity', 'unit', 'kcal', 'protein', 'carbs', 'fat', 'reason', 'warnings']
+        }
+      },
+      suggestions: {
+        type: 'array',
+        items: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            id: { type: 'string' },
+            menuText: { type: 'string' },
+            suggestedName: { type: 'string' },
+            rank: { type: 'number' },
+            fitScore: { type: 'number' },
+            confidence: { type: 'string', enum: ['low', 'medium', 'high'] },
+            reason: { type: 'string' },
+            portionAssumptions: { type: 'string' },
+            warnings: {
+              type: 'array',
+              items: { type: 'string' }
+            },
+            estimate: {
+              type: 'object',
+              additionalProperties: false,
+              properties: {
+                kcal: rangeSchema,
+                protein: rangeSchema,
+                carbs: rangeSchema,
+                fat: rangeSchema
+              },
+              required: ['kcal', 'protein', 'carbs', 'fat']
+            },
+            rows: {
+              type: 'array',
+              items: {
+                type: 'object',
+                additionalProperties: false,
+                properties: {
+                  name: { type: 'string' },
+                  quantity: { type: ['number', 'null'] },
+                  unit: { type: 'string' },
+                  kcal: { type: 'number' },
+                  protein: { type: 'number' },
+                  carbs: { type: 'number' },
+                  fat: { type: 'number' },
+                  source: { type: 'string', enum: ['menu_scan'] }
+                },
+                required: ['name', 'quantity', 'unit', 'kcal', 'protein', 'carbs', 'fat', 'source']
+              }
+            }
+          },
+          required: ['id', 'menuText', 'suggestedName', 'rank', 'fitScore', 'confidence', 'reason', 'portionAssumptions', 'warnings', 'estimate', 'rows']
+        }
+      }
+    },
+    required: ['requestSummary', 'customReservedItems', 'suggestions']
   };
 }
 
@@ -499,6 +885,148 @@ app.post('/api/photo-estimate', async (req, res) => {
   } catch (err) {
     console.error('[Sous Photo Estimate] error', err.message);
     res.status(500).json(errorBody('Photo estimate request failed.', 'detail', err.message));
+  }
+});
+
+app.post('/api/menu-scan', async (req, res) => {
+  const { image, requestText = '', selectedDate = null, currentMealSection = null } = req.body || {};
+
+  if (!image || typeof image !== 'string' || !image.startsWith('data:image/')) {
+    return res.status(400).json(recoverableError('A compressed menu image data URL is required.'));
+  }
+
+  const profileTargets = normaliseMenuMacroSet(req.body && req.body.profileTargets, { requireTargets: true });
+  if (!profileTargets) {
+    return res.status(400).json(recoverableError('Macro targets are required before scanning a menu. Set up profile targets first.'));
+  }
+
+  const currentDayTotals = normaliseMenuMacroSet(req.body && req.body.currentDayTotals);
+  if (!currentDayTotals) {
+    return res.status(400).json(recoverableError('Current day totals must be valid macro numbers.'));
+  }
+
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) {
+    return res.status(500).json({ error: 'OPENAI_API_KEY is not set on the server.' });
+  }
+
+  const cleanRequestText = cleanMenuText(requestText, 1000);
+  const cleanSelectedDate = cleanMenuText(selectedDate, 40);
+  const validSections = new Set(['breakfast', 'lunch', 'dinner', 'snacks', 'supplements']);
+  const cleanMealSection = validSections.has(currentMealSection) ? currentMealSection : null;
+  const remainingBefore = subtractMenuMacros(profileTargets, currentDayTotals);
+  const reservedItems = resolveReservedConsumables(cleanRequestText);
+  const requestTextForMenuRanking = removeReservedConsumablesFromRequestText(cleanRequestText, reservedItems);
+  const remainingAfterKnownReserved = remainingAfterMenuRows(remainingBefore, reservedItems);
+  const promptContext = {
+    originalRequestText: cleanRequestText,
+    requestTextForMenuRanking,
+    selectedDate: cleanSelectedDate,
+    currentMealSection: cleanMealSection,
+    profileTargets,
+    currentDayTotals,
+    remainingBefore,
+    knownReservedItems: reservedItems.map(item => ({
+      presetId: item.presetId,
+      name: item.name,
+      quantity: item.quantity,
+      unit: item.unit,
+      kcal: item.kcal,
+      protein: item.protein,
+      carbs: item.carbs,
+      fat: item.fat,
+      source: item.source
+    })),
+    remainingAfterKnownReserved
+  };
+  const prompt = [
+    'You are Sous menu scanner. Recommend visible restaurant menu options against remaining daily macros.',
+    'Return JSON only. No markdown, no prose outside JSON.',
+    'Read only visible menu text from the image. Do not invent unseen dishes, prices, ingredients, or options.',
+    'Estimate only the most relevant visible dishes, not the whole menu. Return top 3 to 5 suggestions.',
+    'Known reserved items are already accounted for in remainingAfterKnownReserved. Do not estimate them again and do not include them in suggestion rows.',
+    'Use requestTextForMenuRanking, not originalRequestText, when deciding dish fit. originalRequestText is only included for context.',
+    'If the user requested a drink, side, sauce, or extra that is not in knownReservedItems, include it in customReservedItems with a low-confidence estimate and account for it when ranking.',
+    'Rank dishes by staying within kcal after reserved items, helping meet protein, avoiding large fat/carb overshoots, confidence, and direct fit with requestTextForMenuRanking.',
+    'Use conservative assumptions for fried foods, creamy sauces, oil-heavy dishes, hidden dressings, and large restaurant portions.',
+    'Each suggestion row must be editable and approximate. rows.source must be "menu_scan".',
+    `Context: ${JSON.stringify(promptContext).slice(0, 5000)}`
+  ].join('\n');
+
+  try {
+    const upstream = await fetch('https://api.openai.com/v1/responses', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`
+      },
+      body: JSON.stringify({
+        model: 'gpt-4.1-mini',
+        input: [{
+          role: 'user',
+          content: [
+            { type: 'input_text', text: prompt },
+            { type: 'input_image', image_url: image }
+          ]
+        }],
+        text: {
+          format: {
+            type: 'json_schema',
+            name: 'menu_scan_recommendations',
+            strict: true,
+            schema: menuScanSchema()
+          }
+        }
+      })
+    });
+
+    const text = await upstream.text();
+    let data = null;
+    try { data = text ? JSON.parse(text) : null; } catch {}
+
+    if (!upstream.ok) {
+      return res.status(upstream.status).json(errorBody(
+        `OpenAI error: ${upstream.status}`,
+        'detail',
+        data && data.error ? data.error.message || data.error : text
+      ));
+    }
+
+    let rawText = '';
+    if (typeof data.output_text === 'string') {
+      rawText = data.output_text;
+    } else if (Array.isArray(data.output)) {
+      rawText = data.output
+        .flatMap(item => Array.isArray(item.content) ? item.content : [])
+        .map(part => part.text || part.output_text || '')
+        .filter(Boolean)
+        .join('\n');
+    }
+
+    let parsed;
+    try {
+      parsed = JSON.parse(rawText);
+    } catch {
+      return res.status(502).json(errorBody('Invalid JSON returned by OpenAI.', 'raw', rawText));
+    }
+
+    const result = normaliseMenuScanResult(parsed, {
+      requestText: cleanRequestText,
+      remainingBefore,
+      reservedItems
+    });
+
+    if (!result.suggestions.length) {
+      return res.status(422).json({
+        ...result,
+        ...recoverableError('No usable visible menu suggestions were found. Try a clearer menu photo.')
+      });
+    }
+
+    res.json(result);
+  } catch (err) {
+    console.error('[Sous Menu Scan] error', err.message);
+    res.status(500).json(errorBody('Menu scan request failed.', 'detail', err.message));
   }
 });
 
