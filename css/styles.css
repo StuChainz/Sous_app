@@ -892,6 +892,23 @@ html,body{height:100%;height:var(--app-height);min-height:-webkit-fill-available
 .home-fab:hover{transform:translateX(-50%) translateY(-1px);}
 .home-fab:active{transform:translateX(-50%) scale(.98);}
 
+.mic-area,
+.mic-outer,
+.mic-btn,
+.mic-btn *,
+.home-fab,
+.home-fab *{
+  -webkit-tap-highlight-color:transparent;
+  -webkit-touch-callout:none;
+  -webkit-user-select:none;
+  user-select:none;
+}
+.mic-outer,
+.mic-btn,
+.home-fab{
+  touch-action:none;
+}
+
 #ls-listening{
   padding:0 0 calc(var(--bottom-nav-space) + 16px)!important;
   flex-direction:column;

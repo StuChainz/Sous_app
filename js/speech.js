@@ -6005,6 +6005,13 @@ function handleMicKeyUp(e){
     else beginVoiceSession();
   }
 }
+function preventMicHoldDefault(e){
+  if(!isHoldVoiceInputMode()&&!voiceHoldActive) return;
+  if(e.cancelable) e.preventDefault();
+}
+function preventPressSelection(e){
+  if(e.cancelable) e.preventDefault();
+}
 
 // ═══════════════════════════════════════════
 // LOG BUTTON WIRING (done after DOM ready)
@@ -6059,6 +6066,13 @@ function wireLogButtons(){
   micBtn.addEventListener('pointerleave',handleMicPointerUp);
   micBtn.addEventListener('keydown',handleMicKeyDown);
   micBtn.addEventListener('keyup',handleMicKeyUp);
+  micBtn.addEventListener('touchstart',preventMicHoldDefault,{passive:false});
+  micBtn.addEventListener('touchmove',preventMicHoldDefault,{passive:false});
+  micBtn.addEventListener('touchend',preventMicHoldDefault,{passive:false});
+  micBtn.addEventListener('touchcancel',preventMicHoldDefault,{passive:false});
+  micBtn.addEventListener('contextmenu',preventPressSelection);
+  micBtn.addEventListener('selectstart',preventPressSelection);
+  micBtn.addEventListener('dragstart',preventPressSelection);
   micBtn.addEventListener('click',e=>{
     if(isHoldVoiceInputMode()||Date.now()<voiceHoldSuppressClickUntil){
       e.preventDefault();
@@ -6067,6 +6081,11 @@ function wireLogButtons(){
     if(isSpeaking){window.speechSynthesis&&window.speechSynthesis.cancel();setVoiceSpeaking(false,'mic tapped during speech');}
     if(voiceSessionActive){endVoiceSession();return;}
     beginVoiceSession();
+  });
+  document.querySelectorAll('.home-fab').forEach(btn=>{
+    btn.addEventListener('contextmenu',preventPressSelection);
+    btn.addEventListener('selectstart',preventPressSelection);
+    btn.addEventListener('dragstart',preventPressSelection);
   });
   document.getElementById('send-btn').addEventListener('click',()=>{endVoiceSession();submitText();});
   document.getElementById('voice-retry-btn').addEventListener('click',()=>{hideVoiceCorrectBar();if(isHoldVoiceInputMode()){setHoldIdlePrompt('Hold and speak');return;}if(!voiceSessionActive)beginVoiceSession();else startTapRec({sessionRestart:true});});
