@@ -1716,6 +1716,14 @@ function closePhotoEstimateModal(){
   _photoEstimatePreviousDraft=null;
   _photoEstimateManualDirty=false;
   setPhotoAdjustStatus('');
+  const title=document.getElementById('photo-estimate-title');
+  const adjustBox=document.querySelector('#photo-estimate-form .photo-adjust-box');
+  const saveBtn=document.getElementById('photo-estimate-save-btn');
+  const note=document.getElementById('photo-estimate-note');
+  if(title) title.textContent='Review photo estimate';
+  if(adjustBox) adjustBox.style.display='block';
+  if(saveBtn) saveBtn.textContent='Save estimate';
+  if(note) note.textContent='Photo estimates are approximate. Portion size and hidden oils/sauces may be wrong.';
   setPhotoEstimatePreview(null);
   modal.classList.remove('show');
   setTimeout(()=>{modal.style.display='none';},200);
@@ -1956,6 +1964,81 @@ function menuScanEstimateLikely(estimate={}){
     fat:estimate.fat?.likely??0
   };
 }
+function menuScanRowKey(row={}){
+  if(row.presetId) return `preset:${row.presetId}`;
+  return [
+    row.source||'row',
+    String(row.name||'').toLowerCase().trim(),
+    row.quantity??'',
+    row.unit||''
+  ].join(':');
+}
+function menuScanReviewItemFromRow(row={},idx=0){
+  const quantity=row.quantity==null?'':`${row.quantity}${row.unit?` ${row.unit}`:''}`;
+  const notes=[quantity,row.notes].map(v=>String(v||'').trim()).filter(Boolean).join(' · ');
+  return {
+    id:'menu_'+Date.now()+'_'+idx,
+    name:String(row.name||'Menu item').trim()||'Menu item',
+    estimatedGrams:row.estimatedGrams!=null
+      ? Math.round(Number(row.estimatedGrams)||0)
+      : (row.unit==='g'?Math.round(Number(row.quantity)||0):null),
+    calories:Math.round(Number(row.calories??row.kcal)||0),
+    protein:roundMacro(row.protein),
+    carbs:roundMacro(row.carbs),
+    fat:roundMacro(row.fat),
+    fibre:roundMacro(row.fibre??row.fiber),
+    confidence:row.confidence||'medium',
+    notes,
+    source:row.source||'menu_scan',
+    presetId:row.presetId||null
+  };
+}
+function menuScanBuildReviewEstimate(suggestion){
+  const reserved=Array.isArray(_menuScanLastResult?.reservedItems)?_menuScanLastResult.reservedItems:[];
+  const suggestionRows=Array.isArray(suggestion?.rows)?suggestion.rows:[];
+  const seen=new Set();
+  const combined=[];
+  [...reserved,...suggestionRows].forEach(row=>{
+    if(!row||typeof row!=='object') return;
+    const key=menuScanRowKey(row);
+    if(seen.has(key)) return;
+    seen.add(key);
+    combined.push(row);
+  });
+  return {
+    source:'menu_scan',
+    mealName:suggestion?.suggestedName||'Menu choice',
+    section:menuScanCurrentSection(),
+    confidence:suggestion?.confidence||'medium',
+    reviewTitle:'Review menu choice',
+    saveLabel:'Save meal',
+    disableAdjust:true,
+    reviewNote:'Menu recommendations are approximate. Restaurant portions, oils, sauces, and prep can vary.',
+    notes:[
+      _menuScanLastResult?.requestSummary,
+      suggestion?.reason,
+      suggestion?.portionAssumptions,
+      ...(Array.isArray(suggestion?.warnings)?suggestion.warnings:[])
+    ].map(v=>String(v||'').trim()).filter(Boolean).join('\n'),
+    items:combined.map(menuScanReviewItemFromRow)
+  };
+}
+function useMenuScanSuggestion(index){
+  const suggestions=Array.isArray(_menuScanLastResult?.suggestions)?_menuScanLastResult.suggestions:[];
+  const suggestion=suggestions[index];
+  const rows=Array.isArray(suggestion?.rows)?suggestion.rows:[];
+  if(!suggestion||!rows.length){
+    setMenuScanStatus('This recommendation has no editable rows. Try another option or rescan.','warn');
+    return;
+  }
+  const estimate=menuScanBuildReviewEstimate(suggestion);
+  if(!estimate.items.length){
+    setMenuScanStatus('This recommendation has no editable rows. Try another option or rescan.','warn');
+    return;
+  }
+  closeMenuScanModal();
+  renderPhotoEstimateReview(estimate);
+}
 function renderMenuScanResults(data){
   _menuScanLastResult=data;
   const el=document.getElementById('menu-scan-results');
@@ -1975,7 +2058,7 @@ function renderMenuScanResults(data){
   if(!suggestions.length){
     html+=`<div class="menu-scan-card"><div class="menu-scan-muted">No recommendations returned. Try a clearer menu photo.</div></div>`;
   }
-  suggestions.slice(0,5).forEach(item=>{
+  suggestions.slice(0,5).forEach((item,idx)=>{
     const likely=menuScanEstimateLikely(item.estimate||{});
     const warnings=[
       item.portionAssumptions,
@@ -1986,7 +2069,7 @@ function renderMenuScanResults(data){
     html+=menuScanFormatMacroSet(likely);
     if(item.reason) html+=`<div class="menu-scan-muted" style="margin-top:8px;">${photoEstimateEsc(item.reason)}</div>`;
     if(warnings.length) html+=`<div class="menu-scan-warning">${warnings.map(photoEstimateEsc).join('<br>')}</div>`;
-    html+=`<button class="btn-secondary" type="button" disabled>Use this — coming next</button>`;
+    html+=`<button class="btn-secondary menu-scan-use-btn" type="button" data-menu-scan-use="${idx}" data-testid="menu-scan-use-btn">Use this</button>`;
     html+=`</div>`;
   });
   el.innerHTML=html;
@@ -2073,13 +2156,15 @@ function normalisePhotoEstimateItems(estimate){
     id:'photo_'+Date.now()+'_'+idx,
     name:(item.name||'Photo item').trim()||'Photo item',
     estimatedGrams:item.estimatedGrams!=null?Math.round(Number(item.estimatedGrams)||0):null,
-    calories:Math.round(Number(item.calories)||0),
+    calories:Math.round(Number(item.calories??item.kcal)||0),
     protein:roundMacro(item.protein),
     carbs:roundMacro(item.carbs),
     fat:roundMacro(item.fat),
     fibre:roundMacro(item.fibre??item.fiber),
     confidence:item.confidence||estimate?.confidence||'low',
-    notes:item.notes||''
+    notes:item.notes||'',
+    source:item.source||estimate?.source||'photo_estimate',
+    presetId:item.presetId||null
   }));
 }
 function normalisePhotoAdjustItems(adjustment){
@@ -2215,19 +2300,28 @@ function renderPhotoEstimateReview(estimate){
   _photoEstimatePreviousDraft=null;
   _photoEstimateDraft={
     mealName:estimate?.mealName||'Restaurant meal',
+    source:estimate?.source||'photo_estimate',
     confidence:estimate?.confidence||'low',
     items:normalisePhotoEstimateItems(estimate),
     totals:photoEstimateTotalsFallback(estimate),
     notes:estimate?.notes||''
   };
+  const title=document.getElementById('photo-estimate-title');
+  if(title) title.textContent=estimate?.reviewTitle||'Review photo estimate';
   document.getElementById('photo-meal-name').value=estimate?.mealName||'Restaurant meal';
-  document.getElementById('photo-meal-section').value=photoEstimateSectionDefault();
+  document.getElementById('photo-meal-section').value=estimate?.section||photoEstimateSectionDefault();
   const portion=document.getElementById('photo-portion-select');
   if(portion) portion.value='1';
   const adjustInput=document.getElementById('photo-adjust-input');
   const revertBtn=document.getElementById('photo-adjust-revert-btn');
+  const adjustBox=document.querySelector('#photo-estimate-form .photo-adjust-box');
+  const saveBtn=document.getElementById('photo-estimate-save-btn');
+  const note=document.getElementById('photo-estimate-note');
   if(adjustInput) adjustInput.value='';
   if(revertBtn) revertBtn.style.display='none';
+  if(adjustBox) adjustBox.style.display=estimate?.disableAdjust?'none':'block';
+  if(saveBtn) saveBtn.textContent=estimate?.saveLabel||'Save estimate';
+  if(note) note.textContent=estimate?.reviewNote||'Photo estimates are approximate. Portion size and hidden oils/sauces may be wrong.';
   setPhotoAdjustStatus('');
   renderPhotoEstimateItemRows();
   photoEstimateTrace('review_rows_rendered',{itemCount:_photoEstimateDraft.items.length});
@@ -2408,7 +2502,8 @@ function saveReviewedPhotoEstimate(){
       type:'solid',
       confidence:item.confidence||'low',
       notes:item.notes||'',
-      source:'photo_estimate'
+      source:item.source||_photoEstimateDraft.source||'photo_estimate',
+      presetId:item.presetId||undefined
     }))
     .filter(item=>item.name);
   if(!ingredients.length){
@@ -2431,7 +2526,7 @@ function saveReviewedPhotoEstimate(){
     name,
     time:new Date().toISOString(),
     section,
-    source:'photo_estimate',
+    source:_photoEstimateDraft.source||'photo_estimate',
     confidence:_photoEstimateDraft.confidence||'low',
     notes:_photoEstimateDraft.notes||'',
     portionScale:_photoEstimatePortion,
@@ -2443,9 +2538,10 @@ function saveReviewedPhotoEstimate(){
   log[date].totals=sumMacros(log[date].meals.map(m=>m.totals));
   saveLog(log);
   closePhotoEstimateModal();
+  const savedSource=_photoEstimateDraft.source||'photo_estimate';
   _photoEstimateDraft=null;
   _photoEstimatePortion=1;
-  showToast('Photo estimate saved',2400);
+  showToast(savedSource==='menu_scan'?'Menu choice saved':'Photo estimate saved',2400);
   renderHome();
 }
 
@@ -2800,7 +2896,7 @@ function updateHome(){ if(currentTab==='home') renderHome(); }
 // ═══════════════════════════════════════════
 // PWA — MANIFEST + SERVICE WORKER
 // ═══════════════════════════════════════════
-const SOUS_CACHE_VERSION='sous-v17';
+const SOUS_CACHE_VERSION='sous-v18';
 
 window.__sousClearCachesAndReload=async function(){
   if('serviceWorker' in navigator){
@@ -2905,10 +3001,16 @@ function initMenuScan(){
   document.getElementById('menu-scan-submit-btn')?.addEventListener('click',submitMenuScan);
   document.getElementById('menu-scan-close-btn')?.addEventListener('click',closeMenuScanModal);
   document.getElementById('menu-scan-cancel-btn')?.addEventListener('click',closeMenuScanModal);
+  document.getElementById('menu-scan-results')?.addEventListener('click',e=>{
+    const btn=e.target.closest('[data-menu-scan-use]');
+    if(!btn) return;
+    useMenuScanSuggestion(Number(btn.dataset.menuScanUse));
+  });
   document.getElementById('menu-scan-modal')?.addEventListener('click',e=>{if(e.target===document.getElementById('menu-scan-modal'))closeMenuScanModal();});
 }
 
 window.openMenuScanModal=openMenuScanModal;
+window.useMenuScanSuggestion=useMenuScanSuggestion;
 window.__sousMenuScanState=()=>({
   hasFile:!!_menuScanFile,
   inFlight:!!_menuScanInFlight,
