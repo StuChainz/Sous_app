@@ -139,7 +139,7 @@ function refreshJotAfterImport(){
   }catch(e){}
   try{
     if(typeof profState!=='undefined') profState={};
-    ['f-name','f-age','f-height','o-kcal','o-protein','o-carbs','o-fat','prof-bw-input'].forEach(id=>{const el=document.getElementById(id);if(el) el.value='';});
+    ['f-name','f-age','f-height','f-height-ft','f-height-in','o-kcal','o-protein','o-carbs','o-fat','prof-bw-input'].forEach(id=>{const el=document.getElementById(id);if(el) el.value='';});
     document.getElementById('override-toggle')?.classList.remove('on');
     const override=document.getElementById('override-section');
     if(override) override.style.display='none';

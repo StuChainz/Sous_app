@@ -2885,7 +2885,7 @@ function renderHome(){
 
 function homeLogWeight(){
   const inp=document.getElementById('home-bw-input');
-  const val=parseFloat(inp.value);
+  const val=typeof displayToKg==='function'?displayToKg(inp.value):parseFloat(inp.value);
   if(!val||val<20||val>400){showToast('Enter a valid weight');return;}
   const weights=getWeights(),today=todayStr();
   const idx=weights.findIndex(w=>w.date===today);
@@ -3066,7 +3066,7 @@ function updateHome(){ if(currentTab==='home') renderHome(); }
 // ═══════════════════════════════════════════
 // PWA — MANIFEST + SERVICE WORKER
 // ═══════════════════════════════════════════
-const SOUS_CACHE_VERSION='sous-v21';
+const SOUS_CACHE_VERSION='sous-v22';
 
 window.__sousClearCachesAndReload=async function(){
   if('serviceWorker' in navigator){
