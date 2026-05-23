@@ -4601,11 +4601,6 @@ function addManualIngredient(){
     addIngredientToMeal(newItem, {source:'manual', applyOverride:true});
     const foodName=modalSelectedFood.name;
     showToast('Added '+foodName+' ✓');
-    if(newItem.weight){
-      const r2=100/Math.round(newItem.weight);
-      _pendingOverride={key:foodName,name:foodName,macros:{kcal:Math.round(newItem.kcal*r2),protein:Math.round(newItem.protein*r2*10)/10,carbs:Math.round(newItem.carbs*r2*10)/10,fat:Math.round(newItem.fat*r2*10)/10,fibre:Math.round((newItem.fibre||0)*r2*10)/10}};
-      setTimeout(()=>_showOverridePrompt(foodName),350);
-    }
   } else {
     const name=document.getElementById('custom-name').value.trim();
     if(!name){showToast('Enter a food name');return;}
@@ -4783,6 +4778,7 @@ function stepIngWeight(id,delta){
 function commitInlineEdit(id){
   const item=meal.find(i=>i.id===id);
   if(!item){_inlineEditId=null;renderCurrentMeal();return;}
+  const didEditMacros=_inlineManualMacros;
   const newName=(document.getElementById('ile-name')?.value||'').trim();
   if(!newName){showToast('Name required');return;}
   const wtVal=document.getElementById('ile-weight')?.value;
@@ -4805,9 +4801,16 @@ function commitInlineEdit(id){
   _persistDraft();
   _inlineManualMacros=false;
   _inlineEditId=null; renderCurrentMeal(); showToast('Updated ✓');
-  if(item.weight&&!item.customMacro){
+  if(didEditMacros&&item.weight&&!item.customMacro){
     const food=item.rawFood||(typeof findFoodByText==='function'?findFoodByText(item.name):null);
     if(food){
+      const r=item.weight/food.w;
+      const dbKcal=Math.round(food.kcal*r);
+      const dbProtein=Math.round(food.p*r*10)/10;
+      const dbCarbs=Math.round(food.c*r*10)/10;
+      const dbFat=Math.round(food.f*r*10)/10;
+      const changed=item.kcal!==dbKcal||Math.abs(item.protein-dbProtein)>0.05||Math.abs(item.carbs-dbCarbs)>0.05||Math.abs(item.fat-dbFat)>0.05;
+      if(!changed) return;
       const r2=100/item.weight;
       _pendingOverride={key:food.name,name:item.name,macros:{kcal:Math.round(item.kcal*r2),protein:Math.round(item.protein*r2*10)/10,carbs:Math.round(item.carbs*r2*10)/10,fat:Math.round(item.fat*r2*10)/10,fibre:Math.round((item.fibre||0)*r2*10)/10}};
       setTimeout(()=>_showOverridePrompt(item.name),200);
