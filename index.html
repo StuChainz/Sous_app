@@ -1222,6 +1222,27 @@ html,body{height:100%;height:var(--app-height);min-height:-webkit-fill-available
       </div>
 
       <div class="section">
+        <div class="section-label">Data backup</div>
+        <div class="card">
+          <div class="form-row">
+            <div>
+              <div class="form-row-label">Export Jot data</div>
+              <div class="form-row-sub">Download logs, profile, foods, recipes, memories, and settings</div>
+            </div>
+            <button class="btn-secondary" type="button" onclick="exportJotData()" style="flex:0 0 auto;width:auto;padding:8px 12px;"><i class="ti ti-download"></i> Export</button>
+          </div>
+          <div class="form-row" style="border-bottom:none;">
+            <div>
+              <div class="form-row-label">Import Jot data</div>
+              <div class="form-row-sub">Valid backups are checked before anything is replaced</div>
+            </div>
+            <button class="btn-secondary" type="button" onclick="chooseJotBackupFile()" style="flex:0 0 auto;width:auto;padding:8px 12px;"><i class="ti ti-upload"></i> Import</button>
+            <input id="jot-backup-file" type="file" accept="application/json,.json" onchange="handleJotBackupFile(this)" style="display:none;">
+          </div>
+        </div>
+      </div>
+
+      <div class="section">
         <div class="section-label">Help</div>
         <div class="card">
           <div class="form-row" style="border-bottom:none;">
@@ -1765,6 +1786,7 @@ window.sousApiUrl=path=>`${window.SOUS_API_BASE}${path}`;
 <script src="js/history.js?v=10"></script>
 <script src="js/profile.js?v=8"></script>
 <script src="js/recipes.js?v=8"></script>
+<script src="js/backup.js?v=1"></script>
 <script src="js/onboarding.js?v=1"></script>
 <script src="js/test-mode.js?v=5"></script>
 <script src="js/app.js?v=19"></script>
