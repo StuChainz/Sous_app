@@ -58,9 +58,9 @@ test('onboarding remains usable on a small mobile viewport', async ({ page }) =>
 
   for (const title of [
     'Set up Profile',
-    'Tap once, speak normally',
+    'Hold, speak, release',
     'Review and correct',
-    'Sous gets faster over time'
+    'Jot gets faster over time'
   ]) {
     await page.getByRole('button', { name: /Next onboarding card|Start logging/ }).click();
     await expect(page.getByRole('heading', { name: title })).toBeVisible();
@@ -76,7 +76,7 @@ test('final card starts logging experience and stores the seen flag', async ({ p
   for (let i = 0; i < 4; i += 1) {
     await page.getByRole('button', { name: 'Next onboarding card' }).click();
   }
-  await expect(page.getByRole('heading', { name: 'Sous gets faster over time' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Jot gets faster over time' })).toBeVisible();
   await page.getByRole('button', { name: 'Start logging' }).click();
 
   await expect(page.getByTestId('onboarding-overlay')).toBeHidden();

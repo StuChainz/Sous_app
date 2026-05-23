@@ -1,4 +1,4 @@
-const CACHE_VERSION = 'sous-v11';
+const CACHE_VERSION = 'sous-v12';
 const APP_SHELL_CACHE = CACHE_VERSION;
 const APP_SHELL_ASSETS = [
   './',
@@ -16,6 +16,7 @@ const APP_SHELL_ASSETS = [
   './js/history.js',
   './js/profile.js',
   './js/recipes.js',
+  './js/backup.js',
   './js/onboarding.js',
   './js/test-mode.js',
   './js/app.js',

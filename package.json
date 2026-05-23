@@ -5,7 +5,7 @@
   "scripts": {
     "start": "node server.js",
     "test": "npm run test:e2e && npm run test:voice",
-    "test:e2e": "playwright test --workers=1 tests/onboarding.spec.cjs tests/bug-report.spec.cjs tests/render-safety.spec.cjs tests/date-utils.spec.cjs tests/usual-meals.spec.cjs tests/ai-entitlement.spec.cjs",
+    "test:e2e": "playwright test --workers=1 tests/onboarding.spec.cjs tests/bug-report.spec.cjs tests/render-safety.spec.cjs tests/date-utils.spec.cjs tests/usual-meals.spec.cjs tests/ai-entitlement.spec.cjs tests/pwa-cache.spec.cjs",
     "test:onboarding": "playwright test tests/onboarding.spec.cjs",
     "test:bug-report": "playwright test tests/bug-report.spec.cjs",
     "test:voice": "playwright test tests/voice-simulation.spec.cjs tests/voice-input-mode.spec.cjs",

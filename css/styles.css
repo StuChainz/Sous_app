@@ -1509,7 +1509,8 @@ html,body{height:100%;height:var(--app-height);min-height:-webkit-fill-available
   display:none;
 }
 #ls-summary #remember-meal-btn{
-  display:none!important;
+  margin:0 22px 12px;
+  width:calc(100% - 44px);
 }
 .rev-save{
   margin:auto 22px max(4px,env(safe-area-inset-bottom));
