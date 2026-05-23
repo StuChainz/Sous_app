@@ -42,6 +42,11 @@ function renderHistoryDay(){
       const ings=m.ingredients||[];
       const curSection=typeof homeMealSectionKey==='function'?homeMealSectionKey(m):(m.section||'dinner');
       const sectionOpts=[['breakfast','Breakfast'],['lunch','Lunch'],['dinner','Dinner'],['snacks','Snacks'],['supplements','Supplements']].map(([v,l])=>`<option value="${v}"${curSection===v?' selected':''}>${l}</option>`).join('');
+      const canUpdateMenuPhoto=typeof isMenuScanPhotoUpdateMeal==='function'&&isMenuScanPhotoUpdateMeal(m);
+      const menuPhotoUpdateHtml=canUpdateMenuPhoto?`
+        <div style="padding:0 14px 10px;">
+          <button type="button" class="btn-secondary" data-testid="menu-photo-update-btn" onclick="openMenuScanPhotoUpdate('${ds}',${mIdx})" style="width:100%;font-size:12px;padding:8px 10px;justify-content:center;"><i class="ti ti-camera"></i>Update estimate with photo</button>
+        </div>`:'';
       const ingHtml=ings.map((ing,iIdx)=>`
         <div style="font-size:12px;color:var(--text-muted);padding:6px 14px;border-top:.5px solid var(--border);display:flex;justify-content:space-between;align-items:center;">
           <span>${escapeHtml(ing.name)}${ing.weight||ing.serving?' · '+escapeHtml(typeof itemWeightLabel==='function'?itemWeightLabel(ing):(ing.weight+'g')):''} · ${Math.round(Number(ing.kcal)||0)} kcal</span>
@@ -59,7 +64,7 @@ function renderHistoryDay(){
             <div style="font-size:15px;font-weight:500;color:var(--accent);font-family:'Geist Mono',monospace;">${Math.round(Number(m.totals?.kcal)||0)} kcal</div>
             <button onclick="deleteHistoryMeal('${ds}',${mIdx})" style="background:none;border:none;cursor:pointer;color:var(--red);font-size:16px;padding:2px 4px;opacity:.7;" title="Delete meal"><i class="ti ti-trash"></i></button>
           </div>
-        </div>${ingHtml}`;
+        </div>${menuPhotoUpdateHtml}${ingHtml}`;
       listEl.appendChild(wrap);
     });
   }

@@ -132,6 +132,9 @@ html,body{height:100%;height:var(--app-height);min-height:-webkit-fill-available
 .field-input:focus{border-color:var(--accent);}
 .field-input.wide{width:140px;text-align:left;font-family:'Geist',sans-serif;}
 .field-unit{font-size:12px;color:var(--text-muted);min-width:28px;}
+.height-ftin-fields{display:flex;align-items:center;gap:6px;}
+.height-ftin-fields .field-input{width:58px;}
+.unit-hidden{display:none!important;}
 .field-select{background:var(--bg);border:.5px solid var(--border);border-radius:8px;padding:6px 10px;font-size:13px;font-family:'Geist',sans-serif;color:var(--text);outline:none;appearance:none;cursor:pointer;transition:border-color .2s;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%238A7F6E' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 10px center;padding-right:28px;}
 .field-select:focus{border-color:var(--accent);}
 .segment{display:flex;background:var(--bg);border:.5px solid var(--border);border-radius:10px;padding:3px;gap:2px;}
@@ -628,9 +631,12 @@ html,body{height:100%;height:var(--app-height);min-height:-webkit-fill-available
               <button class="photo-gallery-btn" type="button" onclick="openPhotoEstimateLibraryPicker()" data-testid="photo-estimate-library-btn" aria-label="Choose photo from gallery"><i class="ti ti-photo"></i></button>
             </div>
             <button class="btn-secondary" type="button" onclick="openBarcodeScannerFromHome()"><i class="ti ti-barcode"></i>Add from barcode</button>
+            <button class="btn-secondary wide menu-scan-open-btn" type="button" id="menu-scan-open-btn" data-testid="menu-scan-open-btn"><i class="ti ti-menu-2"></i>Scan menu</button>
           </div>
           <input id="photo-estimate-input" type="file" accept="image/*" capture="environment" style="position:absolute;width:1px;height:1px;opacity:0;pointer-events:none;overflow:hidden;">
           <input id="photo-estimate-library-input" type="file" accept="image/*" style="position:absolute;width:1px;height:1px;opacity:0;pointer-events:none;overflow:hidden;">
+          <input id="menu-scan-input" type="file" accept="image/*" capture="environment" style="position:absolute;width:1px;height:1px;opacity:0;pointer-events:none;overflow:hidden;">
+          <input id="menu-scan-library-input" type="file" accept="image/*" style="position:absolute;width:1px;height:1px;opacity:0;pointer-events:none;overflow:hidden;">
         </div>
 
         <div class="section home-bodyweight">
@@ -638,7 +644,7 @@ html,body{height:100%;height:var(--app-height);min-height:-webkit-fill-available
           <div class="card">
             <div class="bw-row">
               <input class="bw-input" id="home-bw-input" type="number" step="0.1" min="30" max="300" placeholder="82.5">
-              <span class="bw-unit">kg</span>
+              <span class="bw-unit weight-unit-label">kg</span>
               <button class="bw-btn" onclick="homeLogWeight()">Log</button>
             </div>
           </div>
@@ -1056,8 +1062,36 @@ html,body{height:100%;height:var(--app-height);min-height:-webkit-fill-available
           </div>
           <div class="form-row">
             <div><div class="form-row-label">Height</div></div>
-            <input class="field-input" id="f-height" type="number" min="100" max="250" placeholder="175">
-            <span class="field-unit">cm</span>
+            <div id="height-cm-wrap" style="display:flex;align-items:center;gap:6px;">
+              <input class="field-input" id="f-height" type="number" step="0.1" min="100" max="250" placeholder="175" oninput="recalcTDEE()">
+              <span class="field-unit">cm</span>
+            </div>
+            <div class="height-ftin-fields unit-hidden" id="height-ftin-wrap">
+              <input class="field-input" id="f-height-ft" type="number" step="1" min="3" max="8" placeholder="5" aria-label="Height feet" oninput="recalcTDEE()">
+              <span class="field-unit">ft</span>
+              <input class="field-input" id="f-height-in" type="number" step="0.1" min="0" max="11.9" placeholder="9" aria-label="Height inches" oninput="recalcTDEE()">
+              <span class="field-unit">in</span>
+            </div>
+          </div>
+          <div class="form-row">
+            <div>
+              <div class="form-row-label">Height units</div>
+              <div class="form-row-sub">For profile entry</div>
+            </div>
+            <div class="segment" id="seg-height-unit">
+              <button class="seg-btn active" data-val="cm" onclick="changeHeightUnit('cm')">cm</button>
+              <button class="seg-btn" data-val="ftin" onclick="changeHeightUnit('ftin')">ft/in</button>
+            </div>
+          </div>
+          <div class="form-row">
+            <div>
+              <div class="form-row-label">Weight units</div>
+              <div class="form-row-sub">For bodyweight entry</div>
+            </div>
+            <div class="segment" id="seg-weight-unit">
+              <button class="seg-btn active" data-val="kg" onclick="changeWeightUnit('kg')">kg</button>
+              <button class="seg-btn" data-val="lb" onclick="changeWeightUnit('lb')">lb</button>
+            </div>
           </div>
         </div>
       </div>
@@ -1131,7 +1165,7 @@ html,body{height:100%;height:var(--app-height);min-height:-webkit-fill-available
         <div class="card">
           <div class="bw-row">
             <input class="bw-input" id="prof-bw-input" type="number" step="0.1" min="30" max="300" placeholder="82.5">
-            <span class="bw-unit">kg</span>
+            <span class="bw-unit weight-unit-label">kg</span>
             <button class="bw-btn" onclick="profLogWeight()">Log today</button>
           </div>
         </div>
@@ -1140,7 +1174,7 @@ html,body{height:100%;height:var(--app-height);min-height:-webkit-fill-available
       <div id="bw-avg-wrap" style="display:none;">
         <div class="bw-avg-chip" id="bw-avg-chip">
           <i class="ti ti-trending-down" id="bw-avg-icon"></i>
-          <span id="bw-avg-text">7-day avg: — kg</span>
+          <span id="bw-avg-text">7-day avg: — <span class="weight-unit-label">kg</span></span>
         </div>
       </div>
 
@@ -1460,11 +1494,41 @@ html,body{height:100%;height:var(--app-height);min-height:-webkit-fill-available
   </div>
 </div>
 
+<!-- MENU SCANNER MODAL -->
+<div id="menu-scan-modal" class="modal-overlay" style="display:none">
+  <div class="modal-sheet menu-scan-sheet">
+    <div class="modal-header">
+      <span class="modal-title">Scan menu</span>
+      <button class="modal-close" id="menu-scan-close-btn">✕</button>
+    </div>
+    <div class="modal-panel">
+      <div class="menu-scan-controls">
+        <div class="menu-scan-pickers">
+          <button class="btn-secondary" type="button" id="menu-scan-camera-btn" data-testid="menu-scan-camera-btn"><i class="ti ti-camera"></i> Camera</button>
+          <button class="btn-secondary" type="button" id="menu-scan-library-btn" data-testid="menu-scan-library-btn"><i class="ti ti-photo"></i> Library</button>
+        </div>
+        <img id="menu-scan-preview" alt="" class="menu-scan-preview" style="display:none;">
+        <div class="custom-field-group">
+          <div class="custom-field-label">What do you want?</div>
+          <textarea id="menu-scan-request" class="custom-input menu-scan-request" rows="3" placeholder="e.g. I have one meal left and want a glass of prosecco with dinner" data-testid="menu-scan-request"></textarea>
+        </div>
+        <button class="btn-primary" type="button" id="menu-scan-submit-btn" data-testid="menu-scan-submit-btn">Scan</button>
+        <div id="menu-scan-status" class="menu-scan-status" data-testid="menu-scan-status"></div>
+      </div>
+      <div id="menu-scan-results" class="menu-scan-results" data-testid="menu-scan-results"></div>
+      <div class="menu-scan-note">Menu recommendations are approximate. Restaurant portions, oils, sauces, and prep can vary.</div>
+    </div>
+    <div class="btn-row" style="margin-top:14px;">
+      <button class="btn-secondary" id="menu-scan-cancel-btn">Close</button>
+    </div>
+  </div>
+</div>
+
 <!-- PHOTO ESTIMATE REVIEW MODAL -->
 <div id="photo-estimate-modal" class="modal-overlay" style="display:none">
   <div class="modal-sheet">
     <div class="modal-header">
-      <span class="modal-title">Review photo estimate</span>
+      <span class="modal-title" id="photo-estimate-title">Review photo estimate</span>
       <button class="modal-close" id="photo-estimate-close-btn">✕</button>
     </div>
     <div class="modal-panel">
@@ -1531,7 +1595,7 @@ html,body{height:100%;height:var(--app-height);min-height:-webkit-fill-available
           </div>
           <div id="photo-adjust-status" class="photo-adjust-status"></div>
         </div>
-        <div style="font-size:12px;color:var(--text-muted);line-height:1.45;">Photo estimates are approximate. Portion size and hidden oils/sauces may be wrong.</div>
+        <div id="photo-estimate-note" style="font-size:12px;color:var(--text-muted);line-height:1.45;">Photo estimates are approximate. Portion size and hidden oils/sauces may be wrong.</div>
       </div>
     </div>
     <div class="btn-row" style="margin-top:14px;">
@@ -1779,17 +1843,18 @@ window.sousApiUrl=path=>`${window.SOUS_API_BASE}${path}`;
 <script src="js/storage.js?v=10"></script>
 <script src="js/core/totals.js?v=8"></script>
 <script src="js/food-data.js?v=11"></script>
+<script src="js/consumable-presets.js?v=1"></script>
 <script src="js/parser.js?v=12"></script>
 <script src="js/meal-memory.js?v=1"></script>
 <script src="js/ai-response-cache.js?v=7"></script>
 <script src="js/speech.js?v=27"></script>
 <script src="js/history.js?v=10"></script>
-<script src="js/profile.js?v=8"></script>
+<script src="js/profile.js?v=9"></script>
 <script src="js/recipes.js?v=8"></script>
-<script src="js/backup.js?v=1"></script>
+<script src="js/backup.js?v=2"></script>
 <script src="js/onboarding.js?v=1"></script>
 <script src="js/test-mode.js?v=5"></script>
-<script src="js/app.js?v=20"></script>
+<script src="js/app.js?v=21"></script>
 <script src="js/ai-interpreter.js?v=3"></script>
 <script src="js/barcode.js?v=2"></script>
 

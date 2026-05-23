@@ -1,4 +1,4 @@
-const CACHE_VERSION = 'sous-v14';
+const CACHE_VERSION = 'sous-v22';
 const APP_SHELL_CACHE = CACHE_VERSION;
 const APP_SHELL_ASSETS = [
   './',
@@ -9,6 +9,7 @@ const APP_SHELL_ASSETS = [
   './js/storage.js',
   './js/core/totals.js',
   './js/food-data.js',
+  './js/consumable-presets.js',
   './js/parser.js',
   './js/meal-memory.js',
   './js/ai-response-cache.js',

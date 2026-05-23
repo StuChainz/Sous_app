@@ -4,12 +4,112 @@
 let profState={};
 let recalSuggestion=null;
 let overrideVisible=false;
+const CM_PER_IN=2.54;
+const KG_PER_LB=0.45359237;
 
 // Rate options per goal
 const RATE_OPTS={
   lose:[{val:'0.25',label:'−0.25'},{val:'0.5',label:'−0.5'},{val:'0.75',label:'−0.75'},{val:'1.0',label:'−1.0'}],
   gain:[{val:'0.1',label:'+0.1'},{val:'0.2',label:'+0.2'},{val:'0.3',label:'+0.3'},{val:'0.4',label:'+0.4'}],
 };
+
+function getHeightUnit(){return profState.heightUnit==='ftin'?'ftin':'cm';}
+function getWeightUnit(){return profState.weightUnit==='lb'?'lb':'kg';}
+function roundOne(n){return Math.round(n*10)/10;}
+function kgToDisplay(kg){return getWeightUnit()==='lb'?kg/KG_PER_LB:kg;}
+function displayToKg(value){
+  const n=parseFloat(value);
+  if(!n) return null;
+  return getWeightUnit()==='lb'?n*KG_PER_LB:n;
+}
+function formatWeightValue(kg){return roundOne(kgToDisplay(kg));}
+function formatWeightUnit(){return getWeightUnit()==='lb'?'lb':'kg';}
+function formatWeightLabel(kg){return formatWeightValue(kg).toFixed(1)+' '+formatWeightUnit();}
+function formatWeightDelta(deltaKg){
+  const val=roundOne(getWeightUnit()==='lb'?deltaKg/KG_PER_LB:deltaKg);
+  return (val>0?'+':'')+val.toFixed(1)+' '+formatWeightUnit();
+}
+function rateLabelForKg(val,goal){
+  const n=parseFloat(val)||0;
+  const signed=goal==='lose'?-n:n;
+  if(getWeightUnit()==='lb') return (signed>0?'+':'')+roundOne(signed/KG_PER_LB).toFixed(1);
+  return (signed>0?'+':'')+signed.toFixed(n>=1?1:2).replace(/\.00$/,'').replace(/0$/,'');
+}
+function readHeightInputCm(){
+  if(getHeightUnit()==='ftin'){
+    const feet=parseFloat(document.getElementById('f-height-ft')?.value);
+    const inches=parseFloat(document.getElementById('f-height-in')?.value);
+    if(!feet&&!inches) return null;
+    return ((feet||0)*12+(inches||0))*CM_PER_IN;
+  }
+  const cm=parseFloat(document.getElementById('f-height')?.value);
+  return cm||null;
+}
+function setHeightInputsFromCm(cm){
+  const cmInput=document.getElementById('f-height');
+  const ftInput=document.getElementById('f-height-ft');
+  const inInput=document.getElementById('f-height-in');
+  if(!cm){
+    if(cmInput) cmInput.value='';
+    if(ftInput) ftInput.value='';
+    if(inInput) inInput.value='';
+    return;
+  }
+  if(cmInput) cmInput.value=roundOne(cm);
+  const totalIn=cm/CM_PER_IN;
+  const feet=Math.floor(totalIn/12);
+  const inches=roundOne(totalIn-feet*12);
+  if(ftInput) ftInput.value=feet;
+  if(inInput) inInput.value=Number.isInteger(inches)?String(inches):inches.toFixed(1);
+}
+function renderUnitInputs(){
+  const heightUnit=getHeightUnit();
+  const weightUnit=getWeightUnit();
+  document.getElementById('height-cm-wrap')?.classList.toggle('unit-hidden',heightUnit!=='cm');
+  document.getElementById('height-ftin-wrap')?.classList.toggle('unit-hidden',heightUnit!=='ftin');
+  segSelectVal('seg-height-unit',heightUnit);
+  segSelectVal('seg-weight-unit',weightUnit);
+  document.querySelectorAll('.weight-unit-label').forEach(el=>{el.textContent=formatWeightUnit();});
+  document.querySelectorAll('.bw-input').forEach(input=>{
+    input.placeholder=weightUnit==='lb'?'181.9':'82.5';
+    input.min=weightUnit==='lb'?'45':'20';
+    input.max=weightUnit==='lb'?'880':'400';
+  });
+  if(profState.height) setHeightInputsFromCm(profState.height);
+  if(profState.currentWeight&&!getWeights().length){
+    const placeholder=formatWeightValue(profState.currentWeight).toFixed(1);
+    const profInput=document.getElementById('prof-bw-input');
+    if(profInput) profInput.placeholder=placeholder;
+  }
+}
+function changeHeightUnit(unit){
+  const current=readHeightInputCm();
+  if(current) profState.height=current;
+  profState.heightUnit=unit==='ftin'?'ftin':'cm';
+  saveProfile({...getProfile(),heightUnit:profState.heightUnit});
+  renderUnitInputs();
+  recalcTDEE();
+}
+function changeWeightUnit(unit){
+  const oldUnit=getWeightUnit();
+  const homeInput=document.getElementById('home-bw-input');
+  const profInput=document.getElementById('prof-bw-input');
+  const homeKg=homeInput?.value?displayToKg(homeInput.value):null;
+  const profKg=profInput?.value?displayToKg(profInput.value):null;
+  const heightCm=readHeightInputCm();
+  if(heightCm) profState.height=heightCm;
+  profState.weightUnit=unit==='lb'?'lb':'kg';
+  saveProfile({...getProfile(),weightUnit:profState.weightUnit});
+  renderUnitInputs();
+  if(oldUnit!==getWeightUnit()){
+    if(homeInput&&homeKg) homeInput.value=formatWeightValue(homeKg).toFixed(1);
+    if(profInput&&profKg) profInput.value=formatWeightValue(profKg).toFixed(1);
+  }
+  onGoalChange();
+  recalcTDEE();
+  renderWeightHistory();
+  renderHome();
+}
 
 function segSelect(groupId,btn){
   document.querySelectorAll('#'+groupId+' .seg-btn').forEach(b=>b.classList.remove('active'));
@@ -33,15 +133,11 @@ function onGoalChange(){
     rateRow.style.display='none';
   } else {
     rateRow.style.display='flex';
-    rateSub.textContent=goal==='lose'?'kg lost per week':'kg gained per week';
+    rateSub.textContent=formatWeightUnit()+(goal==='lose'?' lost per week':' gained per week');
     const opts=RATE_OPTS[goal];
     const defaultVal=goal==='lose'?'0.5':'0.2';
     const current=getSegVal('seg-rate');
-    // Only rebuild if options changed
-    const existingVals=Array.from(seg.querySelectorAll('.seg-btn')).map(b=>b.dataset.val);
-    if(JSON.stringify(existingVals)!==JSON.stringify(opts.map(o=>o.val))){
-      seg.innerHTML=opts.map(o=>`<button class="seg-btn${o.val===defaultVal?' active':''}" data-val="${o.val}" onclick="segSelect('seg-rate',this)">${o.label}</button>`).join('');
-    }
+    seg.innerHTML=opts.map(o=>`<button class="seg-btn${(current||defaultVal)===o.val?' active':''}" data-val="${o.val}" onclick="segSelect('seg-rate',this)">${rateLabelForKg(o.val,goal)}</button>`).join('');
   }
   recalcTDEE();
 }
@@ -52,9 +148,9 @@ function getProfileWeightForTargets(){
     const latest=[...weights].sort((a,b)=>a.date.localeCompare(b.date)).slice(-1)[0];
     if(latest&&latest.kg) return parseFloat(latest.kg);
   }
-  const profInp=parseFloat(document.getElementById('prof-bw-input')?.value);
+  const profInp=displayToKg(document.getElementById('prof-bw-input')?.value);
   if(profInp&&profInp>=20&&profInp<=400) return profInp;
-  const homeInp=parseFloat(document.getElementById('home-bw-input')?.value);
+  const homeInp=displayToKg(document.getElementById('home-bw-input')?.value);
   if(homeInp&&homeInp>=20&&homeInp<=400) return homeInp;
   if(profState.currentWeight&&profState.currentWeight>=20&&profState.currentWeight<=400) return parseFloat(profState.currentWeight);
   return null;
@@ -74,7 +170,7 @@ function upsertTodayWeight(val){
 
 function calcTDEE(){
   const age=parseFloat(document.getElementById('f-age').value)||profState.age;
-  const height=parseFloat(document.getElementById('f-height').value)||profState.height;
+  const height=readHeightInputCm()||profState.height;
   const activity=parseFloat(document.getElementById('f-activity').value)||profState.activity||1.55;
   const goal=document.getElementById('f-goal').value||profState.goal||'maintain';
   const sex=getSegVal('seg-sex')||profState.sex||'male';
@@ -109,7 +205,7 @@ function recalcTDEE(){
   if(!r){
     const missing=[];
     if(!document.getElementById('f-age').value&&!profState.age) missing.push('age');
-    if(!document.getElementById('f-height').value&&!profState.height) missing.push('height');
+    if(!readHeightInputCm()&&!profState.height) missing.push('height');
     if(!getProfileWeightForTargets()) missing.push('bodyweight');
     document.getElementById('tdee-kcal').textContent='—';
     document.getElementById('tdee-protein').textContent='—';
@@ -123,7 +219,7 @@ function recalcTDEE(){
   document.getElementById('tdee-carbs').textContent=r.targetCarbs+'g';
   document.getElementById('tdee-fat').textContent=r.targetFat+'g';
   const lbl={lose:'Fat loss deficit',maintain:'Maintenance calories',gain:'Muscle gain surplus'};
-  document.getElementById('tdee-sub').textContent=(lbl[r.goal]||'')+' · TDEE '+r.tdee+' kcal · using '+r.weight.toFixed(1)+'kg';
+  document.getElementById('tdee-sub').textContent=(lbl[r.goal]||'')+' · TDEE '+r.tdee+' kcal · using '+formatWeightLabel(r.weight);
   profState.targetKcal=r.targetKcal; profState.targetProtein=r.targetProtein;
   profState.targetCarbs=r.targetCarbs; profState.targetFat=r.targetFat;
 }
@@ -156,11 +252,14 @@ function overrideChanged(){
 
 function loadProfileData(){
   const saved=getProfile();
-  if(!saved||!Object.keys(saved).length) return;
+  if(!saved||!Object.keys(saved).length){renderUnitInputs();return;}
   profState={...profState,...saved};
+  profState.heightUnit=saved.heightUnit==='ftin'?'ftin':'cm';
+  profState.weightUnit=saved.weightUnit==='lb'?'lb':'kg';
   if(saved.name) document.getElementById('f-name').value=saved.name;
   if(saved.age)  document.getElementById('f-age').value=saved.age;
-  if(saved.height) document.getElementById('f-height').value=saved.height;
+  if(saved.height) setHeightInputsFromCm(saved.height);
+  renderUnitInputs();
   if(saved.goal) document.getElementById('f-goal').value=saved.goal;
   if(saved.activity) document.getElementById('f-activity').value=String(saved.activity);
   segSelectVal('seg-sex',saved.sex||'male');
@@ -170,7 +269,7 @@ function loadProfileData(){
   if(saved.overrideProtein) document.getElementById('o-protein').value=saved.overrideProtein;
   if(saved.overrideCarbs) document.getElementById('o-carbs').value=saved.overrideCarbs;
   if(saved.overrideFat) document.getElementById('o-fat').value=saved.overrideFat;
-  if(saved.currentWeight&&!getWeights().length) document.getElementById('prof-bw-input').placeholder=String(saved.currentWeight);
+  if(saved.currentWeight&&!getWeights().length) document.getElementById('prof-bw-input').placeholder=formatWeightValue(saved.currentWeight).toFixed(1);
   if(saved.overrideActive){document.getElementById('override-toggle').classList.add('on');document.getElementById('override-section').style.display='block';overrideVisible=true;}
   recalcTDEE();
   renderWeightHistory();
@@ -180,7 +279,9 @@ function loadProfileData(){
 function saveProfileData(){
   profState.name=document.getElementById('f-name').value.trim();
   profState.age=parseFloat(document.getElementById('f-age').value)||null;
-  profState.height=parseFloat(document.getElementById('f-height').value)||null;
+  profState.height=readHeightInputCm()||null;
+  profState.heightUnit=getHeightUnit();
+  profState.weightUnit=getWeightUnit();
   profState.goal=document.getElementById('f-goal').value;
   profState.activity=parseFloat(document.getElementById('f-activity').value)||1.55;
   profState.sex=getSegVal('seg-sex');
@@ -192,7 +293,7 @@ function saveProfileData(){
   profState.overrideActive=document.getElementById('override-toggle').classList.contains('on');
 
   // Treat a bodyweight typed into the Profile bodyweight box as usable target data.
-  const typedWeight=parseFloat(document.getElementById('prof-bw-input').value);
+  const typedWeight=displayToKg(document.getElementById('prof-bw-input').value);
   if(typedWeight&&typedWeight>=20&&typedWeight<=400){
     upsertTodayWeight(typedWeight);
     document.getElementById('prof-bw-input').value='';
@@ -327,7 +428,7 @@ function deleteMealMemoryFromProfile(id){
 // ── Bodyweight ──────────────────────────────────
 function profLogWeight(){
   const inp=document.getElementById('prof-bw-input');
-  const val=parseFloat(inp.value);
+  const val=displayToKg(inp.value);
   if(!val||val<20||val>400){showToast('Enter a valid weight');return;}
   const weights=getWeights(),today=todayStr();
   const idx=weights.findIndex(w=>w.date===today);
@@ -355,7 +456,7 @@ function renderWeightHistory(){
   if(!weights.length){section.style.display='none';avgWrap.style.display='none';return;}
   section.style.display='block'; avgWrap.style.display='block';
   const avg=sevenDayAvg();
-  document.getElementById('bw-avg-text').textContent='7-day avg: '+avg.toFixed(1)+' kg';
+  document.getElementById('bw-avg-text').textContent='7-day avg: '+formatWeightLabel(avg);
   if(weights.length>=7){
     const older=weights.slice(-14,-7),recent=weights.slice(-7);
     const avgOlder=older.length?older.reduce((s,w)=>s+w.kg,0)/older.length:avg;
@@ -370,12 +471,12 @@ function renderWeightHistory(){
   weights.slice(-7).reverse().forEach((entry,i,arr)=>{
     const prev=arr[i+1];
     const delta=prev?(entry.kg-prev.kg):null;
-    const deltaStr=delta!==null?((delta>0?'+':'')+delta.toFixed(1)+' kg'):'';
+    const deltaStr=delta!==null?formatWeightDelta(delta):'';
     const cls=delta===null?'':delta>0.1?'up':delta<-0.1?'down':'same';
     const d=new Date(entry.date+'T12:00:00');
     const lbl=d.toLocaleDateString('en-GB',{weekday:'short',day:'numeric',month:'short'});
     const row=document.createElement('div'); row.className='bw-hist-row';
-    row.innerHTML=`<span class="bw-hist-date">${lbl}</span><span class="bw-hist-val">${entry.kg.toFixed(1)} kg</span><span class="bw-hist-delta ${cls}">${deltaStr}</span>`;
+    row.innerHTML=`<span class="bw-hist-date">${lbl}</span><span class="bw-hist-val">${formatWeightLabel(entry.kg)}</span><span class="bw-hist-delta ${cls}">${deltaStr}</span>`;
     list.appendChild(row);
   });
 }
@@ -403,7 +504,9 @@ function checkRecalibration(){
   const newCarbs=Math.round((newKcal-newProtein*4-newFat*9)/4);
   recalSuggestion={newKcal,newProtein,newCarbs,newFat,weeklyChange,targetChange};
   const dir=weeklyChange>targetChange?'losing less than expected':'gaining faster than expected';
-  document.getElementById('recal-body').textContent=`You're ${dir} (${weeklyChange>=0?'+':''}${weeklyChange.toFixed(2)} kg/wk vs target ${targetChange>=0?'+':''}${targetChange.toFixed(2)} kg/wk).`;
+  const weeklyDisplay=getWeightUnit()==='lb'?weeklyChange/KG_PER_LB:weeklyChange;
+  const targetDisplay=getWeightUnit()==='lb'?targetChange/KG_PER_LB:targetChange;
+  document.getElementById('recal-body').textContent=`You're ${dir} (${weeklyDisplay>=0?'+':''}${weeklyDisplay.toFixed(2)} ${formatWeightUnit()}/wk vs target ${targetDisplay>=0?'+':''}${targetDisplay.toFixed(2)} ${formatWeightUnit()}/wk).`;
   document.getElementById('recal-banner').classList.add('show');
 }
 function showRecalModal(){

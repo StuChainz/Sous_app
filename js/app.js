@@ -1541,6 +1541,11 @@ let _photoEstimateManualDirty=false;
 let _photoEstimatePreviousDraft=null;
 const PHOTO_ESTIMATE_MAX_DIMENSION=1024;
 const PHOTO_ESTIMATE_JPEG_QUALITY=0.75;
+let _menuScanFile=null;
+let _menuScanPreviewUrl=null;
+let _menuScanInFlight=false;
+let _menuScanLastResult=null;
+let _menuScanPhotoUpdateTarget=null;
 
 function photoEstimateSafeMeta(meta={}){
   const safe={};
@@ -1711,7 +1716,16 @@ function closePhotoEstimateModal(){
   _photoEstimateAdjustInProgress=false;
   _photoEstimatePreviousDraft=null;
   _photoEstimateManualDirty=false;
+  _menuScanPhotoUpdateTarget=null;
   setPhotoAdjustStatus('');
+  const title=document.getElementById('photo-estimate-title');
+  const adjustBox=document.querySelector('#photo-estimate-form .photo-adjust-box');
+  const saveBtn=document.getElementById('photo-estimate-save-btn');
+  const note=document.getElementById('photo-estimate-note');
+  if(title) title.textContent='Review photo estimate';
+  if(adjustBox) adjustBox.style.display='block';
+  if(saveBtn) saveBtn.textContent='Save estimate';
+  if(note) note.textContent='Photo estimates are approximate. Portion size and hidden oils/sauces may be wrong.';
   setPhotoEstimatePreview(null);
   modal.classList.remove('show');
   setTimeout(()=>{modal.style.display='none';},200);
@@ -1721,11 +1735,13 @@ function closePhotoEstimateModal(){
   });
 }
 function openPhotoEstimateCameraPicker(){
+  _menuScanPhotoUpdateTarget=null;
   resetPhotoEstimateTrace();
   photoEstimateTrace('photo_picker_opened',{source:'camera'});
   document.getElementById('photo-estimate-input')?.click();
 }
 function openPhotoEstimateLibraryPicker(){
+  _menuScanPhotoUpdateTarget=null;
   resetPhotoEstimateTrace();
   photoEstimateTrace('photo_picker_opened',{source:'library'});
   document.getElementById('photo-estimate-library-input')?.click();
@@ -1733,6 +1749,36 @@ function openPhotoEstimateLibraryPicker(){
 function openPhotoEstimatePicker(){
   openPhotoEstimateCameraPicker();
 }
+function isMenuScanPhotoUpdateMeal(meal){
+  if(!meal||typeof meal!=='object') return false;
+  if(meal.source==='menu_scan') return true;
+  const rows=Array.isArray(meal.ingredients)?meal.ingredients:[];
+  return rows.some(row=>row&&['menu_scan','consumable_ai_estimate'].includes(row.source));
+}
+window.isMenuScanPhotoUpdateMeal=isMenuScanPhotoUpdateMeal;
+function getMenuScanPhotoUpdateMeal(target){
+  const log=getLog();
+  const meals=log[target?.dateStr]?.meals||[];
+  let idx=Number.isInteger(target?.mealIdx)?target.mealIdx:-1;
+  if(!meals[idx]&&target?.mealId!=null){
+    idx=meals.findIndex(meal=>String(meal?.id)===String(target.mealId));
+  }
+  const meal=meals[idx];
+  return meal?{log,meals,meal,idx}:null;
+}
+function openMenuScanPhotoUpdate(dateStr,mealIdx){
+  const log=getLog();
+  const meal=log[dateStr]?.meals?.[mealIdx];
+  if(!isMenuScanPhotoUpdateMeal(meal)){
+    showToast('Photo update is only available for menu-scanned meals');
+    return;
+  }
+  resetPhotoEstimateTrace();
+  _menuScanPhotoUpdateTarget={dateStr,mealIdx,mealId:meal.id};
+  photoEstimateTrace('menu_scan_photo_update_picker_opened',{dateStr,mealIdx});
+  document.getElementById('photo-estimate-input')?.click();
+}
+window.openMenuScanPhotoUpdate=openMenuScanPhotoUpdate;
 async function decodePhotoForEstimate(file){
   photoEstimateTrace('image_decode_started',{
     fileType:file.type||'unknown',
@@ -1821,6 +1867,297 @@ async function resizePhotoForEstimate(file){
     decoded.close?.();
   }
 }
+
+function menuScanRoundMacro(value,key='macro'){
+  const n=Number(value);
+  if(!Number.isFinite(n)) return 0;
+  return key==='kcal'?Math.round(n):Math.round(n*10)/10;
+}
+function menuScanMacroSet(value={}){
+  return {
+    kcal:menuScanRoundMacro(value.kcal,'kcal'),
+    protein:menuScanRoundMacro(value.protein),
+    carbs:menuScanRoundMacro(value.carbs),
+    fat:menuScanRoundMacro(value.fat)
+  };
+}
+function menuScanHasTargets(profile){
+  return ['targetKcal','targetProtein','targetCarbs','targetFat'].every(key=>{
+    const n=Number(profile?.[key]);
+    return Number.isFinite(n)&&n>0;
+  });
+}
+function menuScanProfileTargets(profile){
+  return {
+    kcal:menuScanRoundMacro(profile.targetKcal,'kcal'),
+    protein:menuScanRoundMacro(profile.targetProtein),
+    carbs:menuScanRoundMacro(profile.targetCarbs),
+    fat:menuScanRoundMacro(profile.targetFat)
+  };
+}
+function menuScanCurrentDayTotals(){
+  const date=selectedLogDate||localDateStr();
+  const day=(getLog()[date]||{}).totals||{};
+  return menuScanMacroSet({
+    kcal:day.kcal??0,
+    protein:day.protein??0,
+    carbs:day.carbs??0,
+    fat:day.fat??0
+  });
+}
+function menuScanCurrentSection(){
+  if(typeof getJotMealWindow==='function') return getJotMealWindow();
+  if(typeof photoEstimateSectionDefault==='function') return photoEstimateSectionDefault();
+  return 'snacks';
+}
+function setMenuScanStatus(message='',tone=''){
+  const el=document.getElementById('menu-scan-status');
+  if(!el) return;
+  el.textContent=message;
+  el.dataset.tone=tone||'';
+}
+function setMenuScanBusy(busy){
+  _menuScanInFlight=!!busy;
+  const btn=document.getElementById('menu-scan-submit-btn');
+  if(btn){
+    btn.disabled=!!busy;
+    btn.textContent=busy?'Scanning...':'Scan';
+  }
+}
+function clearMenuScanResults(){
+  _menuScanLastResult=null;
+  const el=document.getElementById('menu-scan-results');
+  if(el) el.innerHTML='';
+}
+function setMenuScanPreview(file){
+  const img=document.getElementById('menu-scan-preview');
+  if(_menuScanPreviewUrl){
+    URL.revokeObjectURL(_menuScanPreviewUrl);
+    _menuScanPreviewUrl=null;
+  }
+  if(!img) return;
+  if(!file){
+    img.removeAttribute('src');
+    img.style.display='none';
+    return;
+  }
+  _menuScanPreviewUrl=URL.createObjectURL(file);
+  img.src=_menuScanPreviewUrl;
+  img.style.display='block';
+}
+function openMenuScanModal(){
+  const modal=document.getElementById('menu-scan-modal');
+  if(!modal) return;
+  clearMenuScanResults();
+  setMenuScanStatus('');
+  setMenuScanBusy(false);
+  _menuScanFile=null;
+  setMenuScanPreview(null);
+  ['menu-scan-input','menu-scan-library-input'].forEach(id=>{
+    const input=document.getElementById(id);
+    if(input) input.value='';
+  });
+  modal.style.display='flex';
+  requestAnimationFrame(()=>modal.classList.add('show'));
+}
+function closeMenuScanModal(){
+  const modal=document.getElementById('menu-scan-modal');
+  if(!modal) return;
+  setMenuScanBusy(false);
+  _menuScanFile=null;
+  setMenuScanPreview(null);
+  modal.classList.remove('show');
+  setTimeout(()=>{modal.style.display='none';},200);
+  ['menu-scan-input','menu-scan-library-input'].forEach(id=>{
+    const input=document.getElementById(id);
+    if(input) input.value='';
+  });
+}
+function openMenuScanCameraPicker(){
+  document.getElementById('menu-scan-input')?.click();
+}
+function openMenuScanLibraryPicker(){
+  document.getElementById('menu-scan-library-input')?.click();
+}
+function handleMenuScanFile(file){
+  if(!file) return;
+  _menuScanFile=file;
+  clearMenuScanResults();
+  setMenuScanStatus('Menu photo ready.');
+  setMenuScanPreview(file);
+}
+function menuScanFormatMacroSet(macros){
+  const m=menuScanMacroSet(macros||{});
+  return `<div class="menu-scan-macros">
+    <div class="menu-scan-macro"><b>${m.kcal}</b><span>kcal</span></div>
+    <div class="menu-scan-macro"><b>${m.protein}g</b><span>protein</span></div>
+    <div class="menu-scan-macro"><b>${m.carbs}g</b><span>carbs</span></div>
+    <div class="menu-scan-macro"><b>${m.fat}g</b><span>fat</span></div>
+  </div>`;
+}
+function menuScanEstimateLikely(estimate={}){
+  return {
+    kcal:estimate.kcal?.likely??0,
+    protein:estimate.protein?.likely??0,
+    carbs:estimate.carbs?.likely??0,
+    fat:estimate.fat?.likely??0
+  };
+}
+function menuScanRowKey(row={}){
+  if(row.presetId) return `preset:${row.presetId}`;
+  return [
+    row.source||'row',
+    String(row.name||'').toLowerCase().trim(),
+    row.quantity??'',
+    row.unit||''
+  ].join(':');
+}
+function menuScanReviewItemFromRow(row={},idx=0){
+  const quantity=row.quantity==null?'':`${row.quantity}${row.unit?` ${row.unit}`:''}`;
+  const notes=[quantity,row.notes].map(v=>String(v||'').trim()).filter(Boolean).join(' · ');
+  return {
+    id:'menu_'+Date.now()+'_'+idx,
+    name:String(row.name||'Menu item').trim()||'Menu item',
+    estimatedGrams:row.estimatedGrams!=null
+      ? Math.round(Number(row.estimatedGrams)||0)
+      : (row.unit==='g'?Math.round(Number(row.quantity)||0):null),
+    calories:Math.round(Number(row.calories??row.kcal)||0),
+    protein:roundMacro(row.protein),
+    carbs:roundMacro(row.carbs),
+    fat:roundMacro(row.fat),
+    fibre:roundMacro(row.fibre??row.fiber),
+    confidence:row.confidence||'medium',
+    notes,
+    source:row.source||'menu_scan',
+    presetId:row.presetId||null
+  };
+}
+function menuScanBuildReviewEstimate(suggestion){
+  const reserved=Array.isArray(_menuScanLastResult?.reservedItems)?_menuScanLastResult.reservedItems:[];
+  const suggestionRows=Array.isArray(suggestion?.rows)?suggestion.rows:[];
+  const seen=new Set();
+  const combined=[];
+  [...reserved,...suggestionRows].forEach(row=>{
+    if(!row||typeof row!=='object') return;
+    const key=menuScanRowKey(row);
+    if(seen.has(key)) return;
+    seen.add(key);
+    combined.push(row);
+  });
+  return {
+    source:'menu_scan',
+    mealName:suggestion?.suggestedName||'Menu choice',
+    section:menuScanCurrentSection(),
+    confidence:suggestion?.confidence||'medium',
+    reviewTitle:'Review menu choice',
+    saveLabel:'Save meal',
+    disableAdjust:true,
+    reviewNote:'Menu recommendations are approximate. Restaurant portions, oils, sauces, and prep can vary.',
+    notes:[
+      _menuScanLastResult?.requestSummary,
+      suggestion?.reason,
+      suggestion?.portionAssumptions,
+      ...(Array.isArray(suggestion?.warnings)?suggestion.warnings:[])
+    ].map(v=>String(v||'').trim()).filter(Boolean).join('\n'),
+    items:combined.map(menuScanReviewItemFromRow)
+  };
+}
+function useMenuScanSuggestion(index){
+  const suggestions=Array.isArray(_menuScanLastResult?.suggestions)?_menuScanLastResult.suggestions:[];
+  const suggestion=suggestions[index];
+  const rows=Array.isArray(suggestion?.rows)?suggestion.rows:[];
+  if(!suggestion||!rows.length){
+    setMenuScanStatus('This recommendation has no editable rows. Try another option or rescan.','warn');
+    return;
+  }
+  const estimate=menuScanBuildReviewEstimate(suggestion);
+  if(!estimate.items.length){
+    setMenuScanStatus('This recommendation has no editable rows. Try another option or rescan.','warn');
+    return;
+  }
+  closeMenuScanModal();
+  renderPhotoEstimateReview(estimate);
+}
+function renderMenuScanResults(data){
+  _menuScanLastResult=data;
+  const el=document.getElementById('menu-scan-results');
+  if(!el) return;
+  const reserved=Array.isArray(data?.reservedItems)?data.reservedItems:[];
+  const suggestions=Array.isArray(data?.suggestions)?data.suggestions:[];
+  let html='';
+  html+=`<div class="menu-scan-summary">`;
+  if(data?.requestSummary) html+=`<div class="menu-scan-summary-title">${photoEstimateEsc(data.requestSummary)}</div>`;
+  html+=`<div class="menu-scan-muted">Reserved: ${reserved.length?reserved.map(item=>photoEstimateEsc(item.name||'Reserved item')).join(', '):'None'}</div>`;
+  html+=`<div class="menu-scan-muted" style="margin-top:8px;">Estimate confidence reflects menu readability and portion uncertainty, not how healthy the option is.</div>`;
+  html+=`<div class="menu-scan-muted" style="margin-top:8px;">Remaining before reserved</div>`;
+  html+=menuScanFormatMacroSet(data?.remainingBefore);
+  html+=`<div class="menu-scan-muted" style="margin-top:8px;">Remaining after reserved</div>`;
+  html+=menuScanFormatMacroSet(data?.remainingAfterReserved);
+  html+=`</div>`;
+
+  if(!suggestions.length){
+    html+=`<div class="menu-scan-card"><div class="menu-scan-muted">No recommendations returned. Try a clearer menu photo.</div></div>`;
+  }
+  suggestions.slice(0,5).forEach((item,idx)=>{
+    const likely=menuScanEstimateLikely(item.estimate||{});
+    const warnings=[
+      item.portionAssumptions,
+      ...(Array.isArray(item.warnings)?item.warnings:[])
+    ].map(v=>String(v||'').trim()).filter(Boolean);
+    html+=`<div class="menu-scan-card">`;
+    html+=`<div class="menu-scan-card-head"><div class="menu-scan-card-title">${photoEstimateEsc(item.suggestedName||'Menu option')}</div><div class="menu-scan-confidence">Estimate confidence: ${photoEstimateEsc(item.confidence||'low')}</div></div>`;
+    html+=menuScanFormatMacroSet(likely);
+    if(item.reason) html+=`<div class="menu-scan-muted" style="margin-top:8px;">${photoEstimateEsc(item.reason)}</div>`;
+    if(warnings.length) html+=`<div class="menu-scan-warning">${warnings.map(photoEstimateEsc).join('<br>')}</div>`;
+    html+=`<button class="btn-secondary menu-scan-use-btn" type="button" data-menu-scan-use="${idx}" data-testid="menu-scan-use-btn">Use this</button>`;
+    html+=`</div>`;
+  });
+  el.innerHTML=html;
+}
+async function submitMenuScan(){
+  if(_menuScanInFlight) return;
+  const profile=getProfile();
+  if(!menuScanHasTargets(profile)){
+    setMenuScanStatus('Add macro targets in Profile before using menu recommendations.','warn');
+    return;
+  }
+  if(!_menuScanFile){
+    setMenuScanStatus('Choose a menu photo first.','warn');
+    return;
+  }
+  clearMenuScanResults();
+  setMenuScanBusy(true);
+  setMenuScanStatus('Preparing menu photo...');
+  try{
+    const resized=await resizePhotoForEstimate(_menuScanFile);
+    const menuScanUrl=typeof window.sousApiUrl==='function'?window.sousApiUrl('/api/menu-scan'):'/api/menu-scan';
+    setMenuScanStatus('Scanning menu...');
+    const res=await fetch(menuScanUrl,{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({
+        image:resized.image,
+        requestText:document.getElementById('menu-scan-request')?.value||'',
+        selectedDate:selectedLogDate||localDateStr(),
+        currentMealSection:menuScanCurrentSection(),
+        profileTargets:menuScanProfileTargets(profile),
+        currentDayTotals:menuScanCurrentDayTotals()
+      })
+    });
+    const data=await res.json().catch(()=>({}));
+    if(!res.ok){
+      const detail=data.detail||data.error||'Could not scan this menu.';
+      throw new Error(detail);
+    }
+    renderMenuScanResults(data);
+    setMenuScanStatus('Recommendations ready.');
+  }catch(e){
+    console.warn('[Sous Menu Scan]',e);
+    setMenuScanStatus(String(e?.message||'Could not scan this menu. Try another photo.'),'warn');
+  }finally{
+    setMenuScanBusy(false);
+  }
+}
 function roundMacro(n){
   const val=Number(n);
   if(!Number.isFinite(val)||val<0) return 0;
@@ -1859,13 +2196,15 @@ function normalisePhotoEstimateItems(estimate){
     id:'photo_'+Date.now()+'_'+idx,
     name:(item.name||'Photo item').trim()||'Photo item',
     estimatedGrams:item.estimatedGrams!=null?Math.round(Number(item.estimatedGrams)||0):null,
-    calories:Math.round(Number(item.calories)||0),
+    calories:Math.round(Number(item.calories??item.kcal)||0),
     protein:roundMacro(item.protein),
     carbs:roundMacro(item.carbs),
     fat:roundMacro(item.fat),
     fibre:roundMacro(item.fibre??item.fiber),
     confidence:item.confidence||estimate?.confidence||'low',
-    notes:item.notes||''
+    notes:item.notes||'',
+    source:item.source||estimate?.source||'photo_estimate',
+    presetId:item.presetId||null
   }));
 }
 function normalisePhotoAdjustItems(adjustment){
@@ -1935,7 +2274,7 @@ function renderPhotoEstimateItemRows(){
   const itemsEl=document.getElementById('photo-items-list');
   if(!itemsEl||!_photoEstimateDraft) return;
   const items=_photoEstimateDraft.items||[];
-  const confidence=_photoEstimateDraft.confidence?`Confidence: ${photoEstimateEsc(_photoEstimateDraft.confidence)}`:'';
+  const confidence=_photoEstimateDraft.confidence?`Estimate confidence: ${photoEstimateEsc(_photoEstimateDraft.confidence)}`:'';
   const notes=_photoEstimateDraft.notes?photoEstimateEsc(_photoEstimateDraft.notes):'';
   let html='';
   if(confidence||notes){
@@ -1947,7 +2286,7 @@ function renderPhotoEstimateItemRows(){
   items.forEach(item=>{
     const id=item.id;
     const grams=item.estimatedGrams==null?'':item.estimatedGrams;
-    const confidence=item.confidence?` · ${photoEstimateEsc(item.confidence)} confidence`:'';
+    const confidence=item.confidence?` · estimate confidence: ${photoEstimateEsc(item.confidence)}`:'';
     const rowNote=item.notes?`<div style="font-size:11px;color:var(--text-muted);margin-top:5px;">${photoEstimateEsc(item.notes)}</div>`:'';
     html+=`<div style="background:var(--card);border:.5px solid var(--border);border-radius:8px;padding:8px 10px;margin-bottom:8px;">`;
     html+=`<div style="display:flex;gap:6px;align-items:center;margin-bottom:6px;">`;
@@ -1955,15 +2294,15 @@ function renderPhotoEstimateItemRows(){
     html+=`<button type="button" onclick="deletePhotoEstimateItem('${id}')" title="Remove item" aria-label="Remove item" style="background:none;border:none;padding:4px 7px;cursor:pointer;color:var(--text-muted);font-size:16px;">✕</button>`;
     html+=`</div>`;
     html+=`<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:5px;margin-bottom:5px;">`;
-    html+=`<input type="number" class="custom-input" id="photo-item-grams-${id}" value="${grams}" min="0" placeholder="g" oninput="markPhotoEstimateManualEdit();photoEstimateSyncRows()" aria-label="Estimated grams" style="padding:6px 7px;font-size:12px;">`;
-    html+=`<input type="number" class="custom-input" id="photo-item-kcal-${id}" value="${Math.round(Number(item.calories)||0)}" min="0" placeholder="kcal" oninput="markPhotoEstimateManualEdit();photoEstimateSyncRows()" aria-label="Calories" style="padding:6px 7px;font-size:12px;">`;
-    html+=`<input type="number" class="custom-input" id="photo-item-protein-${id}" value="${roundMacro(item.protein)}" min="0" step="0.1" placeholder="protein" oninput="markPhotoEstimateManualEdit();photoEstimateSyncRows()" aria-label="Protein" style="padding:6px 7px;font-size:12px;">`;
+    html+=`<label style="display:block;"><span style="display:block;font-size:9px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.04em;margin-bottom:3px;">Qty / g</span><input type="number" class="custom-input" id="photo-item-grams-${id}" value="${grams}" min="0" placeholder="qty" oninput="markPhotoEstimateManualEdit();photoEstimateSyncRows()" aria-label="Quantity or grams" style="width:100%;padding:6px 7px;font-size:12px;"></label>`;
+    html+=`<label style="display:block;"><span style="display:block;font-size:9px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.04em;margin-bottom:3px;">kcal</span><input type="number" class="custom-input" id="photo-item-kcal-${id}" value="${Math.round(Number(item.calories)||0)}" min="0" placeholder="kcal" oninput="markPhotoEstimateManualEdit();photoEstimateSyncRows()" aria-label="Calories" style="width:100%;padding:6px 7px;font-size:12px;"></label>`;
+    html+=`<label style="display:block;"><span style="display:block;font-size:9px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.04em;margin-bottom:3px;">Protein</span><input type="number" class="custom-input" id="photo-item-protein-${id}" value="${roundMacro(item.protein)}" min="0" step="0.1" placeholder="protein" oninput="markPhotoEstimateManualEdit();photoEstimateSyncRows()" aria-label="Protein" style="width:100%;padding:6px 7px;font-size:12px;"></label>`;
     html+=`</div>`;
     html+=`<div style="display:grid;grid-template-columns:1fr 1fr;gap:5px;">`;
-    html+=`<input type="number" class="custom-input" id="photo-item-carbs-${id}" value="${roundMacro(item.carbs)}" min="0" step="0.1" placeholder="carbs" oninput="markPhotoEstimateManualEdit();photoEstimateSyncRows()" aria-label="Carbs" style="padding:6px 7px;font-size:12px;">`;
-    html+=`<input type="number" class="custom-input" id="photo-item-fat-${id}" value="${roundMacro(item.fat)}" min="0" step="0.1" placeholder="fat" oninput="markPhotoEstimateManualEdit();photoEstimateSyncRows()" aria-label="Fat" style="padding:6px 7px;font-size:12px;">`;
+    html+=`<label style="display:block;"><span style="display:block;font-size:9px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.04em;margin-bottom:3px;">Carbs</span><input type="number" class="custom-input" id="photo-item-carbs-${id}" value="${roundMacro(item.carbs)}" min="0" step="0.1" placeholder="carbs" oninput="markPhotoEstimateManualEdit();photoEstimateSyncRows()" aria-label="Carbs" style="width:100%;padding:6px 7px;font-size:12px;"></label>`;
+    html+=`<label style="display:block;"><span style="display:block;font-size:9px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.04em;margin-bottom:3px;">Fat</span><input type="number" class="custom-input" id="photo-item-fat-${id}" value="${roundMacro(item.fat)}" min="0" step="0.1" placeholder="fat" oninput="markPhotoEstimateManualEdit();photoEstimateSyncRows()" aria-label="Fat" style="width:100%;padding:6px 7px;font-size:12px;"></label>`;
     html+=`</div>`;
-    html+=`<div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.04em;margin-top:5px;">grams · kcal · protein${confidence}</div>`;
+    html+=`<div style="font-size:10px;color:var(--text-muted);margin-top:5px;">Qty/unit or grams · kcal · protein · carbs · fat${confidence}</div>`;
     html+=rowNote;
     html+=`</div>`;
   });
@@ -2001,19 +2340,29 @@ function renderPhotoEstimateReview(estimate){
   _photoEstimatePreviousDraft=null;
   _photoEstimateDraft={
     mealName:estimate?.mealName||'Restaurant meal',
+    source:estimate?.source||'photo_estimate',
     confidence:estimate?.confidence||'low',
     items:normalisePhotoEstimateItems(estimate),
     totals:photoEstimateTotalsFallback(estimate),
-    notes:estimate?.notes||''
+    notes:estimate?.notes||'',
+    updateTarget:estimate?.updateTarget||null
   };
+  const title=document.getElementById('photo-estimate-title');
+  if(title) title.textContent=estimate?.reviewTitle||'Review photo estimate';
   document.getElementById('photo-meal-name').value=estimate?.mealName||'Restaurant meal';
-  document.getElementById('photo-meal-section').value=photoEstimateSectionDefault();
+  document.getElementById('photo-meal-section').value=estimate?.section||photoEstimateSectionDefault();
   const portion=document.getElementById('photo-portion-select');
   if(portion) portion.value='1';
   const adjustInput=document.getElementById('photo-adjust-input');
   const revertBtn=document.getElementById('photo-adjust-revert-btn');
+  const adjustBox=document.querySelector('#photo-estimate-form .photo-adjust-box');
+  const saveBtn=document.getElementById('photo-estimate-save-btn');
+  const note=document.getElementById('photo-estimate-note');
   if(adjustInput) adjustInput.value='';
   if(revertBtn) revertBtn.style.display='none';
+  if(adjustBox) adjustBox.style.display=estimate?.disableAdjust?'none':'block';
+  if(saveBtn) saveBtn.textContent=estimate?.saveLabel||'Save estimate';
+  if(note) note.textContent=estimate?.reviewNote||'Photo estimates are approximate. Portion size and hidden oils/sauces may be wrong.';
   setPhotoAdjustStatus('');
   renderPhotoEstimateItemRows();
   photoEstimateTrace('review_rows_rendered',{itemCount:_photoEstimateDraft.items.length});
@@ -2116,8 +2465,106 @@ function revertPhotoEstimateAdjustment(){
   if(revertBtn) revertBtn.style.display='none';
   setPhotoAdjustStatus('Previous estimate restored.');
 }
+function menuScanPhotoUpdateRows(meal){
+  return (Array.isArray(meal?.ingredients)?meal.ingredients:[]).map(item=>({
+    name:item.name,
+    estimatedGrams:item.weight??item.estimatedGrams??null,
+    calories:item.kcal??item.calories??0,
+    kcal:item.kcal??item.calories??0,
+    protein:item.protein||0,
+    carbs:item.carbs||0,
+    fat:item.fat||0,
+    confidence:item.confidence||'low',
+    notes:item.notes||'',
+    source:item.source||'menu_scan',
+    presetId:item.presetId||null
+  }));
+}
+async function handleMenuScanPhotoUpdateFile(file){
+  const target=_menuScanPhotoUpdateTarget;
+  const found=getMenuScanPhotoUpdateMeal(target);
+  const meal=found?.meal;
+  if(!meal||!isMenuScanPhotoUpdateMeal(meal)){
+    _menuScanPhotoUpdateTarget=null;
+    showToast('Could not find that menu-scanned meal');
+    return;
+  }
+  if(!_photoEstimateTraceStart) resetPhotoEstimateTrace();
+  photoEstimateTrace('menu_scan_photo_update_selected',{
+    fileType:file.type||'unknown',
+    fileSizeKb:Math.round((file.size||0)/1024),
+    itemCount:meal.ingredients?.length||0
+  });
+  _photoEstimateDraft=null;
+  setPhotoEstimatePreview(file);
+  showPhotoEstimateModal({status:'Loading photo',showForm:false});
+  startPhotoProgress('Loading photo',8);
+  startPhotoEstimateSlowTimer();
+  try{
+    setPhotoEstimateStatus('Compressing image');
+    setPhotoProgressStage('Compressing image',24,'Preparing');
+    const resized=await resizePhotoForEstimate(file);
+    const updateUrl=typeof window.sousApiUrl==='function'?window.sousApiUrl('/api/menu-scan/photo-update'):'/api/menu-scan/photo-update';
+    setPhotoEstimateStatus('Uploading');
+    setPhotoProgressStage('Uploading',38,'Uploading');
+    photoEstimateTrace('upload_started',{
+      route:'menu_scan_photo_update',
+      resizedBytes:resized.bytes||0,
+      width:resized.width||null,
+      height:resized.height||null
+    });
+    setPhotoEstimateStatus('Updating estimate');
+    setPhotoProgressStage('Estimating meal',72,'Estimating');
+    const res=await fetch(updateUrl,{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({
+        image:resized.image,
+        existingRows:menuScanPhotoUpdateRows(meal),
+        mealName:meal.name||'Menu meal',
+        notes:meal.notes||'',
+        section:meal.section||null,
+        mealId:meal.id||null
+      })
+    });
+    const data=await res.json().catch(()=>({}));
+    photoEstimateTrace('upload_finished',{status:res.status,ok:res.ok,route:'menu_scan_photo_update'});
+    if(!res.ok){
+      const detail=data.detail||data.error||'Could not update estimate.';
+      throw new Error(detail);
+    }
+    setPhotoEstimateStatus('Building editable rows');
+    setPhotoProgressStage('Building review rows',88,'Reviewing');
+    renderPhotoEstimateReview({
+      ...data,
+      source:'menu_scan',
+      section:data.section||meal.section||photoEstimateSectionDefault(),
+      mealName:data.mealName||meal.name||'Updated menu meal',
+      reviewTitle:data.reviewTitle||'Review updated menu estimate',
+      saveLabel:data.saveLabel||'Update meal',
+      disableAdjust:data.disableAdjust!==false,
+      reviewNote:data.reviewNote||'Review and edit before replacing this saved menu-scan meal. Estimates are approximate.',
+      updateTarget:{...target,mealIdx:found.idx,mealId:meal.id}
+    });
+  }catch(e){
+    console.warn('[Sous Menu Scan Photo Update]',e);
+    rememberPhotoEstimateError(e,'menu_scan_photo_update');
+    const detail=String(e&&e.message||'').trim();
+    const message=detail
+      ? `Could not update this menu meal: ${detail}`
+      : 'Could not update this menu meal. Please try another photo.';
+    failPhotoProgress(message);
+    showPhotoEstimateModal({status:message,showForm:false});
+  }finally{
+    clearPhotoEstimateSlowTimer();
+  }
+}
 async function handlePhotoEstimateFile(file){
   if(!file) return;
+  if(_menuScanPhotoUpdateTarget){
+    await handleMenuScanPhotoUpdateFile(file);
+    return;
+  }
   if(!_photoEstimateTraceStart) resetPhotoEstimateTrace();
   photoEstimateTrace('photo_selected',{
     fileType:file.type||'unknown',
@@ -2174,6 +2621,23 @@ async function handlePhotoEstimateFile(file){
     clearPhotoEstimateSlowTimer();
   }
 }
+function replaceMenuScanPhotoUpdateMeal(updateTarget,mealObj){
+  const found=getMenuScanPhotoUpdateMeal(updateTarget);
+  if(!found?.meal||!isMenuScanPhotoUpdateMeal(found.meal)) return false;
+  const original=found.meal;
+  const date=updateTarget.dateStr;
+  found.meals[found.idx]={
+    ...original,
+    ...mealObj,
+    id:original.id||mealObj.id,
+    time:original.time||mealObj.time,
+    source:'menu_scan',
+    updatedAt:new Date().toISOString()
+  };
+  found.log[date].totals=sumMacros(found.log[date].meals.map(m=>m.totals));
+  saveLog(found.log);
+  return true;
+}
 function saveReviewedPhotoEstimate(){
   if(!_photoEstimateDraft) return;
   photoEstimateSyncRows();
@@ -2194,7 +2658,8 @@ function saveReviewedPhotoEstimate(){
       type:'solid',
       confidence:item.confidence||'low',
       notes:item.notes||'',
-      source:'photo_estimate'
+      source:item.source||_photoEstimateDraft.source||'photo_estimate',
+      presetId:item.presetId||undefined
     }))
     .filter(item=>item.name);
   if(!ingredients.length){
@@ -2217,7 +2682,7 @@ function saveReviewedPhotoEstimate(){
     name,
     time:new Date().toISOString(),
     section,
-    source:'photo_estimate',
+    source:_photoEstimateDraft.source||'photo_estimate',
     confidence:_photoEstimateDraft.confidence||'low',
     notes:_photoEstimateDraft.notes||'',
     portionScale:_photoEstimatePortion,
@@ -2225,13 +2690,28 @@ function saveReviewedPhotoEstimate(){
     savedIngredients:ingredients,
     totals
   };
+  if(_photoEstimateDraft.updateTarget){
+    const updated=replaceMenuScanPhotoUpdateMeal(_photoEstimateDraft.updateTarget,mealObj);
+    if(!updated){
+      showToast('Could not update that menu-scanned meal');
+      return;
+    }
+    closePhotoEstimateModal();
+    _photoEstimateDraft=null;
+    _photoEstimatePortion=1;
+    showToast('Menu meal updated',2400);
+    renderHome();
+    if(currentTab==='history'&&typeof renderHistoryDay==='function') renderHistoryDay();
+    return;
+  }
   log[date].meals.push(mealObj);
   log[date].totals=sumMacros(log[date].meals.map(m=>m.totals));
   saveLog(log);
   closePhotoEstimateModal();
+  const savedSource=_photoEstimateDraft.source||'photo_estimate';
   _photoEstimateDraft=null;
   _photoEstimatePortion=1;
-  showToast('Photo estimate saved',2400);
+  showToast(savedSource==='menu_scan'?'Menu choice saved':'Photo estimate saved',2400);
   renderHome();
 }
 
@@ -2405,7 +2885,7 @@ function renderHome(){
 
 function homeLogWeight(){
   const inp=document.getElementById('home-bw-input');
-  const val=parseFloat(inp.value);
+  const val=typeof displayToKg==='function'?displayToKg(inp.value):parseFloat(inp.value);
   if(!val||val<20||val>400){showToast('Enter a valid weight');return;}
   const weights=getWeights(),today=todayStr();
   const idx=weights.findIndex(w=>w.date===today);
@@ -2586,7 +3066,7 @@ function updateHome(){ if(currentTab==='home') renderHome(); }
 // ═══════════════════════════════════════════
 // PWA — MANIFEST + SERVICE WORKER
 // ═══════════════════════════════════════════
-const SOUS_CACHE_VERSION='sous-v14';
+const SOUS_CACHE_VERSION='sous-v22';
 
 window.__sousClearCachesAndReload=async function(){
   if('serviceWorker' in navigator){
@@ -2682,6 +3162,31 @@ function initPhotoEstimate(){
   document.getElementById('photo-adjust-revert-btn')?.addEventListener('click',revertPhotoEstimateAdjustment);
 }
 
+function initMenuScan(){
+  document.getElementById('menu-scan-open-btn')?.addEventListener('click',openMenuScanModal);
+  document.getElementById('menu-scan-camera-btn')?.addEventListener('click',openMenuScanCameraPicker);
+  document.getElementById('menu-scan-library-btn')?.addEventListener('click',openMenuScanLibraryPicker);
+  document.getElementById('menu-scan-input')?.addEventListener('change',e=>handleMenuScanFile(e.target.files&&e.target.files[0]));
+  document.getElementById('menu-scan-library-input')?.addEventListener('change',e=>handleMenuScanFile(e.target.files&&e.target.files[0]));
+  document.getElementById('menu-scan-submit-btn')?.addEventListener('click',submitMenuScan);
+  document.getElementById('menu-scan-close-btn')?.addEventListener('click',closeMenuScanModal);
+  document.getElementById('menu-scan-cancel-btn')?.addEventListener('click',closeMenuScanModal);
+  document.getElementById('menu-scan-results')?.addEventListener('click',e=>{
+    const btn=e.target.closest('[data-menu-scan-use]');
+    if(!btn) return;
+    useMenuScanSuggestion(Number(btn.dataset.menuScanUse));
+  });
+  document.getElementById('menu-scan-modal')?.addEventListener('click',e=>{if(e.target===document.getElementById('menu-scan-modal'))closeMenuScanModal();});
+}
+
+window.openMenuScanModal=openMenuScanModal;
+window.useMenuScanSuggestion=useMenuScanSuggestion;
+window.__sousMenuScanState=()=>({
+  hasFile:!!_menuScanFile,
+  inFlight:!!_menuScanInFlight,
+  hasResult:!!_menuScanLastResult,
+  suggestionCount:Array.isArray(_menuScanLastResult?.suggestions)?_menuScanLastResult.suggestions.length:0
+});
 window.__sousPhotoTimingTrace=()=>_photoEstimateTrace.slice(-100);
 window.__sousLastPhotoError=()=>_photoEstimateLastError?{..._photoEstimateLastError}:null;
 window.__sousPhotoEstimateState=()=>({
@@ -2696,6 +3201,7 @@ function init(){
   updateClock(); setInterval(updateClock,10000);
   initDateNav();
   initPhotoEstimate();
+  initMenuScan();
   initJotStructuralUi();
   renderHome();
   wireLogButtons();

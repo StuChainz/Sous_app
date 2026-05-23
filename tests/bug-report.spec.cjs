@@ -197,3 +197,301 @@ test('photo estimate offers camera and camera roll inputs', async ({ page }) => 
     hasLibraryOpener: true
   });
 });
+
+test('menu scanner controls render and require macro targets', async ({ page }) => {
+  let menuScanCalls = 0;
+  await page.route('**/api/menu-scan', route => {
+    menuScanCalls += 1;
+    route.fulfill({ status: 500, body: 'menu scan should not be called without targets' });
+  });
+  await boot(page);
+
+  await expect(page.getByTestId('menu-scan-open-btn')).toBeVisible();
+  await page.getByTestId('menu-scan-open-btn').click();
+  await expect(page.locator('#menu-scan-modal')).toBeVisible();
+  await expect(page.getByTestId('menu-scan-camera-btn')).toBeVisible();
+  await expect(page.getByTestId('menu-scan-library-btn')).toBeVisible();
+  await expect(page.getByTestId('menu-scan-request')).toHaveAttribute('placeholder', 'e.g. I have one meal left and want a glass of prosecco with dinner');
+
+  await page.getByTestId('menu-scan-submit-btn').click();
+  await expect(page.getByTestId('menu-scan-status')).toContainText('Add macro targets in Profile before using menu recommendations.');
+  expect(menuScanCalls).toBe(0);
+});
+
+test('menu scanner use action opens editable review without auto-saving', async ({ page }) => {
+  let menuScanPayload = null;
+  await page.route('**/api/menu-scan', route => {
+    menuScanPayload = route.request().postDataJSON();
+    return route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        requestSummary: 'Dinner with prosecco reserved',
+        reservedItems: [{
+          id: 'consumable_prosecco-125ml',
+          presetId: 'prosecco-125ml',
+          name: 'prosecco 125ml',
+          quantity: 125,
+          unit: 'ml',
+          kcal: 86,
+          calories: 86,
+          protein: 0.1,
+          carbs: 2.1,
+          fat: 0,
+          source: 'consumable_preset',
+          confidence: 'high'
+        }],
+        remainingBefore: { kcal: 850, protein: 55, carbs: 90, fat: 25 },
+        remainingAfterReserved: { kcal: 764, protein: 54.9, carbs: 87.9, fat: 25 },
+        suggestions: [{
+          id: 'menu_1_grilled-chicken-salad',
+          menuText: 'Grilled chicken salad',
+          suggestedName: 'Grilled chicken salad',
+          rank: 1,
+          fitScore: 88,
+          confidence: 'medium',
+          reason: 'Good protein fit after reserving the prosecco.',
+          portionAssumptions: 'Restaurant dressing on the side.',
+          warnings: ['Dressing may add fat.'],
+          estimate: {
+            kcal: { low: 430, likely: 520, high: 650 },
+            protein: { low: 35, likely: 45, high: 55 },
+            carbs: { low: 18, likely: 25, high: 35 },
+            fat: { low: 16, likely: 24, high: 34 }
+          },
+          rows: [{
+            name: 'Grilled chicken salad',
+            quantity: 1,
+            unit: 'serving',
+            kcal: 520,
+            protein: 45,
+            carbs: 25,
+            fat: 24,
+            source: 'menu_scan'
+          }]
+        }]
+      })
+    });
+  });
+  await boot(page);
+  await page.evaluate(() => {
+    localStorage.setItem('sous_profile', JSON.stringify({
+      targetKcal: 2000,
+      targetProtein: 130,
+      targetCarbs: 220,
+      targetFat: 70
+    }));
+    window.resizePhotoForEstimate = async () => ({
+      image: 'data:image/jpeg;base64,AA==',
+      bytes: 1,
+      width: 1,
+      height: 1
+    });
+  });
+
+  await page.getByTestId('menu-scan-open-btn').click();
+  await page.getByTestId('menu-scan-request').fill('I have one meal left and want a glass of prosecco with dinner');
+  await page.locator('#menu-scan-library-input').setInputFiles({
+    name: 'menu.png',
+    mimeType: 'image/png',
+    buffer: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=', 'base64')
+  });
+  await expect(page.getByTestId('menu-scan-status')).toContainText('Menu photo ready.');
+  await page.getByTestId('menu-scan-submit-btn').click();
+  await expect(page.getByTestId('menu-scan-results')).toContainText('Grilled chicken salad');
+  expect(menuScanPayload.currentDayTotals).toEqual({ kcal: 0, protein: 0, carbs: 0, fat: 0 });
+  await expect(page.getByTestId('menu-scan-results')).toContainText('Estimate confidence reflects menu readability and portion uncertainty');
+  await expect(page.getByTestId('menu-scan-results')).toContainText('Estimate confidence: medium');
+
+  await page.getByTestId('menu-scan-use-btn').click();
+  await expect(page.locator('#photo-estimate-modal')).toBeVisible();
+  await expect(page.locator('#photo-estimate-title')).toContainText('Review menu choice');
+  await expect(page.locator('#photo-items-list')).toContainText('Estimate confidence: medium');
+  await expect(page.locator('#photo-items-list')).toContainText('Qty/unit or grams · kcal · protein · carbs · fat');
+  await expect.poll(() => page.locator('#photo-items-list input[aria-label="Food name"]').evaluateAll(inputs => inputs.map(input => input.value))).toEqual([
+    'prosecco 125ml',
+    'Grilled chicken salad'
+  ]);
+  await expect.poll(() => page.evaluate(() => {
+    const log = JSON.parse(localStorage.getItem('sous_log') || '{}');
+    return Object.values(log).reduce((count, day) => count + (day.meals || []).length, 0);
+  })).toBe(0);
+
+  await page.locator('#photo-estimate-cancel-btn').click();
+  await expect(page.locator('#photo-estimate-modal')).toBeHidden();
+  await expect.poll(() => page.evaluate(() => {
+    const log = JSON.parse(localStorage.getItem('sous_log') || '{}');
+    return Object.values(log).reduce((count, day) => count + (day.meals || []).length, 0);
+  })).toBe(0);
+
+  await page.evaluate(() => window.useMenuScanSuggestion(0));
+  await page.locator('#photo-estimate-save-btn').click();
+  const saved = await page.evaluate(() => {
+    const day = Object.values(JSON.parse(localStorage.getItem('sous_log') || '{}'))[0];
+    const meal = day && day.meals && day.meals[0];
+    return {
+      mealSource: meal && meal.source,
+      rowSources: meal && meal.ingredients && meal.ingredients.map(item => item.source),
+      itemNames: meal && meal.ingredients && meal.ingredients.map(item => item.name)
+    };
+  });
+  expect(saved).toEqual({
+    mealSource: 'menu_scan',
+    rowSources: ['consumable_preset', 'menu_scan'],
+    itemNames: ['prosecco 125ml', 'Grilled chicken salad']
+  });
+});
+
+test('menu-scanned history meal can be photo-updated without changing other meals', async ({ page }) => {
+  let updatePayload = null;
+  await page.route('**/api/menu-scan/photo-update', route => {
+    updatePayload = route.request().postDataJSON();
+    return route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        mealName: 'Updated chicken salad',
+        source: 'menu_scan',
+        confidence: 'medium',
+        items: [
+          {
+            name: 'prosecco 125ml',
+            estimatedGrams: null,
+            calories: 86,
+            protein: 0.1,
+            carbs: 2.1,
+            fat: 0,
+            confidence: 'high',
+            notes: 'Reserved drink preserved.',
+            source: 'consumable_preset',
+            presetId: 'prosecco-125ml'
+          },
+          {
+            name: 'Actual grilled chicken salad',
+            estimatedGrams: null,
+            calories: 610,
+            protein: 50,
+            carbs: 22,
+            fat: 32,
+            confidence: 'medium',
+            notes: 'Updated from the plate photo.',
+            source: 'menu_scan',
+            presetId: null
+          }
+        ],
+        totals: { calories: 696, protein: 50.1, carbs: 24.1, fat: 32 },
+        notes: 'Updated from actual plate photo.'
+      })
+    });
+  });
+  await boot(page);
+  await page.evaluate(() => {
+    const d = new Date();
+    const pad = n => String(n).padStart(2, '0');
+    const today = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+    localStorage.setItem('sous_log', JSON.stringify({
+      [today]: {
+        meals: [
+          {
+            id: 101,
+            name: 'Manual toast',
+            time: new Date().toISOString(),
+            section: 'breakfast',
+            source: 'manual',
+            ingredients: [{ id: 1, name: 'Toast', weight: 60, kcal: 180, protein: 6, carbs: 32, fat: 3, source: 'manual' }],
+            savedIngredients: [{ id: 1, name: 'Toast', weight: 60, kcal: 180, protein: 6, carbs: 32, fat: 3, source: 'manual' }],
+            totals: { kcal: 180, protein: 6, carbs: 32, fat: 3, fibre: 0 }
+          },
+          {
+            id: 202,
+            name: 'Grilled chicken salad',
+            time: new Date().toISOString(),
+            section: 'dinner',
+            source: 'menu_scan',
+            confidence: 'medium',
+            ingredients: [
+              { id: 2, name: 'prosecco 125ml', weight: null, kcal: 86, protein: 0.1, carbs: 2.1, fat: 0, confidence: 'high', source: 'consumable_preset', presetId: 'prosecco-125ml' },
+              { id: 3, name: 'Grilled chicken salad', weight: null, kcal: 520, protein: 45, carbs: 25, fat: 24, confidence: 'medium', source: 'menu_scan' }
+            ],
+            savedIngredients: [],
+            totals: { kcal: 606, protein: 45.1, carbs: 27.1, fat: 24, fibre: 0 }
+          }
+        ],
+        totals: { kcal: 786, protein: 51.1, carbs: 59.1, fat: 27, fibre: 0 }
+      }
+    }));
+    window.resizePhotoForEstimate = async () => ({
+      image: 'data:image/jpeg;base64,AA==',
+      bytes: 1,
+      width: 1,
+      height: 1
+    });
+  });
+
+  await page.locator('.tab[data-tab="history"]').click();
+  await expect(page.getByText('Manual toast')).toBeVisible();
+  await expect(page.getByText('Grilled chicken salad', { exact: true })).toBeVisible();
+  await expect(page.getByTestId('menu-photo-update-btn')).toHaveCount(1);
+
+  await page.getByTestId('menu-photo-update-btn').click();
+  await page.locator('#photo-estimate-input').setInputFiles({
+    name: 'plate.png',
+    mimeType: 'image/png',
+    buffer: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=', 'base64')
+  });
+  await expect(page.locator('#photo-estimate-modal')).toBeVisible();
+  await expect(page.locator('#photo-estimate-title')).toContainText('Review updated menu estimate');
+  await expect.poll(() => page.locator('#photo-items-list input[aria-label="Food name"]').evaluateAll(inputs => inputs.map(input => input.value))).toEqual([
+    'prosecco 125ml',
+    'Actual grilled chicken salad'
+  ]);
+  expect(updatePayload.existingRows.map(row => row.source)).toEqual(['consumable_preset', 'menu_scan']);
+
+  await page.locator('#photo-estimate-cancel-btn').click();
+  await expect(page.locator('#photo-estimate-modal')).toBeHidden();
+  await expect.poll(() => page.evaluate(() => {
+    const day = Object.values(JSON.parse(localStorage.getItem('sous_log') || '{}'))[0];
+    return day.meals.map(meal => ({ name: meal.name, kcal: meal.totals.kcal, rows: meal.ingredients.map(row => row.name) }));
+  })).toEqual([
+    { name: 'Manual toast', kcal: 180, rows: ['Toast'] },
+    { name: 'Grilled chicken salad', kcal: 606, rows: ['prosecco 125ml', 'Grilled chicken salad'] }
+  ]);
+
+  await page.getByTestId('menu-photo-update-btn').click();
+  await page.locator('#photo-estimate-input').setInputFiles({
+    name: 'plate-2.png',
+    mimeType: 'image/png',
+    buffer: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=', 'base64')
+  });
+  await expect(page.locator('#photo-estimate-title')).toContainText('Review updated menu estimate');
+  await page.locator('#photo-estimate-save-btn').click();
+  const saved = await page.evaluate(() => {
+    const day = Object.values(JSON.parse(localStorage.getItem('sous_log') || '{}'))[0];
+    return day.meals.map(meal => ({
+      id: meal.id,
+      name: meal.name,
+      source: meal.source,
+      kcal: meal.totals.kcal,
+      rows: meal.ingredients.map(row => ({ name: row.name, source: row.source, kcal: row.kcal }))
+    }));
+  });
+  expect(saved).toEqual([
+    {
+      id: 101,
+      name: 'Manual toast',
+      source: 'manual',
+      kcal: 180,
+      rows: [{ name: 'Toast', source: 'manual', kcal: 180 }]
+    },
+    {
+      id: 202,
+      name: 'Updated chicken salad',
+      source: 'menu_scan',
+      kcal: 696,
+      rows: [
+        { name: 'prosecco 125ml', source: 'consumable_preset', kcal: 86 },
+        { name: 'Actual grilled chicken salad', source: 'menu_scan', kcal: 610 }
+      ]
+    }
+  ]);
+});
