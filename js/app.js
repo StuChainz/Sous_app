@@ -1534,6 +1534,7 @@ let _photoEstimateProgressTimer=null;
 let _photoEstimateProgressValue=0;
 let _photoEstimateProgressTarget=0;
 let _photoEstimateProgressActive=false;
+let _photoEstimateProgressLabel='Working';
 let _photoEstimateAdjustInProgress=false;
 let _photoEstimateLastAdjustError=null;
 let _photoEstimateManualDirty=false;
@@ -1594,13 +1595,18 @@ function setPhotoProgressVisible(show){
   const el=document.getElementById('photo-estimate-progress');
   if(el) el.style.display=show?'block':'none';
 }
+function photoProgressLabel(stage,pct){
+  if(/^could not/i.test(String(stage||''))) return 'Failed';
+  if(pct>=100) return 'Ready';
+  return _photoEstimateProgressLabel||'Working';
+}
 function renderPhotoProgress(stage){
   const pct=Math.max(0,Math.min(100,Math.round(_photoEstimateProgressValue)));
   const stageEl=document.getElementById('photo-progress-stage');
   const pctEl=document.getElementById('photo-progress-percent');
   const fill=document.getElementById('photo-progress-fill');
   if(stageEl&&stage) stageEl.textContent=stage;
-  if(pctEl) pctEl.textContent=pct+'%';
+  if(pctEl) pctEl.textContent=photoProgressLabel(stage,pct);
   if(fill) fill.style.width=pct+'%';
 }
 function stopPhotoProgress(){
@@ -1613,7 +1619,8 @@ function stopPhotoProgress(){
 function startPhotoProgress(stage='Loading photo',target=12){
   stopPhotoProgress();
   _photoEstimateProgressValue=0;
-  _photoEstimateProgressTarget=Math.max(0,Math.min(95,target));
+  _photoEstimateProgressTarget=Math.max(0,Math.min(88,target));
+  _photoEstimateProgressLabel='Working';
   _photoEstimateProgressActive=true;
   setPhotoProgressVisible(true);
   renderPhotoProgress(stage);
@@ -1622,27 +1629,30 @@ function startPhotoProgress(stage='Loading photo',target=12){
     if(!_photoEstimateProgressActive) return;
     if(_photoEstimateProgressValue>=_photoEstimateProgressTarget) return;
     const remaining=_photoEstimateProgressTarget-_photoEstimateProgressValue;
-    const step=Math.max(0.25,Math.min(2.4,remaining*0.12));
+    const step=Math.max(0.12,Math.min(1.1,remaining*0.06));
     _photoEstimateProgressValue=Math.min(_photoEstimateProgressTarget,_photoEstimateProgressValue+step);
     renderPhotoProgress();
-  },140);
+  },180);
 }
-function setPhotoProgressStage(stage,target){
+function setPhotoProgressStage(stage,target,label='Working'){
   if(!_photoEstimateProgressActive) startPhotoProgress(stage,target);
-  _photoEstimateProgressTarget=Math.max(_photoEstimateProgressValue,Math.min(98,Number(target)||_photoEstimateProgressTarget));
+  _photoEstimateProgressLabel=label||'Working';
+  _photoEstimateProgressTarget=Math.max(_photoEstimateProgressValue,Math.min(88,Number(target)||_photoEstimateProgressTarget));
   renderPhotoProgress(stage);
-  photoEstimateTrace('photo_progress_stage_changed',{stage,target:_photoEstimateProgressTarget});
+  photoEstimateTrace('photo_progress_stage_changed',{stage,target:_photoEstimateProgressTarget,label:_photoEstimateProgressLabel});
 }
 function completePhotoProgress(){
   if(!_photoEstimateProgressActive) setPhotoProgressVisible(true);
   stopPhotoProgress();
   _photoEstimateProgressValue=100;
   _photoEstimateProgressTarget=100;
+  _photoEstimateProgressLabel='Ready';
   renderPhotoProgress('Ready');
   photoEstimateTrace('photo_progress_completed');
 }
 function failPhotoProgress(message){
   stopPhotoProgress();
+  _photoEstimateProgressLabel='Failed';
   renderPhotoProgress('Could not estimate');
   photoEstimateTrace('photo_progress_failed',{message:String(message||'').slice(0,160)});
 }
@@ -2064,11 +2074,11 @@ async function adjustPhotoEstimate(){
   setPhotoAdjustStatus(_photoEstimateManualDirty?'Using your current edits as the starting point.':'Updating estimate...');
   if(_photoEstimateManualDirty) photoEstimateTrace('photo_adjust_preserved_manual_edits');
   photoEstimateTrace('photo_adjust_started',{correctionLength:correction.length,itemCount:_photoEstimateDraft.items?.length||0});
-  startPhotoProgress('Updating estimate',20);
+  startPhotoProgress('Updating estimate',12);
   try{
     const payload=buildPhotoAdjustPayload(correction);
     const adjustUrl=typeof window.sousApiUrl==='function'?window.sousApiUrl('/api/photo-estimate-adjust'):'/api/photo-estimate-adjust';
-    setPhotoProgressStage('Estimating meal',90);
+    setPhotoProgressStage('Estimating meal',72,'Estimating');
     const res=await fetch(adjustUrl,{
       method:'POST',
       headers:{'Content-Type':'application/json'},
@@ -2076,7 +2086,7 @@ async function adjustPhotoEstimate(){
     });
     const data=await res.json().catch(()=>({}));
     if(!res.ok) throw new Error(data.detail||data.error||'Could not update estimate.');
-    setPhotoProgressStage('Building review rows',98);
+    setPhotoProgressStage('Building review rows',88,'Reviewing');
     applyPhotoAdjustResult(data);
     completePhotoProgress();
     photoEstimateTrace('photo_adjust_success',{itemCount:_photoEstimateDraft.items?.length||0,serverAiMs:data?._timings?.aiMs??null});
@@ -2116,22 +2126,22 @@ async function handlePhotoEstimateFile(file){
   _photoEstimateDraft=null;
   setPhotoEstimatePreview(file);
   showPhotoEstimateModal({status:'Loading photo',showForm:false});
-  startPhotoProgress('Loading photo',14);
+  startPhotoProgress('Loading photo',8);
   startPhotoEstimateSlowTimer();
   try{
     setPhotoEstimateStatus('Compressing image');
-    setPhotoProgressStage('Compressing image',42);
+    setPhotoProgressStage('Compressing image',24,'Preparing');
     const resized=await resizePhotoForEstimate(file);
     const photoEstimateUrl=typeof window.sousApiUrl==='function'?window.sousApiUrl('/api/photo-estimate'):'/api/photo-estimate';
     setPhotoEstimateStatus('Uploading');
-    setPhotoProgressStage('Uploading',58);
+    setPhotoProgressStage('Uploading',38,'Uploading');
     photoEstimateTrace('upload_started',{
       resizedBytes:resized.bytes||0,
       width:resized.width||null,
       height:resized.height||null
     });
     setPhotoEstimateStatus('Estimating meal');
-    setPhotoProgressStage('Estimating meal',92);
+    setPhotoProgressStage('Estimating meal',72,'Estimating');
     photoEstimateTrace('ai_started',{route:'server'});
     const res=await fetch(photoEstimateUrl,{
       method:'POST',
@@ -2149,7 +2159,7 @@ async function handlePhotoEstimateFile(file){
       throw new Error(detail);
     }
     setPhotoEstimateStatus('Building editable rows');
-    setPhotoProgressStage('Building review rows',98);
+    setPhotoProgressStage('Building review rows',88,'Reviewing');
     renderPhotoEstimateReview(data);
   }catch(e){
     console.warn('[Sous Photo Estimate]',e);
