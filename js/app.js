@@ -1541,6 +1541,10 @@ let _photoEstimateManualDirty=false;
 let _photoEstimatePreviousDraft=null;
 const PHOTO_ESTIMATE_MAX_DIMENSION=1024;
 const PHOTO_ESTIMATE_JPEG_QUALITY=0.75;
+let _menuScanFile=null;
+let _menuScanPreviewUrl=null;
+let _menuScanInFlight=false;
+let _menuScanLastResult=null;
 
 function photoEstimateSafeMeta(meta={}){
   const safe={};
@@ -1819,6 +1823,216 @@ async function resizePhotoForEstimate(file){
     return {image:dataUrl,bytes:blob.size,width,height};
   }finally{
     decoded.close?.();
+  }
+}
+
+function menuScanRoundMacro(value,key='macro'){
+  const n=Number(value);
+  if(!Number.isFinite(n)) return 0;
+  return key==='kcal'?Math.round(n):Math.round(n*10)/10;
+}
+function menuScanMacroSet(value={}){
+  return {
+    kcal:menuScanRoundMacro(value.kcal,'kcal'),
+    protein:menuScanRoundMacro(value.protein),
+    carbs:menuScanRoundMacro(value.carbs),
+    fat:menuScanRoundMacro(value.fat)
+  };
+}
+function menuScanHasTargets(profile){
+  return ['targetKcal','targetProtein','targetCarbs','targetFat'].every(key=>{
+    const n=Number(profile?.[key]);
+    return Number.isFinite(n)&&n>0;
+  });
+}
+function menuScanProfileTargets(profile){
+  return {
+    kcal:menuScanRoundMacro(profile.targetKcal,'kcal'),
+    protein:menuScanRoundMacro(profile.targetProtein),
+    carbs:menuScanRoundMacro(profile.targetCarbs),
+    fat:menuScanRoundMacro(profile.targetFat)
+  };
+}
+function menuScanCurrentDayTotals(){
+  const date=selectedLogDate||localDateStr();
+  const day=(getLog()[date]||{}).totals||{};
+  return menuScanMacroSet(day);
+}
+function menuScanCurrentSection(){
+  if(typeof getJotMealWindow==='function') return getJotMealWindow();
+  if(typeof photoEstimateSectionDefault==='function') return photoEstimateSectionDefault();
+  return 'snacks';
+}
+function setMenuScanStatus(message='',tone=''){
+  const el=document.getElementById('menu-scan-status');
+  if(!el) return;
+  el.textContent=message;
+  el.dataset.tone=tone||'';
+}
+function setMenuScanBusy(busy){
+  _menuScanInFlight=!!busy;
+  const btn=document.getElementById('menu-scan-submit-btn');
+  if(btn){
+    btn.disabled=!!busy;
+    btn.textContent=busy?'Scanning...':'Scan';
+  }
+}
+function clearMenuScanResults(){
+  _menuScanLastResult=null;
+  const el=document.getElementById('menu-scan-results');
+  if(el) el.innerHTML='';
+}
+function setMenuScanPreview(file){
+  const img=document.getElementById('menu-scan-preview');
+  if(_menuScanPreviewUrl){
+    URL.revokeObjectURL(_menuScanPreviewUrl);
+    _menuScanPreviewUrl=null;
+  }
+  if(!img) return;
+  if(!file){
+    img.removeAttribute('src');
+    img.style.display='none';
+    return;
+  }
+  _menuScanPreviewUrl=URL.createObjectURL(file);
+  img.src=_menuScanPreviewUrl;
+  img.style.display='block';
+}
+function openMenuScanModal(){
+  const modal=document.getElementById('menu-scan-modal');
+  if(!modal) return;
+  clearMenuScanResults();
+  setMenuScanStatus('');
+  setMenuScanBusy(false);
+  _menuScanFile=null;
+  setMenuScanPreview(null);
+  ['menu-scan-input','menu-scan-library-input'].forEach(id=>{
+    const input=document.getElementById(id);
+    if(input) input.value='';
+  });
+  modal.style.display='flex';
+  requestAnimationFrame(()=>modal.classList.add('show'));
+}
+function closeMenuScanModal(){
+  const modal=document.getElementById('menu-scan-modal');
+  if(!modal) return;
+  setMenuScanBusy(false);
+  _menuScanFile=null;
+  setMenuScanPreview(null);
+  modal.classList.remove('show');
+  setTimeout(()=>{modal.style.display='none';},200);
+  ['menu-scan-input','menu-scan-library-input'].forEach(id=>{
+    const input=document.getElementById(id);
+    if(input) input.value='';
+  });
+}
+function openMenuScanCameraPicker(){
+  document.getElementById('menu-scan-input')?.click();
+}
+function openMenuScanLibraryPicker(){
+  document.getElementById('menu-scan-library-input')?.click();
+}
+function handleMenuScanFile(file){
+  if(!file) return;
+  _menuScanFile=file;
+  clearMenuScanResults();
+  setMenuScanStatus('Menu photo ready.');
+  setMenuScanPreview(file);
+}
+function menuScanFormatMacroSet(macros){
+  const m=menuScanMacroSet(macros||{});
+  return `<div class="menu-scan-macros">
+    <div class="menu-scan-macro"><b>${m.kcal}</b><span>kcal</span></div>
+    <div class="menu-scan-macro"><b>${m.protein}g</b><span>protein</span></div>
+    <div class="menu-scan-macro"><b>${m.carbs}g</b><span>carbs</span></div>
+    <div class="menu-scan-macro"><b>${m.fat}g</b><span>fat</span></div>
+  </div>`;
+}
+function menuScanEstimateLikely(estimate={}){
+  return {
+    kcal:estimate.kcal?.likely??0,
+    protein:estimate.protein?.likely??0,
+    carbs:estimate.carbs?.likely??0,
+    fat:estimate.fat?.likely??0
+  };
+}
+function renderMenuScanResults(data){
+  _menuScanLastResult=data;
+  const el=document.getElementById('menu-scan-results');
+  if(!el) return;
+  const reserved=Array.isArray(data?.reservedItems)?data.reservedItems:[];
+  const suggestions=Array.isArray(data?.suggestions)?data.suggestions:[];
+  let html='';
+  html+=`<div class="menu-scan-summary">`;
+  if(data?.requestSummary) html+=`<div class="menu-scan-summary-title">${photoEstimateEsc(data.requestSummary)}</div>`;
+  html+=`<div class="menu-scan-muted">Reserved: ${reserved.length?reserved.map(item=>photoEstimateEsc(item.name||'Reserved item')).join(', '):'None'}</div>`;
+  html+=`<div class="menu-scan-muted" style="margin-top:8px;">Remaining before reserved</div>`;
+  html+=menuScanFormatMacroSet(data?.remainingBefore);
+  html+=`<div class="menu-scan-muted" style="margin-top:8px;">Remaining after reserved</div>`;
+  html+=menuScanFormatMacroSet(data?.remainingAfterReserved);
+  html+=`</div>`;
+
+  if(!suggestions.length){
+    html+=`<div class="menu-scan-card"><div class="menu-scan-muted">No recommendations returned. Try a clearer menu photo.</div></div>`;
+  }
+  suggestions.slice(0,5).forEach(item=>{
+    const likely=menuScanEstimateLikely(item.estimate||{});
+    const warnings=[
+      item.portionAssumptions,
+      ...(Array.isArray(item.warnings)?item.warnings:[])
+    ].map(v=>String(v||'').trim()).filter(Boolean);
+    html+=`<div class="menu-scan-card">`;
+    html+=`<div class="menu-scan-card-head"><div class="menu-scan-card-title">${photoEstimateEsc(item.suggestedName||'Menu option')}</div><div class="menu-scan-confidence">${photoEstimateEsc(item.confidence||'low')}</div></div>`;
+    html+=menuScanFormatMacroSet(likely);
+    if(item.reason) html+=`<div class="menu-scan-muted" style="margin-top:8px;">${photoEstimateEsc(item.reason)}</div>`;
+    if(warnings.length) html+=`<div class="menu-scan-warning">${warnings.map(photoEstimateEsc).join('<br>')}</div>`;
+    html+=`<button class="btn-secondary" type="button" disabled>Use this — coming next</button>`;
+    html+=`</div>`;
+  });
+  el.innerHTML=html;
+}
+async function submitMenuScan(){
+  if(_menuScanInFlight) return;
+  const profile=getProfile();
+  if(!menuScanHasTargets(profile)){
+    setMenuScanStatus('Add macro targets in Profile before using menu recommendations.','warn');
+    return;
+  }
+  if(!_menuScanFile){
+    setMenuScanStatus('Choose a menu photo first.','warn');
+    return;
+  }
+  clearMenuScanResults();
+  setMenuScanBusy(true);
+  setMenuScanStatus('Preparing menu photo...');
+  try{
+    const resized=await resizePhotoForEstimate(_menuScanFile);
+    const menuScanUrl=typeof window.sousApiUrl==='function'?window.sousApiUrl('/api/menu-scan'):'/api/menu-scan';
+    setMenuScanStatus('Scanning menu...');
+    const res=await fetch(menuScanUrl,{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({
+        image:resized.image,
+        requestText:document.getElementById('menu-scan-request')?.value||'',
+        selectedDate:selectedLogDate||localDateStr(),
+        currentMealSection:menuScanCurrentSection(),
+        profileTargets:menuScanProfileTargets(profile),
+        currentDayTotals:menuScanCurrentDayTotals()
+      })
+    });
+    const data=await res.json().catch(()=>({}));
+    if(!res.ok){
+      const detail=data.detail||data.error||'Could not scan this menu.';
+      throw new Error(detail);
+    }
+    renderMenuScanResults(data);
+    setMenuScanStatus('Recommendations ready.');
+  }catch(e){
+    console.warn('[Sous Menu Scan]',e);
+    setMenuScanStatus(String(e?.message||'Could not scan this menu. Try another photo.'),'warn');
+  }finally{
+    setMenuScanBusy(false);
   }
 }
 function roundMacro(n){
@@ -2586,7 +2800,7 @@ function updateHome(){ if(currentTab==='home') renderHome(); }
 // ═══════════════════════════════════════════
 // PWA — MANIFEST + SERVICE WORKER
 // ═══════════════════════════════════════════
-const SOUS_CACHE_VERSION='sous-v16';
+const SOUS_CACHE_VERSION='sous-v17';
 
 window.__sousClearCachesAndReload=async function(){
   if('serviceWorker' in navigator){
@@ -2682,6 +2896,25 @@ function initPhotoEstimate(){
   document.getElementById('photo-adjust-revert-btn')?.addEventListener('click',revertPhotoEstimateAdjustment);
 }
 
+function initMenuScan(){
+  document.getElementById('menu-scan-open-btn')?.addEventListener('click',openMenuScanModal);
+  document.getElementById('menu-scan-camera-btn')?.addEventListener('click',openMenuScanCameraPicker);
+  document.getElementById('menu-scan-library-btn')?.addEventListener('click',openMenuScanLibraryPicker);
+  document.getElementById('menu-scan-input')?.addEventListener('change',e=>handleMenuScanFile(e.target.files&&e.target.files[0]));
+  document.getElementById('menu-scan-library-input')?.addEventListener('change',e=>handleMenuScanFile(e.target.files&&e.target.files[0]));
+  document.getElementById('menu-scan-submit-btn')?.addEventListener('click',submitMenuScan);
+  document.getElementById('menu-scan-close-btn')?.addEventListener('click',closeMenuScanModal);
+  document.getElementById('menu-scan-cancel-btn')?.addEventListener('click',closeMenuScanModal);
+  document.getElementById('menu-scan-modal')?.addEventListener('click',e=>{if(e.target===document.getElementById('menu-scan-modal'))closeMenuScanModal();});
+}
+
+window.openMenuScanModal=openMenuScanModal;
+window.__sousMenuScanState=()=>({
+  hasFile:!!_menuScanFile,
+  inFlight:!!_menuScanInFlight,
+  hasResult:!!_menuScanLastResult,
+  suggestionCount:Array.isArray(_menuScanLastResult?.suggestions)?_menuScanLastResult.suggestions.length:0
+});
 window.__sousPhotoTimingTrace=()=>_photoEstimateTrace.slice(-100);
 window.__sousLastPhotoError=()=>_photoEstimateLastError?{..._photoEstimateLastError}:null;
 window.__sousPhotoEstimateState=()=>({
@@ -2696,6 +2929,7 @@ function init(){
   updateClock(); setInterval(updateClock,10000);
   initDateNav();
   initPhotoEstimate();
+  initMenuScan();
   initJotStructuralUi();
   renderHome();
   wireLogButtons();

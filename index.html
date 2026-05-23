@@ -628,9 +628,12 @@ html,body{height:100%;height:var(--app-height);min-height:-webkit-fill-available
               <button class="photo-gallery-btn" type="button" onclick="openPhotoEstimateLibraryPicker()" data-testid="photo-estimate-library-btn" aria-label="Choose photo from gallery"><i class="ti ti-photo"></i></button>
             </div>
             <button class="btn-secondary" type="button" onclick="openBarcodeScannerFromHome()"><i class="ti ti-barcode"></i>Add from barcode</button>
+            <button class="btn-secondary wide menu-scan-open-btn" type="button" id="menu-scan-open-btn" data-testid="menu-scan-open-btn"><i class="ti ti-menu-2"></i>Scan menu</button>
           </div>
           <input id="photo-estimate-input" type="file" accept="image/*" capture="environment" style="position:absolute;width:1px;height:1px;opacity:0;pointer-events:none;overflow:hidden;">
           <input id="photo-estimate-library-input" type="file" accept="image/*" style="position:absolute;width:1px;height:1px;opacity:0;pointer-events:none;overflow:hidden;">
+          <input id="menu-scan-input" type="file" accept="image/*" capture="environment" style="position:absolute;width:1px;height:1px;opacity:0;pointer-events:none;overflow:hidden;">
+          <input id="menu-scan-library-input" type="file" accept="image/*" style="position:absolute;width:1px;height:1px;opacity:0;pointer-events:none;overflow:hidden;">
         </div>
 
         <div class="section home-bodyweight">
@@ -1456,6 +1459,36 @@ html,body{height:100%;height:var(--app-height);min-height:-webkit-fill-available
     <div class="btn-row" style="margin-top:14px;">
       <button class="btn-secondary" id="barcode-cancel-btn">Cancel</button>
       <button class="btn-primary" id="barcode-add-btn" style="flex:2;">Add to meal</button>
+    </div>
+  </div>
+</div>
+
+<!-- MENU SCANNER MODAL -->
+<div id="menu-scan-modal" class="modal-overlay" style="display:none">
+  <div class="modal-sheet menu-scan-sheet">
+    <div class="modal-header">
+      <span class="modal-title">Scan menu</span>
+      <button class="modal-close" id="menu-scan-close-btn">✕</button>
+    </div>
+    <div class="modal-panel">
+      <div class="menu-scan-controls">
+        <div class="menu-scan-pickers">
+          <button class="btn-secondary" type="button" id="menu-scan-camera-btn" data-testid="menu-scan-camera-btn"><i class="ti ti-camera"></i> Camera</button>
+          <button class="btn-secondary" type="button" id="menu-scan-library-btn" data-testid="menu-scan-library-btn"><i class="ti ti-photo"></i> Library</button>
+        </div>
+        <img id="menu-scan-preview" alt="" class="menu-scan-preview" style="display:none;">
+        <div class="custom-field-group">
+          <div class="custom-field-label">What do you want?</div>
+          <textarea id="menu-scan-request" class="custom-input menu-scan-request" rows="3" placeholder="e.g. I have one meal left and want a glass of prosecco with dinner" data-testid="menu-scan-request"></textarea>
+        </div>
+        <button class="btn-primary" type="button" id="menu-scan-submit-btn" data-testid="menu-scan-submit-btn">Scan</button>
+        <div id="menu-scan-status" class="menu-scan-status" data-testid="menu-scan-status"></div>
+      </div>
+      <div id="menu-scan-results" class="menu-scan-results" data-testid="menu-scan-results"></div>
+      <div class="menu-scan-note">Menu recommendations are approximate. Restaurant portions, oils, sauces, and prep can vary.</div>
+    </div>
+    <div class="btn-row" style="margin-top:14px;">
+      <button class="btn-secondary" id="menu-scan-cancel-btn">Close</button>
     </div>
   </div>
 </div>

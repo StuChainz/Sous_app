@@ -197,3 +197,23 @@ test('photo estimate offers camera and camera roll inputs', async ({ page }) => 
     hasLibraryOpener: true
   });
 });
+
+test('menu scanner controls render and require macro targets', async ({ page }) => {
+  let menuScanCalls = 0;
+  await page.route('**/api/menu-scan', route => {
+    menuScanCalls += 1;
+    route.fulfill({ status: 500, body: 'menu scan should not be called without targets' });
+  });
+  await boot(page);
+
+  await expect(page.getByTestId('menu-scan-open-btn')).toBeVisible();
+  await page.getByTestId('menu-scan-open-btn').click();
+  await expect(page.locator('#menu-scan-modal')).toBeVisible();
+  await expect(page.getByTestId('menu-scan-camera-btn')).toBeVisible();
+  await expect(page.getByTestId('menu-scan-library-btn')).toBeVisible();
+  await expect(page.getByTestId('menu-scan-request')).toHaveAttribute('placeholder', 'e.g. I have one meal left and want a glass of prosecco with dinner');
+
+  await page.getByTestId('menu-scan-submit-btn').click();
+  await expect(page.getByTestId('menu-scan-status')).toContainText('Add macro targets in Profile before using menu recommendations.');
+  expect(menuScanCalls).toBe(0);
+});
