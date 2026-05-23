@@ -10,6 +10,7 @@ const path = require('path');
 const {
   getConsumablePresets,
   findConsumablePresetByText,
+  resolveConsumablePresetQuantity,
   createConsumablePresetRow,
   createCustomConsumableEstimate
 } = require('./js/consumable-presets.js');
@@ -309,24 +310,59 @@ function normaliseReservedConsumableRow(row) {
     editable: row && row.editable !== undefined ? !!row.editable : true,
     loggable: row && row.loggable !== undefined ? !!row.loggable : true,
     reservable: row && row.reservable !== undefined ? !!row.reservable : true,
+    reservedQuantity: cleanMenuMacro(row && row.reservedQuantity) || 1,
+    servingLabel: cleanMenuText(row && row.servingLabel, 40),
     notes: String(row && row.notes || '')
   };
+}
+
+function titleCasePresetName(value) {
+  return String(value || '').replace(/\b[a-z]/g, char => char.toUpperCase());
+}
+
+function createReservedPresetRow(presetItem, requestText) {
+  const quantityInfo = resolveConsumablePresetQuantity(requestText, presetItem);
+  const multiplier = Math.max(1, Math.min(6, Math.round(Number(quantityInfo && quantityInfo.quantity) || 1)));
+  const baseQuantity = Number(presetItem && presetItem.defaultQuantity) || Number(presetItem && presetItem.quantity) || 1;
+  const unit = presetItem && (presetItem.defaultUnit || presetItem.unit) || 'serving';
+  const name = multiplier > 1
+    ? `${titleCasePresetName(presetItem.name)} × ${multiplier}`
+    : presetItem.name;
+
+  return createConsumablePresetRow(presetItem, {
+    id: `consumable_${presetItem.id}${multiplier > 1 ? `_x${multiplier}` : ''}`,
+    name,
+    quantity: unit === 'serving' ? multiplier : baseQuantity * multiplier,
+    unit,
+    kcal: (Number(presetItem.kcal) || 0) * multiplier,
+    protein: (Number(presetItem.protein) || 0) * multiplier,
+    carbs: (Number(presetItem.carbs) || 0) * multiplier,
+    fat: (Number(presetItem.fat) || 0) * multiplier,
+    reservedQuantity: multiplier,
+    servingLabel: quantityInfo && quantityInfo.servingLabel || `${multiplier} serving${multiplier === 1 ? '' : 's'}`,
+    notes: multiplier > 1 ? `${quantityInfo && quantityInfo.servingLabel || `${multiplier} servings`} reserved` : ''
+  });
 }
 
 function resolveReservedConsumables(requestText) {
   let remainingText = cleanMenuText(requestText, 1000);
   const knownPresetIds = new Set(getConsumablePresets().map(item => item.id));
-  const seen = new Set();
+  const rowsByPresetId = new Map();
   const rows = [];
 
   for (let i = 0; i < 12 && remainingText; i += 1) {
     const presetItem = findConsumablePresetByText(remainingText);
     if (!presetItem || !knownPresetIds.has(presetItem.id)) break;
 
-    if (!seen.has(presetItem.id)) {
-      const row = createConsumablePresetRow(presetItem);
-      if (row) rows.push(normaliseReservedConsumableRow(row));
-      seen.add(presetItem.id);
+    const row = normaliseReservedConsumableRow(createReservedPresetRow(presetItem, remainingText));
+    const existing = rowsByPresetId.get(presetItem.id);
+    if (!existing) {
+      rowsByPresetId.set(presetItem.id, row);
+      rows.push(row);
+    } else if ((row.reservedQuantity || 1) > (existing.reservedQuantity || 1)) {
+      rowsByPresetId.set(presetItem.id, row);
+      const index = rows.indexOf(existing);
+      if (index !== -1) rows[index] = row;
     }
 
     const nextText = removePresetPhrases(remainingText, presetItem);
@@ -931,6 +967,8 @@ app.post('/api/menu-scan', async (req, res) => {
       name: item.name,
       quantity: item.quantity,
       unit: item.unit,
+      reservedQuantity: item.reservedQuantity,
+      servingLabel: item.servingLabel,
       kcal: item.kcal,
       protein: item.protein,
       carbs: item.carbs,
@@ -1616,6 +1654,16 @@ app.post('/api/interpret-action', async (req, res) => {
 
 const HOST = process.env.HOST || '0.0.0.0';
 
-app.listen(PORT, HOST, () => {
-  console.log(`Sous proxy server running at http://${HOST}:${PORT}`);
-});
+if (require.main === module) {
+  app.listen(PORT, HOST, () => {
+    console.log(`Sous proxy server running at http://${HOST}:${PORT}`);
+  });
+}
+
+module.exports = {
+  app,
+  _test: {
+    resolveReservedConsumables,
+    remainingAfterMenuRows
+  }
+};

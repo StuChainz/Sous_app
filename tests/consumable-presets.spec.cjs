@@ -2,6 +2,7 @@ const { test, expect } = require('@playwright/test');
 const {
   findConsumablePresetByText,
   getConsumablePresets,
+  resolveConsumablePresetQuantity,
   createConsumablePresetRow,
   createCustomConsumableEstimate
 } = require('../js/consumable-presets.js');
@@ -20,6 +21,53 @@ test('matches beer can wording as a preset', () => {
   expect(findConsumablePresetByText('can of beer')?.id).toBe('beer-can-330ml');
   expect(findConsumablePresetByText('2 cans of beer')?.id).toBe('beer-can-330ml');
   expect(findConsumablePresetByText('two cans of beer')?.id).toBe('beer-can-330ml');
+  expect(findConsumablePresetByText('2 beers')?.id).toBe('beer-can-330ml');
+});
+
+test('extracts obvious consumable preset quantities', () => {
+  const beer = findConsumablePresetByText('can of beer');
+  const prosecco = findConsumablePresetByText('glass of prosecco');
+
+  expect(resolveConsumablePresetQuantity('can of beer', beer)).toMatchObject({ quantity: 1 });
+  expect(resolveConsumablePresetQuantity('2 cans of beer', beer)).toMatchObject({
+    quantity: 2,
+    servingLabel: '2 cans'
+  });
+  expect(resolveConsumablePresetQuantity('two cans of beer', beer)).toMatchObject({
+    quantity: 2,
+    servingLabel: '2 cans'
+  });
+  expect(resolveConsumablePresetQuantity('2 beers', beer)).toMatchObject({
+    quantity: 2,
+    servingLabel: '2 beers'
+  });
+  expect(resolveConsumablePresetQuantity('two beers', beer)).toMatchObject({
+    quantity: 2,
+    servingLabel: '2 beers'
+  });
+  expect(resolveConsumablePresetQuantity('glass of prosecco', prosecco)).toMatchObject({ quantity: 1 });
+  expect(resolveConsumablePresetQuantity('3 glasses of prosecco', prosecco)).toMatchObject({
+    quantity: 3,
+    servingLabel: '3 glasses'
+  });
+  expect(resolveConsumablePresetQuantity('prosecco with dinner', prosecco)).toMatchObject({ quantity: 1 });
+});
+
+test('server menu reservations multiply preset macros before subtracting remaining macros', () => {
+  const { _test } = require('../server.js');
+  const reserved = _test.resolveReservedConsumables('dinner options under 900 calories total with highest protein possible. 2 cans of beer already reserved.');
+
+  expect(reserved[0]).toMatchObject({
+    presetId: 'beer-can-330ml',
+    name: 'Beer Can 330ml × 2',
+    reservedQuantity: 2,
+    servingLabel: '2 cans',
+    kcal: 284,
+    protein: 3.4,
+    carbs: 23.2,
+    fat: 0
+  });
+  expect(_test.remainingAfterMenuRows({ kcal: 3032, protein: 0, carbs: 0, fat: 0 }, reserved).kcal).toBe(2748);
 });
 
 test('unknown consumable text returns null', () => {

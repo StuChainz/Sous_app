@@ -7,12 +7,12 @@
     alcohol:[
       preset('prosecco-125ml','prosecco 125ml',['prosecco','glass of prosecco','125ml prosecco'], 'alcohol',125,'ml',86,0.1,2.1,0,'high'),
       preset('champagne-125ml','champagne 125ml',['champagne','glass of champagne','125ml champagne'], 'alcohol',125,'ml',95,0.1,1.8,0,'high'),
-      preset('white-wine-125ml','white wine 125ml',['white wine','small white wine','glass of white wine','125ml white wine'], 'alcohol',125,'ml',94,0.1,0.8,0,'high'),
+      preset('white-wine-125ml','white wine 125ml',['white wine','small white wine','glass of white wine','glass of wine','glasses of wine','125ml white wine'], 'alcohol',125,'ml',94,0.1,0.8,0,'high'),
       preset('white-wine-175ml','white wine 175ml',['large white wine','175ml white wine'], 'alcohol',175,'ml',131,0.2,1.1,0,'high'),
       preset('red-wine-125ml','red wine 125ml',['red wine','small red wine','glass of red wine','125ml red wine'], 'alcohol',125,'ml',95,0.1,0.3,0,'high'),
       preset('red-wine-175ml','red wine 175ml',['large red wine','175ml red wine'], 'alcohol',175,'ml',133,0.2,0.4,0,'high'),
       preset('beer-pint-568ml','beer pint 568ml',['pint of beer','beer pint','568ml beer'], 'alcohol',568,'ml',182,2.3,17.1,0,'high'),
-      preset('beer-can-330ml','beer can 330ml',['beer can','can of beer','cans of beer','330ml beer can','2 cans of beer','two cans of beer'], 'alcohol',330,'ml',142,1.7,11.6,0,'high'),
+      preset('beer-can-330ml','beer can 330ml',['beer can','beer cans','beer','beers','can of beer','cans of beer','330ml beer can','2 cans of beer','two cans of beer'], 'alcohol',330,'ml',142,1.7,11.6,0,'high'),
       preset('beer-bottle-330ml','beer bottle 330ml',['bottle of beer','beer bottle','330ml beer'], 'alcohol',330,'ml',142,1.7,11.6,0,'high'),
       preset('lager-pint-568ml','lager pint 568ml',['pint of lager','lager pint','568ml lager'], 'alcohol',568,'ml',136,1.7,0,0,'high'),
       preset('cider-pint-568ml','cider pint 568ml',['pint of cider','cider pint','568ml cider'], 'alcohol',568,'ml',216,0,17,0,'medium'),
@@ -106,6 +106,67 @@
     return clone(matches[0].item);
   }
 
+  const QUANTITY_WORDS={one:1,two:2,three:3,four:4,five:5,six:6};
+
+  function escapeRegExp(value){
+    return String(value||'').replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
+  }
+
+  function clampServingQuantity(value){
+    const number=Number(value);
+    if(!Number.isFinite(number)) return 1;
+    return Math.min(6,Math.max(1,Math.round(number)));
+  }
+
+  function quantityTokenToNumber(value){
+    const token=String(value||'').toLowerCase().trim();
+    return clampServingQuantity(QUANTITY_WORDS[token]??token);
+  }
+
+  function pluralizeServingNoun(noun,quantity){
+    const clean=String(noun||'serving').toLowerCase().trim()||'serving';
+    if(quantity===1){
+      if(clean.endsWith('ies')) return `${clean.slice(0,-3)}y`;
+      if(clean.endsWith('s')) return clean.slice(0,-1);
+      return clean;
+    }
+    if(clean.endsWith('s')) return clean;
+    if(clean.endsWith('y')) return `${clean.slice(0,-1)}ies`;
+    return `${clean}s`;
+  }
+
+  function servingNounFromMatch(middle,phrase){
+    const words=`${middle||''} ${phrase||''}`.trim().split(/\s+/).filter(Boolean);
+    const preferred=['can','cans','glass','glasses','bottle','bottles','pint','pints','beer','beers'];
+    return preferred.find(noun=>words.includes(noun))||words[0]||'serving';
+  }
+
+  function resolveConsumablePresetQuantity(text,presetItem){
+    const normalized=normalizeText(text);
+    if(!normalized||!presetItem) return {quantity:1,servingLabel:'1 serving'};
+
+    const phrases=[presetItem.name,...(presetItem.aliases||[])]
+      .map(phrase=>normalizeText(phrase))
+      .filter(Boolean)
+      .sort((a,b)=>b.length-a.length);
+    const quantityPattern='(?:[1-6]|one|two|three|four|five|six)';
+
+    for(const phrase of phrases){
+      const phrasePattern=escapeRegExp(phrase).replace(/\s+/g,'\\s+');
+      const pattern=new RegExp(`(?:^|\\s)(${quantityPattern})(?:\\s+((?:[a-z]+\\s+){0,3}?))${phrasePattern}(?:\\s|$)`,'i');
+      const match=normalized.match(pattern);
+      if(!match) continue;
+      const quantity=quantityTokenToNumber(match[1]);
+      const noun=servingNounFromMatch(match[2],phrase);
+      return {
+        quantity,
+        servingLabel:`${quantity} ${pluralizeServingNoun(noun,quantity)}`
+      };
+    }
+
+    return {quantity:1,servingLabel:'1 serving'};
+  }
+
   function createConsumablePresetRow(presetItem,overrides={}){
     if(!presetItem) return null;
     const quantity=overrides.quantity??presetItem.defaultQuantity??presetItem.quantity??1;
@@ -136,6 +197,8 @@
       editable:overrides.editable??presetItem.editable??true,
       loggable:overrides.loggable??presetItem.loggable??true,
       reservable:overrides.reservable??presetItem.reservable??true,
+      reservedQuantity:overrides.reservedQuantity,
+      servingLabel:overrides.servingLabel,
       notes:overrides.notes||''
     };
     return row;
@@ -181,6 +244,7 @@
     CONSUMABLE_PRESETS:getConsumablePresets(),
     getConsumablePresets,
     findConsumablePresetByText,
+    resolveConsumablePresetQuantity,
     createConsumablePresetRow,
     createCustomConsumableEstimate
   };

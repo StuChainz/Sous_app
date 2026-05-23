@@ -1,4 +1,4 @@
-const CACHE_VERSION = 'sous-v19';
+const CACHE_VERSION = 'sous-v20';
 const APP_SHELL_CACHE = CACHE_VERSION;
 const APP_SHELL_ASSETS = [
   './',
