@@ -85,6 +85,7 @@ app.use([
   '/api/photo-estimate',
   '/api/photo-estimate-adjust',
   '/api/menu-scan',
+  '/api/menu-scan/photo-update',
   '/api/realtime/session',
   '/api/interpret',
   '/api/repair-transcript',
@@ -158,6 +159,106 @@ function normalisePhotoEstimate(parsed) {
 
   return {
     mealName: String(parsed && parsed.mealName || 'Photo meal').trim() || 'Photo meal',
+    confidence: clampConfidence(parsed && parsed.confidence),
+    items,
+    totals: {
+      calories: Math.round(rowTotals.calories),
+      protein: Math.round(rowTotals.protein * 10) / 10,
+      carbs: Math.round(rowTotals.carbs * 10) / 10,
+      fat: Math.round(rowTotals.fat * 10) / 10
+    },
+    notes: String(parsed && parsed.notes || '')
+  };
+}
+
+function menuScanPhotoUpdateSchema() {
+  return {
+    type: 'object',
+    additionalProperties: false,
+    properties: {
+      mealName: { type: 'string' },
+      confidence: { type: 'string', enum: ['low', 'medium', 'high'] },
+      items: {
+        type: 'array',
+        items: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            name: { type: 'string' },
+            estimatedGrams: { type: ['number', 'null'] },
+            calories: { type: 'number' },
+            protein: { type: 'number' },
+            carbs: { type: 'number' },
+            fat: { type: 'number' },
+            confidence: { type: 'string', enum: ['low', 'medium', 'high'] },
+            notes: { type: 'string' },
+            source: { type: 'string', enum: ['menu_scan', 'consumable_preset', 'consumable_ai_estimate'] },
+            presetId: { type: ['string', 'null'] }
+          },
+          required: ['name', 'estimatedGrams', 'calories', 'protein', 'carbs', 'fat', 'confidence', 'notes', 'source', 'presetId']
+        }
+      },
+      totals: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          calories: { type: 'number' },
+          protein: { type: 'number' },
+          carbs: { type: 'number' },
+          fat: { type: 'number' }
+        },
+        required: ['calories', 'protein', 'carbs', 'fat']
+      },
+      notes: { type: 'string' }
+    },
+    required: ['mealName', 'confidence', 'items', 'totals', 'notes']
+  };
+}
+
+function normaliseMenuScanPhotoRows(rows) {
+  if (!Array.isArray(rows)) return [];
+  return rows.slice(0, 20)
+    .filter(row => row && typeof row === 'object')
+    .map(row => ({
+      name: String(row.name || '').trim().slice(0, 140),
+      estimatedGrams: cleanNullableGrams(row.estimatedGrams ?? row.grams ?? row.weight),
+      calories: cleanNumber(row.calories ?? row.kcal),
+      protein: cleanNumber(row.protein),
+      carbs: cleanNumber(row.carbs),
+      fat: cleanNumber(row.fat),
+      confidence: clampConfidence(row.confidence),
+      notes: String(row.notes || '').slice(0, 260),
+      source: ['menu_scan', 'consumable_preset', 'consumable_ai_estimate'].includes(row.source) ? row.source : 'menu_scan',
+      presetId: row.presetId ? String(row.presetId).slice(0, 120) : null
+    }))
+    .filter(row => row.name);
+}
+
+function normaliseMenuScanPhotoUpdate(parsed) {
+  const rawItems = Array.isArray(parsed && parsed.items) ? parsed.items : [];
+  const items = rawItems
+    .filter(item => item && typeof item === 'object')
+    .map(item => ({
+      name: String(item.name || 'Menu item').trim() || 'Menu item',
+      estimatedGrams: cleanNullableGrams(item.estimatedGrams),
+      calories: cleanNumber(item.calories),
+      protein: cleanNumber(item.protein),
+      carbs: cleanNumber(item.carbs),
+      fat: cleanNumber(item.fat),
+      confidence: clampConfidence(item.confidence || parsed.confidence),
+      notes: String(item.notes || ''),
+      source: ['menu_scan', 'consumable_preset', 'consumable_ai_estimate'].includes(item.source) ? item.source : 'menu_scan',
+      presetId: item.presetId ? String(item.presetId) : null
+    }));
+  const rowTotals = items.reduce((totals, item) => ({
+    calories: totals.calories + item.calories,
+    protein: totals.protein + item.protein,
+    carbs: totals.carbs + item.carbs,
+    fat: totals.fat + item.fat
+  }), { calories: 0, protein: 0, carbs: 0, fat: 0 });
+  return {
+    mealName: String(parsed && parsed.mealName || 'Updated menu meal').trim() || 'Updated menu meal',
+    source: 'menu_scan',
     confidence: clampConfidence(parsed && parsed.confidence),
     items,
     totals: {
@@ -921,6 +1022,124 @@ app.post('/api/photo-estimate', async (req, res) => {
   } catch (err) {
     console.error('[Sous Photo Estimate] error', err.message);
     res.status(500).json(errorBody('Photo estimate request failed.', 'detail', err.message));
+  }
+});
+
+app.post('/api/menu-scan/photo-update', async (req, res) => {
+  const receivedAt = Date.now();
+  const { image, existingRows, mealName = '', notes = '', section = null } = req.body || {};
+
+  if (!image || typeof image !== 'string' || !image.startsWith('data:image/')) {
+    return res.status(400).json({ error: 'A compressed image data URL is required.' });
+  }
+
+  const rows = normaliseMenuScanPhotoRows(existingRows);
+  const hasMenuScanRow = rows.some(row => row.source === 'menu_scan' || row.source === 'consumable_ai_estimate');
+  if (!rows.length || !hasMenuScanRow) {
+    return res.status(400).json({ error: 'Existing menu-scan rows are required for photo update.' });
+  }
+
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) {
+    return res.status(500).json({ error: 'OPENAI_API_KEY is not set on the server.' });
+  }
+
+  const prompt = [
+    'Update a previously saved menu-scan meal estimate using the actual visible plate photo.',
+    'Return JSON only. Estimates remain approximate and user-editable.',
+    'Use the existing rows as the starting point. Adjust only the selected menu-scanned meal.',
+    'Do not invent unrelated foods or add items that are not visible and not already in the existing rows.',
+    'Preserve obvious reserved drinks or extras from existing rows if they are not visible, unless the photo clearly contradicts them.',
+    'Keep reserved preset rows as source "consumable_preset". Keep menu dish rows as source "menu_scan".',
+    'Break the updated estimate into editable item-level rows with conservative restaurant assumptions.',
+    section ? `Meal section: ${String(section).slice(0, 40)}` : null,
+    mealName ? `Original meal name: ${String(mealName).slice(0, 160)}` : null,
+    notes ? `Original notes: ${String(notes).slice(0, 800)}` : null,
+    `Existing rows: ${JSON.stringify(rows).slice(0, 7000)}`
+  ].filter(Boolean).join('\n');
+
+  try {
+    const aiStartedAt = Date.now();
+    const upstream = await fetch('https://api.openai.com/v1/responses', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`
+      },
+      body: JSON.stringify({
+        model: 'gpt-4.1-mini',
+        input: [{
+          role: 'user',
+          content: [
+            { type: 'input_text', text: prompt },
+            { type: 'input_image', image_url: image }
+          ]
+        }],
+        text: {
+          format: {
+            type: 'json_schema',
+            name: 'menu_scan_photo_update',
+            strict: true,
+            schema: menuScanPhotoUpdateSchema()
+          }
+        }
+      })
+    });
+    const aiFinishedAt = Date.now();
+
+    const text = await upstream.text();
+    let data = null;
+    try { data = text ? JSON.parse(text) : null; } catch {}
+
+    if (!upstream.ok) {
+      return res.status(upstream.status).json(errorBody(
+        `OpenAI error: ${upstream.status}`,
+        'detail',
+        data && data.error ? data.error.message || data.error : text
+      ));
+    }
+
+    let rawText = '';
+    if (typeof data.output_text === 'string') {
+      rawText = data.output_text;
+    } else if (Array.isArray(data.output)) {
+      rawText = data.output
+        .flatMap(item => Array.isArray(item.content) ? item.content : [])
+        .map(part => part.text || part.output_text || '')
+        .filter(Boolean)
+        .join('\n');
+    }
+
+    let parsed;
+    try {
+      parsed = JSON.parse(rawText);
+    } catch {
+      return res.status(502).json(errorBody('Invalid JSON returned by OpenAI.', 'raw', rawText));
+    }
+
+    const estimate = normaliseMenuScanPhotoUpdate(parsed);
+    if (!estimate.items.length) {
+      return res.status(422).json({ error: 'No updated menu-scan rows were returned.', recoverable: true });
+    }
+
+    res.json({
+      ...estimate,
+      reviewTitle: 'Review updated menu estimate',
+      saveLabel: 'Update meal',
+      disableAdjust: true,
+      reviewNote: 'Review and edit before replacing this saved menu-scan meal. Estimates are approximate.',
+      _timings: {
+        receivedAt,
+        aiStartedAt,
+        aiFinishedAt,
+        aiMs: aiFinishedAt - aiStartedAt,
+        totalMs: Date.now() - receivedAt,
+        imageBytesApprox: Math.round((image.length * 3) / 4)
+      }
+    });
+  } catch (err) {
+    console.error('[Sous Menu Scan Photo Update] error', err.message);
+    res.status(500).json(errorBody('Menu scan photo update failed.', 'detail', err.message));
   }
 });
 
