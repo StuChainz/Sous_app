@@ -248,11 +248,24 @@
     return null;
   }
 
+  function getPhotoEstimateState(){
+    try{
+      if(typeof window.__sousPhotoEstimateState==='function') return clonePlain(window.__sousPhotoEstimateState());
+    }catch(e){}
+    return {
+      hasPhotoEstimate:false,
+      photoEstimateItemCount:0,
+      photoAdjustInProgress:false,
+      lastPhotoAdjustError:null
+    };
+  }
+
   function buildBugReport(note=''){
     let appVersion=null;
     try{
       appVersion=typeof SOUS_CACHE_VERSION!=='undefined'?SOUS_CACHE_VERSION:null;
     }catch(e){}
+    const photoEstimateState=getPhotoEstimateState();
     return {
       testerNote:String(note||'').trim(),
       timestamp:new Date().toISOString(),
@@ -271,6 +284,11 @@
       voiceTrace:getVoiceTrace(),
       voiceDecisionTrace:getVoiceDecisionTrace(),
       voiceTestEvents:getVoiceTestEvents(),
+      photoEstimateState,
+      hasPhotoEstimate:photoEstimateState.hasPhotoEstimate,
+      photoEstimateItemCount:photoEstimateState.photoEstimateItemCount,
+      photoAdjustInProgress:photoEstimateState.photoAdjustInProgress,
+      lastPhotoAdjustError:photoEstimateState.lastPhotoAdjustError,
       photoTimingTrace:getPhotoTimingTrace(),
       barcodeTimingTrace:getBarcodeTimingTrace(),
       lastPhotoEstimateError:getLastPhotoError(),

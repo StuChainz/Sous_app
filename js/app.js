@@ -1530,6 +1530,14 @@ let _photoEstimateTraceStart=0;
 let _photoEstimateLastError=null;
 let _photoEstimatePreviewUrl=null;
 let _photoEstimateSlowTimer=null;
+let _photoEstimateProgressTimer=null;
+let _photoEstimateProgressValue=0;
+let _photoEstimateProgressTarget=0;
+let _photoEstimateProgressActive=false;
+let _photoEstimateAdjustInProgress=false;
+let _photoEstimateLastAdjustError=null;
+let _photoEstimateManualDirty=false;
+let _photoEstimatePreviousDraft=null;
 const PHOTO_ESTIMATE_MAX_DIMENSION=1024;
 const PHOTO_ESTIMATE_JPEG_QUALITY=0.75;
 
@@ -1546,6 +1554,7 @@ function resetPhotoEstimateTrace(){
   _photoEstimateTraceStart=performance?.now?performance.now():Date.now();
   _photoEstimateTrace=[];
   _photoEstimateLastError=null;
+  _photoEstimateLastAdjustError=null;
 }
 function photoEstimateTrace(event,meta={}){
   if(!_photoEstimateTraceStart) resetPhotoEstimateTrace();
@@ -1574,6 +1583,68 @@ function setPhotoEstimateStatus(message){
   if(!statusEl) return;
   statusEl.style.display=message?'block':'none';
   statusEl.textContent=message||'';
+}
+function setPhotoAdjustStatus(message,tone=''){
+  const el=document.getElementById('photo-adjust-status');
+  if(!el) return;
+  el.textContent=message||'';
+  el.dataset.tone=tone||'';
+}
+function setPhotoProgressVisible(show){
+  const el=document.getElementById('photo-estimate-progress');
+  if(el) el.style.display=show?'block':'none';
+}
+function renderPhotoProgress(stage){
+  const pct=Math.max(0,Math.min(100,Math.round(_photoEstimateProgressValue)));
+  const stageEl=document.getElementById('photo-progress-stage');
+  const pctEl=document.getElementById('photo-progress-percent');
+  const fill=document.getElementById('photo-progress-fill');
+  if(stageEl&&stage) stageEl.textContent=stage;
+  if(pctEl) pctEl.textContent=pct+'%';
+  if(fill) fill.style.width=pct+'%';
+}
+function stopPhotoProgress(){
+  _photoEstimateProgressActive=false;
+  if(_photoEstimateProgressTimer){
+    clearInterval(_photoEstimateProgressTimer);
+    _photoEstimateProgressTimer=null;
+  }
+}
+function startPhotoProgress(stage='Loading photo',target=12){
+  stopPhotoProgress();
+  _photoEstimateProgressValue=0;
+  _photoEstimateProgressTarget=Math.max(0,Math.min(95,target));
+  _photoEstimateProgressActive=true;
+  setPhotoProgressVisible(true);
+  renderPhotoProgress(stage);
+  photoEstimateTrace('photo_progress_started',{stage,target:_photoEstimateProgressTarget});
+  _photoEstimateProgressTimer=setInterval(()=>{
+    if(!_photoEstimateProgressActive) return;
+    if(_photoEstimateProgressValue>=_photoEstimateProgressTarget) return;
+    const remaining=_photoEstimateProgressTarget-_photoEstimateProgressValue;
+    const step=Math.max(0.25,Math.min(2.4,remaining*0.12));
+    _photoEstimateProgressValue=Math.min(_photoEstimateProgressTarget,_photoEstimateProgressValue+step);
+    renderPhotoProgress();
+  },140);
+}
+function setPhotoProgressStage(stage,target){
+  if(!_photoEstimateProgressActive) startPhotoProgress(stage,target);
+  _photoEstimateProgressTarget=Math.max(_photoEstimateProgressValue,Math.min(98,Number(target)||_photoEstimateProgressTarget));
+  renderPhotoProgress(stage);
+  photoEstimateTrace('photo_progress_stage_changed',{stage,target:_photoEstimateProgressTarget});
+}
+function completePhotoProgress(){
+  if(!_photoEstimateProgressActive) setPhotoProgressVisible(true);
+  stopPhotoProgress();
+  _photoEstimateProgressValue=100;
+  _photoEstimateProgressTarget=100;
+  renderPhotoProgress('Ready');
+  photoEstimateTrace('photo_progress_completed');
+}
+function failPhotoProgress(message){
+  stopPhotoProgress();
+  renderPhotoProgress('Could not estimate');
+  photoEstimateTrace('photo_progress_failed',{message:String(message||'').slice(0,160)});
 }
 function clearPhotoEstimateSlowTimer(){
   if(_photoEstimateSlowTimer){
@@ -1625,6 +1696,12 @@ function closePhotoEstimateModal(){
   const modal=document.getElementById('photo-estimate-modal');
   if(!modal) return;
   clearPhotoEstimateSlowTimer();
+  stopPhotoProgress();
+  setPhotoProgressVisible(false);
+  _photoEstimateAdjustInProgress=false;
+  _photoEstimatePreviousDraft=null;
+  _photoEstimateManualDirty=false;
+  setPhotoAdjustStatus('');
   setPhotoEstimatePreview(null);
   modal.classList.remove('show');
   setTimeout(()=>{modal.style.display='none';},200);
@@ -1776,9 +1853,34 @@ function normalisePhotoEstimateItems(estimate){
     protein:roundMacro(item.protein),
     carbs:roundMacro(item.carbs),
     fat:roundMacro(item.fat),
+    fibre:roundMacro(item.fibre??item.fiber),
     confidence:item.confidence||estimate?.confidence||'low',
     notes:item.notes||''
   }));
+}
+function normalisePhotoAdjustItems(adjustment){
+  const rawItems=Array.isArray(adjustment?.items)?adjustment.items:[];
+  return rawItems.map((item,idx)=>({
+    id:'photo_'+Date.now()+'_adj_'+idx,
+    name:(item.name||'Photo item').trim()||'Photo item',
+    estimatedGrams:item.grams!=null?Math.round(Number(item.grams)||0):null,
+    calories:Math.max(0,Math.round(Number(item.kcal??item.calories)||0)),
+    protein:roundMacro(item.protein),
+    carbs:roundMacro(item.carbs),
+    fat:roundMacro(item.fat),
+    fibre:roundMacro(item.fibre??item.fiber),
+    confidence:item.confidence||'low',
+    notes:item.reason||item.notes||''
+  })).filter(item=>item.name);
+}
+function clonePhotoEstimateDraft(draft=_photoEstimateDraft){
+  if(!draft) return null;
+  try{return JSON.parse(JSON.stringify(draft));}
+  catch(e){return null;}
+}
+function markPhotoEstimateManualEdit(){
+  if(_photoEstimateAdjustInProgress) return;
+  _photoEstimateManualDirty=true;
 }
 function photoEstimateTotalsFromItems(items){
   return (items||[]).reduce((tot,item)=>({
@@ -1839,17 +1941,17 @@ function renderPhotoEstimateItemRows(){
     const rowNote=item.notes?`<div style="font-size:11px;color:var(--text-muted);margin-top:5px;">${photoEstimateEsc(item.notes)}</div>`:'';
     html+=`<div style="background:var(--card);border:.5px solid var(--border);border-radius:8px;padding:8px 10px;margin-bottom:8px;">`;
     html+=`<div style="display:flex;gap:6px;align-items:center;margin-bottom:6px;">`;
-    html+=`<input type="text" class="custom-input" id="photo-item-name-${id}" value="${photoEstimateEsc(item.name)}" oninput="photoEstimateSyncRows()" aria-label="Food name" style="flex:1;min-width:0;padding:7px 8px;font-size:13px;">`;
+    html+=`<input type="text" class="custom-input" id="photo-item-name-${id}" value="${photoEstimateEsc(item.name)}" oninput="markPhotoEstimateManualEdit();photoEstimateSyncRows()" aria-label="Food name" style="flex:1;min-width:0;padding:7px 8px;font-size:13px;">`;
     html+=`<button type="button" onclick="deletePhotoEstimateItem('${id}')" title="Remove item" aria-label="Remove item" style="background:none;border:none;padding:4px 7px;cursor:pointer;color:var(--text-muted);font-size:16px;">✕</button>`;
     html+=`</div>`;
     html+=`<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:5px;margin-bottom:5px;">`;
-    html+=`<input type="number" class="custom-input" id="photo-item-grams-${id}" value="${grams}" min="0" placeholder="g" oninput="photoEstimateSyncRows()" aria-label="Estimated grams" style="padding:6px 7px;font-size:12px;">`;
-    html+=`<input type="number" class="custom-input" id="photo-item-kcal-${id}" value="${Math.round(Number(item.calories)||0)}" min="0" placeholder="kcal" oninput="photoEstimateSyncRows()" aria-label="Calories" style="padding:6px 7px;font-size:12px;">`;
-    html+=`<input type="number" class="custom-input" id="photo-item-protein-${id}" value="${roundMacro(item.protein)}" min="0" step="0.1" placeholder="protein" oninput="photoEstimateSyncRows()" aria-label="Protein" style="padding:6px 7px;font-size:12px;">`;
+    html+=`<input type="number" class="custom-input" id="photo-item-grams-${id}" value="${grams}" min="0" placeholder="g" oninput="markPhotoEstimateManualEdit();photoEstimateSyncRows()" aria-label="Estimated grams" style="padding:6px 7px;font-size:12px;">`;
+    html+=`<input type="number" class="custom-input" id="photo-item-kcal-${id}" value="${Math.round(Number(item.calories)||0)}" min="0" placeholder="kcal" oninput="markPhotoEstimateManualEdit();photoEstimateSyncRows()" aria-label="Calories" style="padding:6px 7px;font-size:12px;">`;
+    html+=`<input type="number" class="custom-input" id="photo-item-protein-${id}" value="${roundMacro(item.protein)}" min="0" step="0.1" placeholder="protein" oninput="markPhotoEstimateManualEdit();photoEstimateSyncRows()" aria-label="Protein" style="padding:6px 7px;font-size:12px;">`;
     html+=`</div>`;
     html+=`<div style="display:grid;grid-template-columns:1fr 1fr;gap:5px;">`;
-    html+=`<input type="number" class="custom-input" id="photo-item-carbs-${id}" value="${roundMacro(item.carbs)}" min="0" step="0.1" placeholder="carbs" oninput="photoEstimateSyncRows()" aria-label="Carbs" style="padding:6px 7px;font-size:12px;">`;
-    html+=`<input type="number" class="custom-input" id="photo-item-fat-${id}" value="${roundMacro(item.fat)}" min="0" step="0.1" placeholder="fat" oninput="photoEstimateSyncRows()" aria-label="Fat" style="padding:6px 7px;font-size:12px;">`;
+    html+=`<input type="number" class="custom-input" id="photo-item-carbs-${id}" value="${roundMacro(item.carbs)}" min="0" step="0.1" placeholder="carbs" oninput="markPhotoEstimateManualEdit();photoEstimateSyncRows()" aria-label="Carbs" style="padding:6px 7px;font-size:12px;">`;
+    html+=`<input type="number" class="custom-input" id="photo-item-fat-${id}" value="${roundMacro(item.fat)}" min="0" step="0.1" placeholder="fat" oninput="markPhotoEstimateManualEdit();photoEstimateSyncRows()" aria-label="Fat" style="padding:6px 7px;font-size:12px;">`;
     html+=`</div>`;
     html+=`<div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.04em;margin-top:5px;">grams · kcal · protein${confidence}</div>`;
     html+=rowNote;
@@ -1860,6 +1962,7 @@ function renderPhotoEstimateItemRows(){
 }
 function setPhotoEstimatePortion(value){
   if(!_photoEstimateDraft) return;
+  markPhotoEstimateManualEdit();
   photoEstimateSyncRows();
   const next=Number(value)||1;
   const prev=Number(_photoEstimatePortion)||1;
@@ -1877,12 +1980,15 @@ function setPhotoEstimatePortion(value){
 }
 function deletePhotoEstimateItem(id){
   if(!_photoEstimateDraft) return;
+  markPhotoEstimateManualEdit();
   photoEstimateSyncRows();
   _photoEstimateDraft.items=(_photoEstimateDraft.items||[]).filter(item=>item.id!==id);
   renderPhotoEstimateItemRows();
 }
 function renderPhotoEstimateReview(estimate){
   _photoEstimatePortion=1;
+  _photoEstimateManualDirty=false;
+  _photoEstimatePreviousDraft=null;
   _photoEstimateDraft={
     mealName:estimate?.mealName||'Restaurant meal',
     confidence:estimate?.confidence||'low',
@@ -1894,9 +2000,111 @@ function renderPhotoEstimateReview(estimate){
   document.getElementById('photo-meal-section').value=photoEstimateSectionDefault();
   const portion=document.getElementById('photo-portion-select');
   if(portion) portion.value='1';
+  const adjustInput=document.getElementById('photo-adjust-input');
+  const revertBtn=document.getElementById('photo-adjust-revert-btn');
+  if(adjustInput) adjustInput.value='';
+  if(revertBtn) revertBtn.style.display='none';
+  setPhotoAdjustStatus('');
   renderPhotoEstimateItemRows();
   photoEstimateTrace('review_rows_rendered',{itemCount:_photoEstimateDraft.items.length});
+  completePhotoProgress();
   showPhotoEstimateModal({showForm:true});
+}
+function buildPhotoAdjustPayload(correction){
+  photoEstimateSyncRows();
+  const section=document.getElementById('photo-meal-section')?.value||photoEstimateSectionDefault();
+  return {
+    correction,
+    section,
+    date:selectedLogDate||localDateStr(),
+    previousEstimate:{
+      mealName:(document.getElementById('photo-meal-name')?.value||_photoEstimateDraft?.mealName||'Restaurant meal').trim(),
+      confidence:_photoEstimateDraft?.confidence||'low',
+      notes:_photoEstimateDraft?.notes||'',
+      items:(_photoEstimateDraft?.items||[]).map(item=>({
+        name:item.name,
+        estimatedGrams:item.estimatedGrams,
+        calories:item.calories,
+        protein:item.protein,
+        carbs:item.carbs,
+        fat:item.fat,
+        fibre:item.fibre||0,
+        confidence:item.confidence||'low',
+        notes:item.notes||''
+      }))
+    }
+  };
+}
+function applyPhotoAdjustResult(data){
+  const items=normalisePhotoAdjustItems(data);
+  if(!items.length) throw new Error('No revised rows returned.');
+  _photoEstimateDraft={
+    ..._photoEstimateDraft,
+    items,
+    notes:[data.summary||'',...(Array.isArray(data.warnings)?data.warnings:[])].filter(Boolean).join('\n')
+  };
+  renderPhotoEstimateItemRows();
+  photoEstimateTrace('photo_adjust_replaced_rows',{itemCount:items.length});
+  const revertBtn=document.getElementById('photo-adjust-revert-btn');
+  if(revertBtn) revertBtn.style.display=_photoEstimatePreviousDraft?'inline-flex':'none';
+  _photoEstimateManualDirty=false;
+}
+async function adjustPhotoEstimate(){
+  if(!_photoEstimateDraft||_photoEstimateAdjustInProgress) return;
+  const input=document.getElementById('photo-adjust-input');
+  const correction=(input?.value||'').trim();
+  if(!correction){
+    setPhotoAdjustStatus('Type what needs changing first.','warn');
+    return;
+  }
+  _photoEstimateAdjustInProgress=true;
+  _photoEstimatePreviousDraft=clonePhotoEstimateDraft();
+  const btn=document.getElementById('photo-adjust-btn');
+  if(btn) btn.disabled=true;
+  setPhotoAdjustStatus(_photoEstimateManualDirty?'Using your current edits as the starting point.':'Updating estimate...');
+  if(_photoEstimateManualDirty) photoEstimateTrace('photo_adjust_preserved_manual_edits');
+  photoEstimateTrace('photo_adjust_started',{correctionLength:correction.length,itemCount:_photoEstimateDraft.items?.length||0});
+  startPhotoProgress('Updating estimate',20);
+  try{
+    const payload=buildPhotoAdjustPayload(correction);
+    const adjustUrl=typeof window.sousApiUrl==='function'?window.sousApiUrl('/api/photo-estimate-adjust'):'/api/photo-estimate-adjust';
+    setPhotoProgressStage('Estimating meal',90);
+    const res=await fetch(adjustUrl,{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify(payload)
+    });
+    const data=await res.json().catch(()=>({}));
+    if(!res.ok) throw new Error(data.detail||data.error||'Could not update estimate.');
+    setPhotoProgressStage('Building review rows',98);
+    applyPhotoAdjustResult(data);
+    completePhotoProgress();
+    photoEstimateTrace('photo_adjust_success',{itemCount:_photoEstimateDraft.items?.length||0,serverAiMs:data?._timings?.aiMs??null});
+    if(input) input.value='';
+    setPhotoAdjustStatus('Estimate updated. Review the rows before saving.');
+  }catch(e){
+    console.warn('[Sous Photo Adjust]',e);
+    _photoEstimateLastAdjustError={
+      t:new Date().toISOString(),
+      message:String(e?.message||e||'Could not update estimate.').slice(0,240)
+    };
+    failPhotoProgress(_photoEstimateLastAdjustError.message);
+    photoEstimateTrace('photo_adjust_failed',_photoEstimateLastAdjustError);
+    setPhotoAdjustStatus(_photoEstimateLastAdjustError.message,'warn');
+  }finally{
+    _photoEstimateAdjustInProgress=false;
+    if(btn) btn.disabled=false;
+  }
+}
+function revertPhotoEstimateAdjustment(){
+  if(!_photoEstimatePreviousDraft) return;
+  _photoEstimateDraft=clonePhotoEstimateDraft(_photoEstimatePreviousDraft);
+  _photoEstimatePreviousDraft=null;
+  _photoEstimateManualDirty=false;
+  renderPhotoEstimateItemRows();
+  const revertBtn=document.getElementById('photo-adjust-revert-btn');
+  if(revertBtn) revertBtn.style.display='none';
+  setPhotoAdjustStatus('Previous estimate restored.');
 }
 async function handlePhotoEstimateFile(file){
   if(!file) return;
@@ -1908,17 +2116,22 @@ async function handlePhotoEstimateFile(file){
   _photoEstimateDraft=null;
   setPhotoEstimatePreview(file);
   showPhotoEstimateModal({status:'Loading photo',showForm:false});
+  startPhotoProgress('Loading photo',14);
   startPhotoEstimateSlowTimer();
   try{
     setPhotoEstimateStatus('Compressing image');
+    setPhotoProgressStage('Compressing image',42);
     const resized=await resizePhotoForEstimate(file);
     const photoEstimateUrl=typeof window.sousApiUrl==='function'?window.sousApiUrl('/api/photo-estimate'):'/api/photo-estimate';
-    setPhotoEstimateStatus('Estimating meal');
+    setPhotoEstimateStatus('Uploading');
+    setPhotoProgressStage('Uploading',58);
     photoEstimateTrace('upload_started',{
       resizedBytes:resized.bytes||0,
       width:resized.width||null,
       height:resized.height||null
     });
+    setPhotoEstimateStatus('Estimating meal');
+    setPhotoProgressStage('Estimating meal',92);
     photoEstimateTrace('ai_started',{route:'server'});
     const res=await fetch(photoEstimateUrl,{
       method:'POST',
@@ -1936,6 +2149,7 @@ async function handlePhotoEstimateFile(file){
       throw new Error(detail);
     }
     setPhotoEstimateStatus('Building editable rows');
+    setPhotoProgressStage('Building review rows',98);
     renderPhotoEstimateReview(data);
   }catch(e){
     console.warn('[Sous Photo Estimate]',e);
@@ -1944,6 +2158,7 @@ async function handlePhotoEstimateFile(file){
     const message=detail
       ? `Could not estimate this photo: ${detail}`
       : 'Could not estimate this photo. Please try another photo or log the meal manually.';
+    failPhotoProgress(message);
     showPhotoEstimateModal({status:message,showForm:false});
   }finally{
     clearPhotoEstimateSlowTimer();
@@ -1964,7 +2179,7 @@ function saveReviewedPhotoEstimate(){
       protein:roundMacro(item.protein),
       carbs:roundMacro(item.carbs),
       fat:roundMacro(item.fat),
-      fibre:0,
+      fibre:roundMacro(item.fibre),
       icon:'ti-camera',
       type:'solid',
       confidence:item.confidence||'low',
@@ -2453,10 +2668,18 @@ function initPhotoEstimate(){
   document.getElementById('photo-estimate-modal')?.addEventListener('click',e=>{if(e.target===document.getElementById('photo-estimate-modal'))closePhotoEstimateModal();});
   document.getElementById('photo-estimate-save-btn')?.addEventListener('click',saveReviewedPhotoEstimate);
   document.getElementById('photo-portion-select')?.addEventListener('change',e=>setPhotoEstimatePortion(e.target.value));
+  document.getElementById('photo-adjust-btn')?.addEventListener('click',adjustPhotoEstimate);
+  document.getElementById('photo-adjust-revert-btn')?.addEventListener('click',revertPhotoEstimateAdjustment);
 }
 
 window.__sousPhotoTimingTrace=()=>_photoEstimateTrace.slice(-100);
 window.__sousLastPhotoError=()=>_photoEstimateLastError?{..._photoEstimateLastError}:null;
+window.__sousPhotoEstimateState=()=>({
+  hasPhotoEstimate:!!_photoEstimateDraft,
+  photoEstimateItemCount:Array.isArray(_photoEstimateDraft?.items)?_photoEstimateDraft.items.length:0,
+  photoAdjustInProgress:!!_photoEstimateAdjustInProgress,
+  lastPhotoAdjustError:_photoEstimateLastAdjustError?{..._photoEstimateLastAdjustError}:null
+});
 
 function init(){
   setCurrentCountry(typeof getUserCountry==='function'?getUserCountry():'GLOBAL');

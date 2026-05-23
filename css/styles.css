@@ -869,6 +869,71 @@ html,body{height:100%;height:var(--app-height);min-height:-webkit-fill-available
   outline:2px solid var(--hl);
   outline-offset:2px;
 }
+.photo-progress{
+  margin:0 0 12px;
+  padding:10px 12px;
+  border:.5px solid var(--border);
+  border-radius:12px;
+  background:var(--bg);
+}
+.photo-progress-top{
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  gap:10px;
+  margin-bottom:8px;
+  font-size:12px;
+  color:var(--text-muted);
+}
+.photo-progress-top span:last-child{
+  font-family:var(--font-mono);
+  color:var(--text);
+}
+.photo-progress-track{
+  height:7px;
+  border-radius:999px;
+  overflow:hidden;
+  background:var(--border);
+}
+.photo-progress-fill{
+  width:0;
+  height:100%;
+  border-radius:999px;
+  background:var(--accent);
+  transition:width .18s ease;
+}
+.photo-adjust-box{
+  margin:10px 0 12px;
+  padding:10px;
+  border:.5px solid var(--border);
+  border-radius:12px;
+  background:var(--bg);
+}
+.photo-adjust-box textarea{
+  width:100%;
+  min-height:58px;
+  resize:vertical;
+  margin-top:6px;
+  line-height:1.35;
+}
+.photo-adjust-actions{
+  display:flex;
+  gap:8px;
+  justify-content:flex-end;
+  margin-top:8px;
+}
+.photo-adjust-actions .btn-secondary{
+  flex:none;
+  padding:8px 12px;
+  font-size:12px;
+}
+.photo-adjust-status{
+  min-height:16px;
+  margin-top:7px;
+  font-size:11px;
+  line-height:1.35;
+  color:var(--text-muted);
+}
 .home-action-grid .wide{grid-column:1/-1;}
 .home-bodyweight{padding-top:2px;}
 .home-fab{

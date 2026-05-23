@@ -76,6 +76,7 @@ const expensiveApiLimiter = rateLimit({
 app.use('/api', apiLimiter);
 app.use([
   '/api/photo-estimate',
+  '/api/photo-estimate-adjust',
   '/api/realtime/session',
   '/api/interpret',
   '/api/repair-transcript',
@@ -158,6 +159,39 @@ function normalisePhotoEstimate(parsed) {
       fat: Math.round(rowTotals.fat * 10) / 10
     },
     notes: String(parsed && parsed.notes || '')
+  };
+}
+
+function normalisePhotoAdjustEstimate(parsed) {
+  const rawItems = Array.isArray(parsed && parsed.items) ? parsed.items : [];
+  const items = rawItems
+    .filter(item => item && typeof item === 'object')
+    .map(item => {
+      const grams = cleanNullableGrams(item.grams ?? item.estimatedGrams);
+      const kcal = cleanNumber(item.kcal ?? item.calories);
+      return {
+        name: String(item.name || 'Photo item').trim() || 'Photo item',
+        quantity: item.quantity === null || item.quantity === undefined || item.quantity === ''
+          ? null
+          : cleanNumber(item.quantity),
+        unit: String(item.unit || (grams !== null ? 'g' : '')).trim(),
+        grams,
+        kcal,
+        protein: cleanNumber(item.protein),
+        carbs: cleanNumber(item.carbs),
+        fat: cleanNumber(item.fat),
+        fibre: cleanNumber(item.fibre ?? item.fiber),
+        confidence: clampConfidence(item.confidence),
+        reason: String(item.reason || item.notes || '')
+      };
+    });
+
+  return {
+    items,
+    summary: String(parsed && parsed.summary || ''),
+    warnings: Array.isArray(parsed && parsed.warnings)
+      ? parsed.warnings.map(warning => String(warning || '').trim()).filter(Boolean).slice(0, 5)
+      : []
   };
 }
 
@@ -465,6 +499,153 @@ app.post('/api/photo-estimate', async (req, res) => {
   } catch (err) {
     console.error('[Sous Photo Estimate] error', err.message);
     res.status(500).json(errorBody('Photo estimate request failed.', 'detail', err.message));
+  }
+});
+
+app.post('/api/photo-estimate-adjust', async (req, res) => {
+  const receivedAt = Date.now();
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) {
+    return res.status(500).json({ error: 'OPENAI_API_KEY is not set on the server.' });
+  }
+
+  const { previousEstimate, correction, section = null, date = null } = req.body || {};
+  const correctionText = String(correction || '').trim().slice(0, 800);
+  if (!correctionText) {
+    return res.status(400).json({ error: 'Correction text is required.' });
+  }
+  const previousItems = Array.isArray(previousEstimate && previousEstimate.items)
+    ? previousEstimate.items.slice(0, 20).map(item => ({
+      name: String(item && item.name || '').slice(0, 120),
+      grams: cleanNullableGrams(item && (item.estimatedGrams ?? item.grams)),
+      kcal: cleanNumber(item && (item.calories ?? item.kcal)),
+      protein: cleanNumber(item && item.protein),
+      carbs: cleanNumber(item && item.carbs),
+      fat: cleanNumber(item && item.fat),
+      fibre: cleanNumber(item && (item.fibre ?? item.fiber)),
+      confidence: clampConfidence(item && item.confidence),
+      notes: String(item && (item.notes || item.reason) || '').slice(0, 240)
+    }))
+    : [];
+
+  if (!previousItems.length) {
+    return res.status(400).json({ error: 'Previous estimate items are required.' });
+  }
+
+  const prompt = [
+    'Revise an unsaved photo meal estimate using the user correction.',
+    'Use only the previous structured estimate and correction text. No saved history edits.',
+    'Return JSON only. Keep rows editable and conservative.',
+    'Apply remove/add/change/portion instructions directly to the item rows.',
+    'If the user names a food replacement, update the row name and macros accordingly.',
+    'Do not auto-save. Do not mention unavailable image details.',
+    section ? `Section: ${String(section).slice(0, 40)}` : null,
+    date ? `Date: ${String(date).slice(0, 40)}` : null,
+    `Previous estimate: ${JSON.stringify({ items: previousItems }).slice(0, 6000)}`,
+    `User correction: ${correctionText}`
+  ].filter(Boolean).join('\n');
+
+  try {
+    const aiStartedAt = Date.now();
+    const upstream = await fetch('https://api.openai.com/v1/responses', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`
+      },
+      body: JSON.stringify({
+        model: 'gpt-4.1-mini',
+        input: [{
+          role: 'user',
+          content: [{ type: 'input_text', text: prompt }]
+        }],
+        text: {
+          format: {
+            type: 'json_schema',
+            name: 'photo_meal_estimate_adjustment',
+            strict: true,
+            schema: {
+              type: 'object',
+              additionalProperties: false,
+              properties: {
+                items: {
+                  type: 'array',
+                  items: {
+                    type: 'object',
+                    additionalProperties: false,
+                    properties: {
+                      name: { type: 'string' },
+                      quantity: { type: ['number', 'null'] },
+                      unit: { type: 'string' },
+                      grams: { type: ['number', 'null'] },
+                      kcal: { type: 'number' },
+                      protein: { type: 'number' },
+                      carbs: { type: 'number' },
+                      fat: { type: 'number' },
+                      fibre: { type: 'number' },
+                      confidence: { type: 'string', enum: ['low', 'medium', 'high'] },
+                      reason: { type: 'string' }
+                    },
+                    required: ['name', 'quantity', 'unit', 'grams', 'kcal', 'protein', 'carbs', 'fat', 'fibre', 'confidence', 'reason']
+                  }
+                },
+                summary: { type: 'string' },
+                warnings: {
+                  type: 'array',
+                  items: { type: 'string' }
+                }
+              },
+              required: ['items', 'summary', 'warnings']
+            }
+          }
+        }
+      })
+    });
+    const aiFinishedAt = Date.now();
+
+    const text = await upstream.text();
+    let data = null;
+    try { data = text ? JSON.parse(text) : null; } catch {}
+
+    if (!upstream.ok) {
+      return res.status(upstream.status).json(errorBody(
+        `OpenAI error: ${upstream.status}`,
+        'detail',
+        data && data.error ? data.error.message || data.error : text
+      ));
+    }
+
+    let rawText = '';
+    if (typeof data.output_text === 'string') {
+      rawText = data.output_text;
+    } else if (Array.isArray(data.output)) {
+      rawText = data.output
+        .flatMap(item => Array.isArray(item.content) ? item.content : [])
+        .map(part => part.text || part.output_text || '')
+        .filter(Boolean)
+        .join('\n');
+    }
+
+    let parsed;
+    try {
+      parsed = JSON.parse(rawText);
+    } catch {
+      return res.status(502).json(errorBody('Invalid JSON returned by OpenAI.', 'raw', rawText));
+    }
+
+    res.json({
+      ...normalisePhotoAdjustEstimate(parsed),
+      _timings: {
+        receivedAt,
+        aiStartedAt,
+        aiFinishedAt,
+        aiMs: aiFinishedAt - aiStartedAt,
+        totalMs: Date.now() - receivedAt
+      }
+    });
+  } catch (err) {
+    console.error('[Sous Photo Adjust] error', err.message);
+    res.status(500).json(errorBody('Photo estimate adjustment failed.', 'detail', err.message));
   }
 });
 

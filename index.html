@@ -1432,6 +1432,13 @@ html,body{height:100%;height:var(--app-height);min-height:-webkit-fill-available
     </div>
     <div class="modal-panel">
       <div id="photo-estimate-status" class="modal-body" style="display:none;margin-bottom:12px;"></div>
+      <div id="photo-estimate-progress" class="photo-progress" style="display:none;">
+        <div class="photo-progress-top">
+          <span id="photo-progress-stage">Loading photo</span>
+          <span id="photo-progress-percent">0%</span>
+        </div>
+        <div class="photo-progress-track"><div id="photo-progress-fill" class="photo-progress-fill"></div></div>
+      </div>
       <img id="photo-estimate-preview" alt="" style="display:none;width:100%;max-height:180px;object-fit:cover;border-radius:12px;margin-bottom:12px;background:var(--bg);border:.5px solid var(--border);">
       <div id="photo-estimate-form" style="display:none;">
         <div class="custom-field-group" style="margin-bottom:10px;">
@@ -1478,6 +1485,15 @@ html,body{height:100%;height:var(--app-height);min-height:-webkit-fill-available
           </select>
         </div>
         <div id="photo-items-list" style="font-size:12px;color:var(--text-muted);line-height:1.5;margin:8px 0 10px;"></div>
+        <div class="photo-adjust-box">
+          <div class="custom-field-label">Adjust estimate</div>
+          <textarea id="photo-adjust-input" class="custom-input" rows="2" placeholder="e.g. It's cheesecake and only palm-sized"></textarea>
+          <div class="photo-adjust-actions">
+            <button class="btn-secondary" type="button" id="photo-adjust-revert-btn" style="display:none;">Revert</button>
+            <button class="btn-secondary" type="button" id="photo-adjust-btn">Update estimate</button>
+          </div>
+          <div id="photo-adjust-status" class="photo-adjust-status"></div>
+        </div>
         <div style="font-size:12px;color:var(--text-muted);line-height:1.45;">Photo estimates are approximate. Portion size and hidden oils/sauces may be wrong.</div>
       </div>
     </div>
@@ -1734,8 +1750,8 @@ window.sousApiUrl=path=>`${window.SOUS_API_BASE}${path}`;
 <script src="js/profile.js?v=8"></script>
 <script src="js/recipes.js?v=8"></script>
 <script src="js/onboarding.js?v=1"></script>
-<script src="js/test-mode.js?v=3"></script>
-<script src="js/app.js?v=18"></script>
+<script src="js/test-mode.js?v=4"></script>
+<script src="js/app.js?v=19"></script>
 <script src="js/ai-interpreter.js?v=3"></script>
 <script src="js/barcode.js?v=2"></script>
 
