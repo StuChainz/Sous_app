@@ -1081,8 +1081,8 @@ html,body{height:100%;height:var(--app-height);min-height:-webkit-fill-available
   flex-shrink:0;
   font-size:10px;
   color:var(--text-muted);
-  text-transform:uppercase;
-  letter-spacing:.06em;
+  text-transform:none;
+  letter-spacing:0;
   border:.5px solid var(--border);
   border-radius:999px;
   padding:4px 7px;

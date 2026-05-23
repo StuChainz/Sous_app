@@ -12,6 +12,7 @@
       preset('red-wine-125ml','red wine 125ml',['red wine','small red wine','glass of red wine','125ml red wine'], 'alcohol',125,'ml',95,0.1,0.3,0,'high'),
       preset('red-wine-175ml','red wine 175ml',['large red wine','175ml red wine'], 'alcohol',175,'ml',133,0.2,0.4,0,'high'),
       preset('beer-pint-568ml','beer pint 568ml',['pint of beer','beer pint','568ml beer'], 'alcohol',568,'ml',182,2.3,17.1,0,'high'),
+      preset('beer-can-330ml','beer can 330ml',['beer can','can of beer','cans of beer','330ml beer can','2 cans of beer','two cans of beer'], 'alcohol',330,'ml',142,1.7,11.6,0,'high'),
       preset('beer-bottle-330ml','beer bottle 330ml',['bottle of beer','beer bottle','330ml beer'], 'alcohol',330,'ml',142,1.7,11.6,0,'high'),
       preset('lager-pint-568ml','lager pint 568ml',['pint of lager','lager pint','568ml lager'], 'alcohol',568,'ml',136,1.7,0,0,'high'),
       preset('cider-pint-568ml','cider pint 568ml',['pint of cider','cider pint','568ml cider'], 'alcohol',568,'ml',216,0,17,0,'medium'),

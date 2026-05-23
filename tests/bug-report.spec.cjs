@@ -219,56 +219,60 @@ test('menu scanner controls render and require macro targets', async ({ page }) 
 });
 
 test('menu scanner use action opens editable review without auto-saving', async ({ page }) => {
-  await page.route('**/api/menu-scan', route => route.fulfill({
-    status: 200,
-    contentType: 'application/json',
-    body: JSON.stringify({
-      requestSummary: 'Dinner with prosecco reserved',
-      reservedItems: [{
-        id: 'consumable_prosecco-125ml',
-        presetId: 'prosecco-125ml',
-        name: 'prosecco 125ml',
-        quantity: 125,
-        unit: 'ml',
-        kcal: 86,
-        calories: 86,
-        protein: 0.1,
-        carbs: 2.1,
-        fat: 0,
-        source: 'consumable_preset',
-        confidence: 'high'
-      }],
-      remainingBefore: { kcal: 850, protein: 55, carbs: 90, fat: 25 },
-      remainingAfterReserved: { kcal: 764, protein: 54.9, carbs: 87.9, fat: 25 },
-      suggestions: [{
-        id: 'menu_1_grilled-chicken-salad',
-        menuText: 'Grilled chicken salad',
-        suggestedName: 'Grilled chicken salad',
-        rank: 1,
-        fitScore: 88,
-        confidence: 'medium',
-        reason: 'Good protein fit after reserving the prosecco.',
-        portionAssumptions: 'Restaurant dressing on the side.',
-        warnings: ['Dressing may add fat.'],
-        estimate: {
-          kcal: { low: 430, likely: 520, high: 650 },
-          protein: { low: 35, likely: 45, high: 55 },
-          carbs: { low: 18, likely: 25, high: 35 },
-          fat: { low: 16, likely: 24, high: 34 }
-        },
-        rows: [{
-          name: 'Grilled chicken salad',
-          quantity: 1,
-          unit: 'serving',
-          kcal: 520,
-          protein: 45,
-          carbs: 25,
-          fat: 24,
-          source: 'menu_scan'
+  let menuScanPayload = null;
+  await page.route('**/api/menu-scan', route => {
+    menuScanPayload = route.request().postDataJSON();
+    return route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        requestSummary: 'Dinner with prosecco reserved',
+        reservedItems: [{
+          id: 'consumable_prosecco-125ml',
+          presetId: 'prosecco-125ml',
+          name: 'prosecco 125ml',
+          quantity: 125,
+          unit: 'ml',
+          kcal: 86,
+          calories: 86,
+          protein: 0.1,
+          carbs: 2.1,
+          fat: 0,
+          source: 'consumable_preset',
+          confidence: 'high'
+        }],
+        remainingBefore: { kcal: 850, protein: 55, carbs: 90, fat: 25 },
+        remainingAfterReserved: { kcal: 764, protein: 54.9, carbs: 87.9, fat: 25 },
+        suggestions: [{
+          id: 'menu_1_grilled-chicken-salad',
+          menuText: 'Grilled chicken salad',
+          suggestedName: 'Grilled chicken salad',
+          rank: 1,
+          fitScore: 88,
+          confidence: 'medium',
+          reason: 'Good protein fit after reserving the prosecco.',
+          portionAssumptions: 'Restaurant dressing on the side.',
+          warnings: ['Dressing may add fat.'],
+          estimate: {
+            kcal: { low: 430, likely: 520, high: 650 },
+            protein: { low: 35, likely: 45, high: 55 },
+            carbs: { low: 18, likely: 25, high: 35 },
+            fat: { low: 16, likely: 24, high: 34 }
+          },
+          rows: [{
+            name: 'Grilled chicken salad',
+            quantity: 1,
+            unit: 'serving',
+            kcal: 520,
+            protein: 45,
+            carbs: 25,
+            fat: 24,
+            source: 'menu_scan'
+          }]
         }]
-      }]
-    })
-  }));
+      })
+    });
+  });
   await boot(page);
   await page.evaluate(() => {
     localStorage.setItem('sous_profile', JSON.stringify({
@@ -295,10 +299,15 @@ test('menu scanner use action opens editable review without auto-saving', async 
   await expect(page.getByTestId('menu-scan-status')).toContainText('Menu photo ready.');
   await page.getByTestId('menu-scan-submit-btn').click();
   await expect(page.getByTestId('menu-scan-results')).toContainText('Grilled chicken salad');
+  expect(menuScanPayload.currentDayTotals).toEqual({ kcal: 0, protein: 0, carbs: 0, fat: 0 });
+  await expect(page.getByTestId('menu-scan-results')).toContainText('Estimate confidence reflects menu readability and portion uncertainty');
+  await expect(page.getByTestId('menu-scan-results')).toContainText('Estimate confidence: medium');
 
   await page.getByTestId('menu-scan-use-btn').click();
   await expect(page.locator('#photo-estimate-modal')).toBeVisible();
   await expect(page.locator('#photo-estimate-title')).toContainText('Review menu choice');
+  await expect(page.locator('#photo-items-list')).toContainText('Estimate confidence: medium');
+  await expect(page.locator('#photo-items-list')).toContainText('Qty/unit or grams · kcal · protein · carbs · fat');
   await expect.poll(() => page.locator('#photo-items-list input[aria-label="Food name"]').evaluateAll(inputs => inputs.map(input => input.value))).toEqual([
     'prosecco 125ml',
     'Grilled chicken salad'

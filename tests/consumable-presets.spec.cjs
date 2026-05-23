@@ -16,6 +16,12 @@ test('matches common drink aliases', () => {
   expect(findConsumablePresetByText('gin and slimline tonic')?.name).toBe('gin and slimline tonic');
 });
 
+test('matches beer can wording as a preset', () => {
+  expect(findConsumablePresetByText('can of beer')?.id).toBe('beer-can-330ml');
+  expect(findConsumablePresetByText('2 cans of beer')?.id).toBe('beer-can-330ml');
+  expect(findConsumablePresetByText('two cans of beer')?.id).toBe('beer-can-330ml');
+});
+
 test('unknown consumable text returns null', () => {
   expect(findConsumablePresetByText('truffle risotto')).toBeNull();
 });

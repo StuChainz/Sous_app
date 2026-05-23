@@ -238,7 +238,7 @@ function normaliseMenuMacroSet(value, { requireTargets = false } = {}) {
     }
 
     const number = Number(raw);
-    if (!Number.isFinite(number) || number < 0 || (key === 'kcal' && number <= 0)) {
+    if (!Number.isFinite(number) || number < 0 || (requireTargets && number <= 0)) {
       return null;
     }
 

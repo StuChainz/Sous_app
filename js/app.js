@@ -1864,7 +1864,12 @@ function menuScanProfileTargets(profile){
 function menuScanCurrentDayTotals(){
   const date=selectedLogDate||localDateStr();
   const day=(getLog()[date]||{}).totals||{};
-  return menuScanMacroSet(day);
+  return menuScanMacroSet({
+    kcal:day.kcal??0,
+    protein:day.protein??0,
+    carbs:day.carbs??0,
+    fat:day.fat??0
+  });
 }
 function menuScanCurrentSection(){
   if(typeof getJotMealWindow==='function') return getJotMealWindow();
@@ -2049,6 +2054,7 @@ function renderMenuScanResults(data){
   html+=`<div class="menu-scan-summary">`;
   if(data?.requestSummary) html+=`<div class="menu-scan-summary-title">${photoEstimateEsc(data.requestSummary)}</div>`;
   html+=`<div class="menu-scan-muted">Reserved: ${reserved.length?reserved.map(item=>photoEstimateEsc(item.name||'Reserved item')).join(', '):'None'}</div>`;
+  html+=`<div class="menu-scan-muted" style="margin-top:8px;">Estimate confidence reflects menu readability and portion uncertainty, not how healthy the option is.</div>`;
   html+=`<div class="menu-scan-muted" style="margin-top:8px;">Remaining before reserved</div>`;
   html+=menuScanFormatMacroSet(data?.remainingBefore);
   html+=`<div class="menu-scan-muted" style="margin-top:8px;">Remaining after reserved</div>`;
@@ -2065,7 +2071,7 @@ function renderMenuScanResults(data){
       ...(Array.isArray(item.warnings)?item.warnings:[])
     ].map(v=>String(v||'').trim()).filter(Boolean);
     html+=`<div class="menu-scan-card">`;
-    html+=`<div class="menu-scan-card-head"><div class="menu-scan-card-title">${photoEstimateEsc(item.suggestedName||'Menu option')}</div><div class="menu-scan-confidence">${photoEstimateEsc(item.confidence||'low')}</div></div>`;
+    html+=`<div class="menu-scan-card-head"><div class="menu-scan-card-title">${photoEstimateEsc(item.suggestedName||'Menu option')}</div><div class="menu-scan-confidence">Estimate confidence: ${photoEstimateEsc(item.confidence||'low')}</div></div>`;
     html+=menuScanFormatMacroSet(likely);
     if(item.reason) html+=`<div class="menu-scan-muted" style="margin-top:8px;">${photoEstimateEsc(item.reason)}</div>`;
     if(warnings.length) html+=`<div class="menu-scan-warning">${warnings.map(photoEstimateEsc).join('<br>')}</div>`;
@@ -2234,7 +2240,7 @@ function renderPhotoEstimateItemRows(){
   const itemsEl=document.getElementById('photo-items-list');
   if(!itemsEl||!_photoEstimateDraft) return;
   const items=_photoEstimateDraft.items||[];
-  const confidence=_photoEstimateDraft.confidence?`Confidence: ${photoEstimateEsc(_photoEstimateDraft.confidence)}`:'';
+  const confidence=_photoEstimateDraft.confidence?`Estimate confidence: ${photoEstimateEsc(_photoEstimateDraft.confidence)}`:'';
   const notes=_photoEstimateDraft.notes?photoEstimateEsc(_photoEstimateDraft.notes):'';
   let html='';
   if(confidence||notes){
@@ -2246,7 +2252,7 @@ function renderPhotoEstimateItemRows(){
   items.forEach(item=>{
     const id=item.id;
     const grams=item.estimatedGrams==null?'':item.estimatedGrams;
-    const confidence=item.confidence?` · ${photoEstimateEsc(item.confidence)} confidence`:'';
+    const confidence=item.confidence?` · estimate confidence: ${photoEstimateEsc(item.confidence)}`:'';
     const rowNote=item.notes?`<div style="font-size:11px;color:var(--text-muted);margin-top:5px;">${photoEstimateEsc(item.notes)}</div>`:'';
     html+=`<div style="background:var(--card);border:.5px solid var(--border);border-radius:8px;padding:8px 10px;margin-bottom:8px;">`;
     html+=`<div style="display:flex;gap:6px;align-items:center;margin-bottom:6px;">`;
@@ -2254,15 +2260,15 @@ function renderPhotoEstimateItemRows(){
     html+=`<button type="button" onclick="deletePhotoEstimateItem('${id}')" title="Remove item" aria-label="Remove item" style="background:none;border:none;padding:4px 7px;cursor:pointer;color:var(--text-muted);font-size:16px;">✕</button>`;
     html+=`</div>`;
     html+=`<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:5px;margin-bottom:5px;">`;
-    html+=`<input type="number" class="custom-input" id="photo-item-grams-${id}" value="${grams}" min="0" placeholder="g" oninput="markPhotoEstimateManualEdit();photoEstimateSyncRows()" aria-label="Estimated grams" style="padding:6px 7px;font-size:12px;">`;
-    html+=`<input type="number" class="custom-input" id="photo-item-kcal-${id}" value="${Math.round(Number(item.calories)||0)}" min="0" placeholder="kcal" oninput="markPhotoEstimateManualEdit();photoEstimateSyncRows()" aria-label="Calories" style="padding:6px 7px;font-size:12px;">`;
-    html+=`<input type="number" class="custom-input" id="photo-item-protein-${id}" value="${roundMacro(item.protein)}" min="0" step="0.1" placeholder="protein" oninput="markPhotoEstimateManualEdit();photoEstimateSyncRows()" aria-label="Protein" style="padding:6px 7px;font-size:12px;">`;
+    html+=`<label style="display:block;"><span style="display:block;font-size:9px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.04em;margin-bottom:3px;">Qty / g</span><input type="number" class="custom-input" id="photo-item-grams-${id}" value="${grams}" min="0" placeholder="qty" oninput="markPhotoEstimateManualEdit();photoEstimateSyncRows()" aria-label="Quantity or grams" style="width:100%;padding:6px 7px;font-size:12px;"></label>`;
+    html+=`<label style="display:block;"><span style="display:block;font-size:9px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.04em;margin-bottom:3px;">kcal</span><input type="number" class="custom-input" id="photo-item-kcal-${id}" value="${Math.round(Number(item.calories)||0)}" min="0" placeholder="kcal" oninput="markPhotoEstimateManualEdit();photoEstimateSyncRows()" aria-label="Calories" style="width:100%;padding:6px 7px;font-size:12px;"></label>`;
+    html+=`<label style="display:block;"><span style="display:block;font-size:9px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.04em;margin-bottom:3px;">Protein</span><input type="number" class="custom-input" id="photo-item-protein-${id}" value="${roundMacro(item.protein)}" min="0" step="0.1" placeholder="protein" oninput="markPhotoEstimateManualEdit();photoEstimateSyncRows()" aria-label="Protein" style="width:100%;padding:6px 7px;font-size:12px;"></label>`;
     html+=`</div>`;
     html+=`<div style="display:grid;grid-template-columns:1fr 1fr;gap:5px;">`;
-    html+=`<input type="number" class="custom-input" id="photo-item-carbs-${id}" value="${roundMacro(item.carbs)}" min="0" step="0.1" placeholder="carbs" oninput="markPhotoEstimateManualEdit();photoEstimateSyncRows()" aria-label="Carbs" style="padding:6px 7px;font-size:12px;">`;
-    html+=`<input type="number" class="custom-input" id="photo-item-fat-${id}" value="${roundMacro(item.fat)}" min="0" step="0.1" placeholder="fat" oninput="markPhotoEstimateManualEdit();photoEstimateSyncRows()" aria-label="Fat" style="padding:6px 7px;font-size:12px;">`;
+    html+=`<label style="display:block;"><span style="display:block;font-size:9px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.04em;margin-bottom:3px;">Carbs</span><input type="number" class="custom-input" id="photo-item-carbs-${id}" value="${roundMacro(item.carbs)}" min="0" step="0.1" placeholder="carbs" oninput="markPhotoEstimateManualEdit();photoEstimateSyncRows()" aria-label="Carbs" style="width:100%;padding:6px 7px;font-size:12px;"></label>`;
+    html+=`<label style="display:block;"><span style="display:block;font-size:9px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.04em;margin-bottom:3px;">Fat</span><input type="number" class="custom-input" id="photo-item-fat-${id}" value="${roundMacro(item.fat)}" min="0" step="0.1" placeholder="fat" oninput="markPhotoEstimateManualEdit();photoEstimateSyncRows()" aria-label="Fat" style="width:100%;padding:6px 7px;font-size:12px;"></label>`;
     html+=`</div>`;
-    html+=`<div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.04em;margin-top:5px;">grams · kcal · protein${confidence}</div>`;
+    html+=`<div style="font-size:10px;color:var(--text-muted);margin-top:5px;">Qty/unit or grams · kcal · protein · carbs · fat${confidence}</div>`;
     html+=rowNote;
     html+=`</div>`;
   });
@@ -2896,7 +2902,7 @@ function updateHome(){ if(currentTab==='home') renderHome(); }
 // ═══════════════════════════════════════════
 // PWA — MANIFEST + SERVICE WORKER
 // ═══════════════════════════════════════════
-const SOUS_CACHE_VERSION='sous-v18';
+const SOUS_CACHE_VERSION='sous-v19';
 
 window.__sousClearCachesAndReload=async function(){
   if('serviceWorker' in navigator){
