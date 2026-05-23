@@ -1363,7 +1363,9 @@ function mrfCancel(){
 
 function updateClock(){
   const n=new Date(),h=n.getHours();
-  document.getElementById('clock').textContent=String(h).padStart(2,'0')+':'+String(n.getMinutes()).padStart(2,'0');
+  const clock=document.getElementById('clock');
+  if(clock) clock.textContent=String(h).padStart(2,'0')+':'+String(n.getMinutes()).padStart(2,'0');
+  if(!clock) return;
   const el=document.getElementById('home-greeting');
   if(el) el.textContent=h<12?'Good morning':h<18?'Good afternoon':'Good evening';
 }
@@ -1964,7 +1966,7 @@ function renderHome(){
   const selectedDateLabel=selectedDateObj.toLocaleDateString('en-GB',{weekday:'short',day:'numeric',month:'short'});
   document.getElementById('home-greeting').textContent=(selectedLogDate===localDateStr()?'Today':'Viewing')+' · '+selectedDateLabel;
   const profileName=profile.name?'<span class="home-user">'+escapeHtml(profile.name)+'</span>':'';
-  document.getElementById('home-name').innerHTML='<em>'+escapeHtml(mealLabel)+'</em>'+profileName;
+  document.getElementById('home-name').innerHTML=escapeHtml(mealLabel)+profileName;
   const context=document.getElementById('home-meal-context');
   if(context){
     const mealsLeft=HOME_MEAL_SECTIONS.filter(s=>!hasMealForSectionOnSelectedDate(s.key,dayData.meals||[])).length;
