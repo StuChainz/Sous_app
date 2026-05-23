@@ -2586,7 +2586,7 @@ function updateHome(){ if(currentTab==='home') renderHome(); }
 // ═══════════════════════════════════════════
 // PWA — MANIFEST + SERVICE WORKER
 // ═══════════════════════════════════════════
-const SOUS_CACHE_VERSION='sous-v12';
+const SOUS_CACHE_VERSION='sous-v14';
 
 window.__sousClearCachesAndReload=async function(){
   if('serviceWorker' in navigator){
@@ -2604,7 +2604,7 @@ function initPWA(){
   console.log(`[Sous] active cache version: ${SOUS_CACHE_VERSION}`);
 
   // Inject inline manifest via blob URL (enables Add to Home Screen / install prompt)
-  const icon=`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><rect width="512" height="512" rx="112" fill="%23F4F0E6"/><circle cx="372" cy="354" r="34" fill="%23F4C81E"/><text x="256" y="330" font-size="210" text-anchor="middle" fill="%2315140F" font-family="Geist,Arial,sans-serif" font-weight="700">J</text></svg>`;
+  const icon=`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><rect width="512" height="512" rx="112" fill="%23F4F0E6"/><circle cx="372" cy="354" r="34" fill="%23F8C91C"/><text x="256" y="330" font-size="210" text-anchor="middle" fill="%2317140F" font-family="Geist,Arial,sans-serif" font-weight="700">J</text></svg>`;
   const manifest={
     name:'Jot — Voice Food Log',
     short_name:'Jot',
@@ -2612,7 +2612,7 @@ function initPWA(){
     start_url:location.href,
     display:'standalone',
     background_color:'#F4F0E6',
-    theme_color:'#1A1611',
+    theme_color:'#17140F',
     orientation:'portrait-primary',
     categories:['health','fitness'],
     icons:[

@@ -9,7 +9,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="Jot">
 <title>Jot</title>
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23F4F0E6'/%3E%3Cpath d='M16 43h32v5H16zM18 16h28v5H18zM18 27h22v5H18z' fill='%2315140F'/%3E%3Cpath d='M16 34h29v6H16z' fill='%23F4C81E'/%3E%3C/svg%3E">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23F4F0E6'/%3E%3Cpath d='M16 43h32v5H16zM18 16h28v5H18zM18 27h22v5H18z' fill='%2317140F'/%3E%3Cpath d='M16 34h29v6H16z' fill='%23F8C91C'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600;700&family=Geist+Mono:wght@400;500;600&display=swap" rel="stylesheet">
@@ -36,20 +36,20 @@
   document.documentElement.setAttribute('data-palette',theme.mode==='dark'?'ink':'paper');
   document.documentElement.classList.toggle('theme-light',theme.mode==='light');
   document.documentElement.classList.toggle('theme-dark',theme.mode==='dark');
-  document.querySelector('meta[name="theme-color"]')?.setAttribute('content',theme.mode==='light'?'#F4F0E6':'#1A1611');
+  document.querySelector('meta[name="theme-color"]')?.setAttribute('content',theme.mode==='light'?'#F4F0E6':'#17140F');
 })();
 </script>
 <style>
 /* ── TOKENS ─────────────────────────────────────────────── */
 :root {
   color-scheme: dark;
-  --bg:#14110D; --bg-2:#1A1611;
-  --card:#1E1913; --card-2:#251F18; --raised:#2C2519;
-  --text:#F2EAD9; --text-muted:#8A7F6E; --text-dim:#5C5447;
-  --border:rgba(242,234,217,0.08); --border-strong:rgba(242,234,217,0.14);
-  --accent:#FF6B3D; --accent-2:#FF8A5C;
-  --accent-soft:rgba(255,107,61,0.14); --accent-pale:rgba(255,107,61,0.08);
-  --accent-glow:rgba(255,107,61,0.35);
+  --bg:#17140F; --bg-2:#211C16;
+  --card:#211D17; --card-2:#28231B; --raised:#312A21;
+  --text:#F6F0E4; --text-muted:#A19585; --text-dim:#71685B;
+  --border:rgba(246,240,228,0.14); --border-strong:rgba(246,240,228,0.22);
+  --accent:#F8C91C; --accent-2:#FFD94A;
+  --accent-soft:rgba(248,201,28,0.20); --accent-pale:rgba(248,201,28,0.11);
+  --accent-glow:rgba(248,201,28,0.32);
   --sage:#B5C56F; --sage-soft:rgba(181,197,111,0.16);
   --green:#A8C770; --green-light:rgba(168,199,112,0.16);
   --amber:#E8A547; --amber-light:rgba(232,165,71,0.16);
@@ -94,7 +94,7 @@
 [data-palette="phosphor"] .btn-primary,
 [data-palette="phosphor"] .modal-btn.primary,
 [data-palette="midnight"] .btn-primary,
-[data-palette="midnight"] .modal-btn.primary{ color:#14110D; }
+[data-palette="midnight"] .modal-btn.primary{ color:#17140F; }
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;}
 html{height:-webkit-fill-available;}
 html,body{height:100%;height:var(--app-height);min-height:-webkit-fill-available;font-family:'Geist',sans-serif;background:var(--bg);overscroll-behavior:none;overflow:hidden;}
@@ -297,7 +297,7 @@ html,body{height:100%;height:var(--app-height);min-height:-webkit-fill-available
 .mic-btn::before{content:"";position:absolute;inset:8px;border-radius:50%;background:radial-gradient(circle at 50% 30%, rgba(255,255,255,0.05), transparent 60%);pointer-events:none;}
 .mic-btn:active{transform:scale(0.97);}
 .mic-btn.wake{background:radial-gradient(circle at 30% 25%, var(--card-2), var(--bg) 70%);border-color:rgba(232,165,71,0.4);}
-.mic-btn.listening{background:radial-gradient(circle at 30% 25%, var(--card-2), var(--bg-2) 70%);border-color:rgba(255,107,61,0.4);box-shadow:inset 0 2px 0 rgba(255,255,255,0.06),inset 0 -10px 30px rgba(0,0,0,0.5),0 0 0 1px var(--accent-soft),0 12px 50px var(--accent-glow);}
+.mic-btn.listening{background:radial-gradient(circle at 30% 25%, var(--card-2), var(--bg-2) 70%);border-color:rgba(248,201,28,0.4);box-shadow:inset 0 2px 0 rgba(255,255,255,0.06),inset 0 -10px 30px rgba(0,0,0,0.5),0 0 0 1px var(--accent-soft),0 12px 50px var(--accent-glow);}
 .mic-btn.recording{background:radial-gradient(circle at 30% 25%, var(--accent), var(--accent-2) 70%);border-color:var(--accent-2);box-shadow:inset 0 2px 0 rgba(255,255,255,0.15),inset 0 -10px 30px rgba(0,0,0,0.3),0 0 0 1px var(--accent),0 14px 60px var(--accent-glow);}
 .mic-btn.speaking{background:radial-gradient(circle at 30% 25%, var(--card-2), var(--bg) 70%);border-color:rgba(181,197,111,0.4);}
 .mic-btn i{font-size:42px;color:var(--text-muted);transition:color .2s;}
@@ -324,7 +324,7 @@ html,body{height:100%;height:var(--app-height);min-height:-webkit-fill-available
 .voice-text-input::placeholder{color:var(--text-dim);}
 .voice-text-input:focus{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft);}
 .send-btn{width:46px;height:46px;border-radius:12px;background:var(--accent);border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;box-shadow:0 0 0 1px rgba(255,255,255,0.08) inset,0 6px 14px var(--accent-glow);}
-.send-btn i{font-size:18px;color:#14110D;}
+.send-btn i{font-size:18px;color:#17140F;}
 .listen-hint{font-size:10px;color:var(--text-dim);text-align:center;line-height:1.5;padding:0 20px 14px;font-weight:500;text-transform:uppercase;letter-spacing:0.14em;flex-shrink:0;}
 #voice-correct-bar{display:none;align-items:center;justify-content:space-between;gap:8px;margin:0 22px 8px;padding:9px 12px;background:var(--card);border:0.5px solid var(--border);border-radius:10px;flex-shrink:0;}
 #voice-correct-msg{font-size:13px;color:var(--text);flex:1;min-width:0;}
@@ -1184,8 +1184,8 @@ html,body{height:100%;height:var(--app-height);min-height:-webkit-fill-available
             <div class="form-row-label">Highlight pen</div>
             <div class="accent-grid" id="accent-grid">
               <div class="accent-swatch active" data-accent="yellow" onclick="setThemeAccent('yellow')">
-                <div class="accent-dot" style="background:#F4C81E;"></div>
-                <div class="accent-bar" style="background:linear-gradient(90deg,#F4C81E,#FFD93A);"></div>
+                <div class="accent-dot" style="background:#F8C91C;"></div>
+                <div class="accent-bar" style="background:linear-gradient(90deg,#F8C91C,#FFD94A);"></div>
                 <div class="accent-name">Yellow</div>
               </div>
               <div class="accent-swatch" data-accent="blue" onclick="setThemeAccent('blue')">

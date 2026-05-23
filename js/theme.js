@@ -46,7 +46,7 @@ function applyTheme(theme={},persist=true){
     document.body.classList.toggle('theme-light',mode==='light');
     document.body.classList.toggle('theme-dark',mode==='dark');
   }
-  document.querySelector('meta[name="theme-color"]')?.setAttribute('content',mode==='light'?'#F4F0E6':'#1A1611');
+  document.querySelector('meta[name="theme-color"]')?.setAttribute('content',mode==='light'?'#F4F0E6':'#17140F');
   try{if(persist)localStorage.setItem(THEME_STORAGE_KEY,JSON.stringify({mode,hl}));}catch(e){}
 }
 
