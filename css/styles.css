@@ -1090,6 +1090,19 @@ html,body{height:100%;height:var(--app-height);min-height:-webkit-fill-available
   border-radius:999px;
   padding:4px 7px;
 }
+.menu-scan-ocr{
+  margin:2px 0 8px;
+  font-size:11px;
+  line-height:1.35;
+  color:var(--text);
+  background:var(--card);
+  border:.5px solid var(--border);
+  border-radius:8px;
+  padding:7px 8px;
+}
+.menu-scan-ocr span{
+  color:var(--text-muted);
+}
 .menu-scan-warning{
   margin-top:6px;
   font-size:11px;

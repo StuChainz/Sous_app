@@ -375,6 +375,213 @@ function cleanMenuText(value, maxLength = 800) {
   return String(value || '').replace(/\s+/g, ' ').trim().slice(0, maxLength);
 }
 
+function normaliseMenuNameKey(value) {
+  return String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+}
+
+const MENU_CANONICAL_FOOD_TERMS = new Set([
+  'chicken', 'beef', 'pork', 'lamb', 'turkey', 'duck', 'salmon', 'tuna', 'cod', 'fish', 'prawn', 'prawns',
+  'shrimp', 'crab', 'egg', 'eggs', 'rice', 'pasta', 'noodles', 'bread', 'toast', 'potato', 'beans',
+  'lentils', 'chickpeas', 'tofu', 'cheese', 'yoghurt', 'yogurt', 'milk', 'cream', 'butter', 'salad',
+  'soup', 'stew', 'curry', 'wrap', 'sandwich', 'burger', 'pizza', 'tortilla', 'oats', 'avocado',
+  'tomato', 'mushroom', 'spinach', 'broccoli', 'peas', 'corn', 'sausage', 'bacon', 'ham'
+]);
+
+const MENU_PRESERVE_DISH_TERMS = new Set([
+  'shakshuka',
+  'bibimbap',
+  'chilaquiles',
+  'arepa',
+  'arepa reina pepiada',
+  'reina pepiada',
+  'huevos rancheros',
+  'croque madame',
+  'creme brulee',
+  'pho',
+  'ramen',
+  'udon',
+  'soba',
+  'bao',
+  'banh mi',
+  'biryani',
+  'tagine',
+  'mezze',
+  'hummus',
+  'falafel',
+  'tostada',
+  'quesadilla',
+  'enchilada',
+  'tamale',
+  'gnocchi',
+  'risotto',
+  'paella',
+  'lasagne',
+  'pierogi',
+  'schnitzel',
+  'katsu',
+  'sashimi',
+  'sushi',
+  'ceviche',
+  'empanada',
+  'laksa',
+  'rendang',
+  'satay',
+  'tikka',
+  'masala',
+  'dosa',
+  'idli',
+  'injera',
+  'jollof',
+  'moussaka',
+  'shawarma',
+  'gyros',
+  'bulgogi'
+]);
+
+const MENU_FAKE_DISH_TERMS = new Set([
+  'shakeplate',
+  'eggcano',
+  'toastbucket',
+  'ricewhip'
+]);
+
+const MENU_SMALL_NAME_WORDS = new Set(['and', 'or', 'of', 'the', 'with', 'in', 'on', 'a', 'an', 'al', 'el', 'la', 'le', 'de', 'di']);
+
+function titleCaseMenuDish(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  if (/[A-Z]/.test(raw.slice(1))) return raw;
+  return raw.toLowerCase().replace(/\p{L}[\p{L}'-]*/gu, (word, offset) => {
+    if (offset > 0 && MENU_SMALL_NAME_WORDS.has(word)) return word;
+    return word.charAt(0).toLocaleUpperCase() + word.slice(1);
+  });
+}
+
+function menuNameTokens(value) {
+  return normaliseMenuNameKey(value).split(/\s+/).filter(Boolean);
+}
+
+function menuLooksLikeKnownFood(value) {
+  const key = normaliseMenuNameKey(value);
+  if (!key) return false;
+  const tokens = menuNameTokens(value);
+  if (tokens.some(token => MENU_CANONICAL_FOOD_TERMS.has(token))) return true;
+  for (const term of MENU_CANONICAL_FOOD_TERMS) {
+    if (term.includes(' ') && key.includes(term)) return true;
+  }
+  return false;
+}
+
+function menuLooksLikeKnownDishEntity(value) {
+  const key = normaliseMenuNameKey(value);
+  if (!key) return false;
+  if (MENU_PRESERVE_DISH_TERMS.has(key)) return true;
+  for (const term of MENU_PRESERVE_DISH_TERMS) {
+    if (term.includes(' ') ? key.includes(term) : menuNameTokens(value).includes(term)) return true;
+  }
+  return false;
+}
+
+function menuLooksInvented(value) {
+  const key = normaliseMenuNameKey(value);
+  if (!key) return true;
+  if (MENU_FAKE_DISH_TERMS.has(key)) return true;
+  const tokens = menuNameTokens(value);
+  return tokens.length === 1 && /(?:bucket|whip|cano|plate)$/.test(tokens[0]) && !menuLooksLikeKnownDishEntity(value);
+}
+
+function levenshteinDistance(a, b) {
+  const left = String(a || '');
+  const right = String(b || '');
+  if (left === right) return 0;
+  if (!left) return right.length;
+  if (!right) return left.length;
+  const prev = Array.from({ length: right.length + 1 }, (_, index) => index);
+  const curr = Array(right.length + 1).fill(0);
+  for (let i = 1; i <= left.length; i += 1) {
+    curr[0] = i;
+    for (let j = 1; j <= right.length; j += 1) {
+      const cost = left[i - 1] === right[j - 1] ? 0 : 1;
+      curr[j] = Math.min(curr[j - 1] + 1, prev[j] + 1, prev[j - 1] + cost);
+    }
+    for (let j = 0; j <= right.length; j += 1) prev[j] = curr[j];
+  }
+  return prev[right.length];
+}
+
+function menuNameSimilarity(left, right) {
+  const a = normaliseMenuNameKey(left);
+  const b = normaliseMenuNameKey(right);
+  if (!a && !b) return 1;
+  if (!a || !b) return 0;
+  const maxLength = Math.max(a.length, b.length);
+  return maxLength ? 1 - (levenshteinDistance(a, b) / maxLength) : 1;
+}
+
+function menuConfidenceScore(confidence, similarity = 1) {
+  const base = confidence === 'high' ? 0.9 : confidence === 'medium' ? 0.65 : 0.35;
+  return Math.max(0.05, Math.min(0.99, Math.round((base * 0.75 + similarity * 0.25) * 100) / 100));
+}
+
+function validateMenuOcrName({ menuText, suggestedName, confidence }) {
+  const originalRaw = cleanMenuText(menuText || suggestedName, 120);
+  const correctedRaw = cleanMenuText(suggestedName || menuText, 120);
+  const original = originalRaw || correctedRaw || 'Menu option';
+  const corrected = correctedRaw || original;
+  const clampedConfidence = clampConfidence(confidence);
+  const similarity = menuNameSimilarity(original, corrected);
+  const changed = normaliseMenuNameKey(original) !== normaliseMenuNameKey(corrected);
+  const lowConfidence = clampedConfidence === 'low' || similarity < 0.72;
+  const originalLooksLikeDish = menuLooksLikeKnownDishEntity(original);
+  const correctedKnown = menuLooksLikeKnownFood(corrected) || menuLooksLikeKnownDishEntity(corrected);
+  const correctedInvented = menuLooksInvented(corrected);
+
+  let displayName = corrected;
+  let correctionPreserved = false;
+  let correctionRejected = false;
+  let reason = '';
+
+  if (changed && lowConfidence && originalLooksLikeDish && (!correctedKnown || correctedInvented)) {
+    displayName = titleCaseMenuDish(original);
+    correctionPreserved = true;
+    correctionRejected = true;
+    reason = 'preserved_likely_dish_name';
+  } else if (correctedInvented && (!correctedKnown || lowConfidence)) {
+    displayName = originalLooksLikeDish ? titleCaseMenuDish(original) : 'Unclear menu item';
+    correctionRejected = true;
+    correctionPreserved = originalLooksLikeDish;
+    reason = originalLooksLikeDish ? 'rejected_invented_correction' : 'rejected_invented_name';
+  } else if (!changed && originalLooksLikeDish && clampedConfidence !== 'high') {
+    displayName = titleCaseMenuDish(original);
+    correctionPreserved = true;
+    reason = 'preserved_uncertain_dish_name';
+  }
+
+  const adjustedConfidence = correctionRejected || (correctionPreserved && clampedConfidence !== 'high')
+    ? 'low'
+    : clampedConfidence;
+
+  return {
+    displayName: cleanMenuText(displayName, 120) || 'Unclear menu item',
+    confidence: adjustedConfidence,
+    ocr: {
+      originalText: original,
+      correctedText: corrected,
+      confidenceScore: menuConfidenceScore(adjustedConfidence, similarity),
+      correctionForced: changed && !correctionPreserved && !correctionRejected,
+      correctionPreserved,
+      correctionRejected,
+      lowConfidence: adjustedConfidence === 'low' || correctionRejected,
+      reason
+    }
+  };
+}
+
 function escapeRegExp(value) {
   return String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
@@ -522,7 +729,7 @@ function slugifyMenuId(value) {
     .slice(0, 50) || 'item';
 }
 
-function normaliseMenuRows(rows, suggestion, index) {
+function normaliseMenuRows(rows, suggestion, index, ocrInfo = null) {
   const rawRows = Array.isArray(rows) ? rows : [];
   const sourceRows = rawRows.length ? rawRows : [{
     name: suggestion && (suggestion.suggestedName || suggestion.menuText) || `Menu option ${index + 1}`,
@@ -537,18 +744,27 @@ function normaliseMenuRows(rows, suggestion, index) {
   return sourceRows
     .filter(row => row && typeof row === 'object')
     .slice(0, 8)
-    .map(row => ({
-      name: String(row.name || 'Menu item').trim() || 'Menu item',
-      quantity: row.quantity === null || row.quantity === undefined || row.quantity === ''
-        ? null
-        : cleanMenuMacro(row.quantity),
-      unit: String(row.unit || 'serving').trim() || 'serving',
-      kcal: cleanMenuKcal(row.kcal ?? row.calories),
-      protein: cleanMenuMacro(row.protein),
-      carbs: cleanMenuMacro(row.carbs),
-      fat: cleanMenuMacro(row.fat),
-      source: 'menu_scan'
-    }))
+    .map(row => {
+      const rawName = String(row.name || 'Menu item').trim() || 'Menu item';
+      const rowNameKey = normaliseMenuNameKey(rawName);
+      const shouldUsePreservedName = ocrInfo && ocrInfo.ocr && ocrInfo.ocr.correctionRejected && (
+        rowNameKey === normaliseMenuNameKey(ocrInfo.ocr.correctedText) ||
+        menuLooksInvented(rawName)
+      );
+      return {
+        name: shouldUsePreservedName ? ocrInfo.displayName : rawName,
+        quantity: row.quantity === null || row.quantity === undefined || row.quantity === ''
+          ? null
+          : cleanMenuMacro(row.quantity),
+        unit: String(row.unit || 'serving').trim() || 'serving',
+        kcal: cleanMenuKcal(row.kcal ?? row.calories),
+        protein: cleanMenuMacro(row.protein),
+        carbs: cleanMenuMacro(row.carbs),
+        fat: cleanMenuMacro(row.fat),
+        source: 'menu_scan',
+        ocr: shouldUsePreservedName ? ocrInfo.ocr : undefined
+      };
+    })
     .filter(row => row.name);
 }
 
@@ -592,21 +808,37 @@ function normaliseMenuScanResult(parsed, context) {
     .map((item, index) => {
       const estimate = normaliseMenuEstimate(item.estimate || {});
       const provisional = { ...item, estimate };
-      const rows = normaliseMenuRows(item.rows, provisional, index);
-      const suggestedName = cleanMenuText(item.suggestedName || rows[0] && rows[0].name || item.menuText || `Menu option ${index + 1}`, 120);
+      const ocrInfo = validateMenuOcrName({
+        menuText: item.menuText || item.suggestedName || item.rows && item.rows[0] && item.rows[0].name || `Menu option ${index + 1}`,
+        suggestedName: item.suggestedName || item.rows && item.rows[0] && item.rows[0].name || item.menuText || `Menu option ${index + 1}`,
+        confidence: item.confidence
+      });
+      const rows = normaliseMenuRows(item.rows, { ...provisional, suggestedName: ocrInfo.displayName }, index, ocrInfo);
+      const suggestedName = cleanMenuText(ocrInfo.displayName || rows[0] && rows[0].name || item.menuText || `Menu option ${index + 1}`, 120);
       const id = cleanMenuText(item.id, 80) || `menu_${index + 1}_${slugifyMenuId(suggestedName)}`;
+      const confidence = ocrInfo.confidence || clampConfidence(item.confidence);
+      const warnings = cleanMenuWarnings(item.warnings);
+      if (ocrInfo.ocr.lowConfidence) {
+        const readLabel = ocrInfo.ocr.correctionRejected
+          ? `Low confidence menu read: we think this says ${suggestedName}. Tap to correct.`
+          : `We think this says ${suggestedName}. Tap to correct if needed.`;
+        if (!warnings.some(warning => normaliseMenuNameKey(warning) === normaliseMenuNameKey(readLabel))) {
+          warnings.unshift(readLabel);
+        }
+      }
       return {
         id,
         menuText: cleanMenuText(item.menuText || suggestedName, 240),
         suggestedName,
         rank: Math.max(1, Math.round(Number(item.rank) || index + 1)),
         fitScore: Math.max(0, Math.min(100, Math.round(Number(item.fitScore) || 0))),
-        confidence: clampConfidence(item.confidence),
+        confidence,
         reason: cleanMenuText(item.reason, 280),
         portionAssumptions: cleanMenuText(item.portionAssumptions, 280),
-        warnings: cleanMenuWarnings(item.warnings),
+        warnings,
         estimate,
-        rows
+        rows,
+        ocr: ocrInfo.ocr
       };
     })
     .filter(item => item.suggestedName && item.rows.length)
@@ -1200,6 +1432,11 @@ app.post('/api/menu-scan', async (req, res) => {
     'You are Sous menu scanner. Recommend visible restaurant menu options against remaining daily macros.',
     'Return JSON only. No markdown, no prose outside JSON.',
     'Read only visible menu text from the image. Do not invent unseen dishes, prices, ingredients, or options.',
+    'Menu mode is tolerant of imperfect OCR, foreign dish names, cuisine terms, and restaurant naming.',
+    'Keep menuText as the most readable original visible menu phrase. Do not normalize it to a basic food database item.',
+    'Only use suggestedName to lightly clean spacing/capitalization or expand an obvious abbreviation.',
+    'Do not aggressively fuzzy-correct dish/entity names. Preserve names such as shakshuka, bibimbap, chilaquiles, arepa reina pepiada, huevos rancheros, croque madame, crème brûlée, and pho.',
+    'If OCR confidence is uncertain, preserve the readable dish/entity phrase and mark confidence low rather than inventing a normalized food phrase.',
     'Estimate only the most relevant visible dishes, not the whole menu. Return top 3 to 5 suggestions.',
     'Known reserved items are already accounted for in remainingAfterKnownReserved. Do not estimate them again and do not include them in suggestion rows.',
     'Use requestTextForMenuRanking, not originalRequestText, when deciding dish fit. originalRequestText is only included for context.',
@@ -1883,6 +2120,8 @@ module.exports = {
   app,
   _test: {
     resolveReservedConsumables,
-    remainingAfterMenuRows
+    remainingAfterMenuRows,
+    validateMenuOcrName,
+    normaliseMenuScanResult
   }
 };

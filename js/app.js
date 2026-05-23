@@ -2014,7 +2014,10 @@ function menuScanRowKey(row={}){
 }
 function menuScanReviewItemFromRow(row={},idx=0){
   const quantity=row.quantity==null?'':`${row.quantity}${row.unit?` ${row.unit}`:''}`;
-  const notes=[quantity,row.notes].map(v=>String(v||'').trim()).filter(Boolean).join(' · ');
+  const ocrNote=row.ocr?.lowConfidence
+    ? `Low confidence menu read: we think this says ${row.name||'this item'}. Tap to correct.`
+    : '';
+  const notes=[quantity,ocrNote,row.notes].map(v=>String(v||'').trim()).filter(Boolean).join(' · ');
   return {
     id:'menu_'+Date.now()+'_'+idx,
     name:String(row.name||'Menu item').trim()||'Menu item',
@@ -2055,6 +2058,7 @@ function menuScanBuildReviewEstimate(suggestion){
     reviewNote:'Menu recommendations are approximate. Restaurant portions, oils, sauces, and prep can vary.',
     notes:[
       _menuScanLastResult?.requestSummary,
+      suggestion?.ocr?.lowConfidence ? `Low confidence menu read: we think this says ${suggestion.suggestedName||'this item'}. Tap to correct.` : '',
       suggestion?.reason,
       suggestion?.portionAssumptions,
       ...(Array.isArray(suggestion?.warnings)?suggestion.warnings:[])
@@ -2104,8 +2108,14 @@ function renderMenuScanResults(data){
       item.portionAssumptions,
       ...(Array.isArray(item.warnings)?item.warnings:[])
     ].map(v=>String(v||'').trim()).filter(Boolean);
+    const ocr=item.ocr&&typeof item.ocr==='object'?item.ocr:null;
     html+=`<div class="menu-scan-card">`;
     html+=`<div class="menu-scan-card-head"><div class="menu-scan-card-title">${photoEstimateEsc(item.suggestedName||'Menu option')}</div><div class="menu-scan-confidence">Estimate confidence: ${photoEstimateEsc(item.confidence||'low')}</div></div>`;
+    if(ocr?.lowConfidence){
+      html+=`<div class="menu-scan-ocr" title="Tap Use this, then edit the row name if needed.">`;
+      html+=`${ocr.correctionRejected?'Low confidence menu read':'We think this says'} ${photoEstimateEsc(item.suggestedName||'this item')}. <span>Tap to correct.</span>`;
+      html+=`</div>`;
+    }
     html+=menuScanFormatMacroSet(likely);
     if(item.reason) html+=`<div class="menu-scan-muted" style="margin-top:8px;">${photoEstimateEsc(item.reason)}</div>`;
     if(warnings.length) html+=`<div class="menu-scan-warning">${warnings.map(photoEstimateEsc).join('<br>')}</div>`;

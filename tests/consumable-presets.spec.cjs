@@ -70,6 +70,115 @@ test('server menu reservations multiply preset macros before subtracting remaini
   expect(_test.remainingAfterMenuRows({ kcal: 3032, protein: 0, carbs: 0, fat: 0 }, reserved).kcal).toBe(2748);
 });
 
+test('menu OCR guard preserves likely real dish names over fake fuzzy corrections', () => {
+  const { _test } = require('../server.js');
+  const result = _test.validateMenuOcrName({
+    menuText: 'Shakshuka',
+    suggestedName: 'shakeplate',
+    confidence: 'low'
+  });
+
+  expect(result.displayName).toBe('Shakshuka');
+  expect(result.confidence).toBe('low');
+  expect(result.ocr).toMatchObject({
+    originalText: 'Shakshuka',
+    correctedText: 'shakeplate',
+    correctionPreserved: true,
+    correctionRejected: true,
+    lowConfidence: true
+  });
+});
+
+test('menu OCR guard keeps cuisine-specific dish names in menu mode', () => {
+  const { _test } = require('../server.js');
+  const terms = [
+    'shakshuka',
+    'bibimbap',
+    'chilaquiles',
+    'arepa reina pepiada',
+    'huevos rancheros',
+    'croque madame',
+    'crème brûlée',
+    'pho',
+    'shakshuka with eggs'
+  ];
+
+  for (const term of terms) {
+    const result = _test.validateMenuOcrName({
+      menuText: term,
+      suggestedName: term,
+      confidence: 'low'
+    });
+    expect(result.displayName.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')).toBe(
+      term.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    );
+    expect(result.ocr.correctionPreserved).toBe(true);
+  }
+});
+
+test('menu OCR guard rejects invented fake dish names', () => {
+  const { _test } = require('../server.js');
+  for (const fakeName of ['shakeplate', 'eggcano', 'toastbucket', 'ricewhip']) {
+    const result = _test.validateMenuOcrName({
+      menuText: fakeName,
+      suggestedName: fakeName,
+      confidence: 'low'
+    });
+    expect(result.displayName).toBe('Unclear menu item');
+    expect(result.ocr.correctionRejected).toBe(true);
+    expect(result.ocr.lowConfidence).toBe(true);
+  }
+});
+
+test('server menu scan normalisation replaces rejected fake row names and exposes OCR metadata', () => {
+  const { _test } = require('../server.js');
+  const result = _test.normaliseMenuScanResult({
+    requestSummary: 'Dinner',
+    customReservedItems: [],
+    suggestions: [{
+      id: 'menu_1',
+      menuText: 'Shakshuka',
+      suggestedName: 'shakeplate',
+      rank: 1,
+      fitScore: 70,
+      confidence: 'low',
+      reason: 'Good fit.',
+      portionAssumptions: 'One restaurant portion.',
+      warnings: [],
+      estimate: {
+        kcal: { low: 350, likely: 450, high: 550 },
+        protein: { low: 15, likely: 22, high: 30 },
+        carbs: { low: 20, likely: 30, high: 40 },
+        fat: { low: 15, likely: 24, high: 32 }
+      },
+      rows: [{
+        name: 'shakeplate',
+        quantity: 1,
+        unit: 'serving',
+        kcal: 450,
+        protein: 22,
+        carbs: 30,
+        fat: 24,
+        source: 'menu_scan'
+      }]
+    }]
+  }, {
+    requestText: 'Dinner',
+    remainingBefore: { kcal: 800, protein: 50, carbs: 80, fat: 30 },
+    reservedItems: []
+  });
+
+  expect(result.suggestions[0].suggestedName).toBe('Shakshuka');
+  expect(result.suggestions[0].rows[0].name).toBe('Shakshuka');
+  expect(result.suggestions[0].confidence).toBe('low');
+  expect(result.suggestions[0].ocr).toMatchObject({
+    correctionPreserved: true,
+    correctionRejected: true,
+    lowConfidence: true
+  });
+  expect(result.suggestions[0].warnings[0]).toContain('Low confidence menu read');
+});
+
 test('unknown consumable text returns null', () => {
   expect(findConsumablePresetByText('truffle risotto')).toBeNull();
 });
