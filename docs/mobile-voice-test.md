@@ -54,6 +54,18 @@ The overlay is hidden for normal users. Tap `copy` to copy the current trace, or
 4. Rotate the phone once if orientation changes are relevant.
 5. Confirm the overlay shows a sane state and the mic can be restarted.
 
+## iPhone Hold-To-Talk Lifecycle Pass
+
+1. In Profile -> Voice, select `Hold to talk`.
+2. Hold the mic, say `oats 75 grams`, wait for the words to appear, then press the side button or swipe away before lifting your finger.
+3. Reopen the PWA and confirm exactly one `Oats` row appears, the state is `idle`, and no automatic restart begins.
+4. Hold the mic again without speaking, open Control Centre or trigger an interruption that cancels the touch, then return.
+5. Confirm no ingredient is added, the state is `idle`, and the copied trace includes `touch cancel`, `page hidden`, or `pagehide`.
+6. Very quickly tap-hold-release the mic.
+7. Confirm the state returns to `idle`, no recognizer remains active, and no ingredient is added.
+8. Rotate the phone while not holding the mic.
+9. Confirm orientation or viewport changes do not start or stop voice by themselves.
+
 ## Modes To Cover
 
 1. Hold-to-talk.

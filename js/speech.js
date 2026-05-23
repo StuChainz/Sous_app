@@ -281,29 +281,35 @@ function pendingQuantitySnapshot(){
   };
 }
 function currentMealRowsSnapshot(){
-  return meal.map(item=>({
-    id:item.id??null,
-    name:item.name||null,
-    weight:item.weight??null,
-    serving:item.serving?{...item.serving}:null,
-    kcal:item.kcal??null,
-    protein:item.protein??null,
-    carbs:item.carbs??null,
-    fat:item.fat??null,
-    rawFood:item.rawFood?.name||null
+  return meal.slice(-8).map((item,index)=>({
+    index:Math.max(0,meal.length-8)+index,
+    hasName:!!item.name,
+    hasWeight:item.weight!=null,
+    hasServing:!!item.serving,
+    hasMacros:item.kcal!=null||item.protein!=null||item.carbs!=null||item.fat!=null,
+    hasRawFood:!!item.rawFood,
+    source:item.source||null
   }));
+}
+function sousVoiceDebugStateSnapshot(){
+  const state=sousVoiceStateSnapshot();
+  return {
+    ...state,
+    meal:{count:meal.length}
+  };
 }
 function sousVoiceDebugExport(){
   return {
     createdAt:new Date().toISOString(),
-    note:'Local debug export only. Sous does not upload this automatically.',
+    note:'Local debug export only. Sous does not upload this automatically. Spoken transcripts may appear in the trace; full meal rows are summarized.',
     owner:voiceOwnerSnapshot(),
     trace:voiceDebugEvents.slice(),
     decisionTrace:voiceDecisionTraceSummary(voiceDebugEvents,8),
-    voiceState:sousVoiceStateSnapshot(),
+    voiceState:sousVoiceDebugStateSnapshot(),
     context:voiceDebugContextSnapshot(),
     pendingClarification:voiceDebugClarificationSnapshot(),
     pendingQuantity:pendingQuantitySnapshot(),
+    currentMealCount:meal.length,
     currentMealRows:currentMealRowsSnapshot()
   };
 }
@@ -5175,7 +5181,7 @@ function buildTapRec(){
     return true;
   };
   r.__sousHasHeardSpeech=()=>!!(pendingTranscript.trim()||lastInterimTrace||tapRunState?.hadSound||tapRunState?.hadSpeech||tapRunState?.hadInterim||tapRunState?.hadFinal);
-  r.onstart=()=>{const run=currentTapRunState();if(!isCurrentTapRun(run)){traceStaleTapRun('tap_onstart',run);return;}const source=currentTapSource();run.startedAt=Date.now();clearVoiceRecognizerStartTimer();tapRecStarting=false;tapRecStopping=false;isRecording=true;voiceCurrentlyListening=true;voiceListenStartedAt=Date.now();setVoiceSessionState('listening','recognition started');voiceDebugTrace('recognizer_start',{source,phase:'started',runId:run.id});voiceDebugTrace('session_restart',{phase:'completed',route:source==='hold'?'hold_recognition':'tap_recognition',restartCount:voiceRestartCount,turnId:activeVoiceTranscriptTurn||null});voiceDebugTrace('session_restart_completed',{route:source==='hold'?'hold_recognition':'tap_recognition',restartCount:voiceRestartCount,turnId:activeVoiceTranscriptTurn||null});console.log('[Sous Voice] listening');logVoiceState('recognition actually started',{source});setMicState('recording');startVoiceListeningWatchdog(source);};
+  r.onstart=()=>{const run=currentTapRunState();if(!isCurrentTapRun(run)){traceStaleTapRun('tap_onstart',run);return;}const source=currentTapSource();if(source==='hold'&&!voiceHoldActive){clearVoiceRecognizerStartTimer();tapRecStarting=false;tapRecStopping=true;voiceCurrentlyListening=false;isRecording=false;voiceDebugTrace('recognizer_start_blocked',{source,reason:'hold_released_before_start',runId:run.id});try{r.stop();}catch(e){}setVoiceSessionState('idle','hold released before recognition started');setHoldIdlePrompt('Hold and speak');return;}run.startedAt=Date.now();clearVoiceRecognizerStartTimer();tapRecStarting=false;tapRecStopping=false;isRecording=true;voiceCurrentlyListening=true;voiceListenStartedAt=Date.now();setVoiceSessionState('listening','recognition started');voiceDebugTrace('recognizer_start',{source,phase:'started',runId:run.id});voiceDebugTrace('session_restart',{phase:'completed',route:source==='hold'?'hold_recognition':'tap_recognition',restartCount:voiceRestartCount,turnId:activeVoiceTranscriptTurn||null});voiceDebugTrace('session_restart_completed',{route:source==='hold'?'hold_recognition':'tap_recognition',restartCount:voiceRestartCount,turnId:activeVoiceTranscriptTurn||null});console.log('[Sous Voice] listening');logVoiceState('recognition actually started',{source});setMicState('recording');startVoiceListeningWatchdog(source);};
   r.onsoundstart=()=>traceTapRunActivity('soundstart',{hadSound:true});
   r.onspeechstart=()=>traceTapRunActivity('speechstart',{hadSound:true,hadSpeech:true});
   r.onspeechend=()=>traceTapRunActivity('speechend',{hadSpeech:true});
@@ -6028,9 +6034,14 @@ function stopHoldToTalk(reason='hold stop'){
   voiceHoldSuppressClickUntil=Date.now()+650;
   voiceDebugTrace('hold_to_talk_stop',{reason});
   const rec=tapRec;
+  const releasedBeforeStart=!!(rec&&tapRecStarting&&!voiceCurrentlyListening&&!isRecording);
   const finalized=!!(rec&&typeof rec.__sousFinalizeNow==='function'&&rec.__sousFinalizeNow('hold released'));
   if(!finalized){
     requestTapStop(reason);
+    if(releasedBeforeStart){
+      voiceDebugTrace('recognizer_start_blocked',{source:'hold',reason:'hold_released_before_start'});
+      setVoiceSessionState('idle','hold released before recognition started');
+    }
     if(!rec&&!tapRecStarting){
       setHoldIdlePrompt('Hold and speak');
     } else {
@@ -6041,6 +6052,34 @@ function stopHoldToTalk(reason='hold stop'){
       },220);
     }
   }
+  return true;
+}
+function holdRecognizerActiveForLifecycle(){
+  return isHoldVoiceInputMode()&&(voiceHoldActive||tapRecStarting||tapRecStopping||voiceCurrentlyListening||isRecording||!!tapRec);
+}
+function pauseVoiceForLifecycle(reason){
+  if(holdRecognizerActiveForLifecycle()){
+    voiceDebugTrace('voice_lifecycle_pause',{reason,inputMode:'hold'});
+    stopHoldToTalk(reason);
+    return true;
+  }
+  if(!voiceSessionActive) return false;
+  voicePausedForVisibility=true;
+  clearVoiceRestartTimer();
+  stopRecognitionForState(reason);
+  setVoiceSessionState('idle',reason);
+  return true;
+}
+function resumeVoiceAfterLifecyclePause(reason){
+  if(!voicePausedForVisibility) return false;
+  voicePausedForVisibility=false;
+  if(isHoldVoiceInputMode()){
+    voiceDebugTrace('voice_lifecycle_resume',{reason,inputMode:'hold',resume:false});
+    setHoldIdlePrompt('Hold to speak');
+    return true;
+  }
+  voiceDebugTrace('voice_lifecycle_resume',{reason,inputMode:getVoiceInputMode(),resume:true});
+  speakCachedResponse('session_resumed',{},()=>scheduleVoiceSessionRestart(VOICE_RESTART_DEFAULT_MS));
   return true;
 }
 function handleMicPointerDown(e){
@@ -6080,6 +6119,10 @@ function preventMicHoldDefault(e){
   if(!isHoldVoiceInputMode()&&!voiceHoldActive) return;
   if(e.cancelable) e.preventDefault();
 }
+function handleMicTouchCancel(e){
+  preventMicHoldDefault(e);
+  if(isHoldVoiceInputMode()||voiceHoldActive) stopHoldToTalk('touch cancel');
+}
 function preventPressSelection(e){
   if(e.cancelable) e.preventDefault();
 }
@@ -6103,25 +6146,17 @@ function wireLogButtons(){
     }
   });
   document.addEventListener('visibilitychange',()=>{
-    if(!voiceSessionActive) return;
     if(document.hidden){
-      voicePausedForVisibility=true;
-      clearVoiceRestartTimer();
-      stopRecognitionForState('page hidden');
-      setVoiceSessionState('idle','page hidden');
+      pauseVoiceForLifecycle('page hidden');
       return;
     }
-    if(voicePausedForVisibility){
-      voicePausedForVisibility=false;
-      speakCachedResponse('session_resumed',{},()=>scheduleVoiceSessionRestart(VOICE_RESTART_DEFAULT_MS));
-    }
+    resumeVoiceAfterLifecyclePause('page visible');
   });
   window.addEventListener('pagehide',()=>{
-    if(!voiceSessionActive) return;
-    voicePausedForVisibility=true;
-    clearVoiceRestartTimer();
-    stopRecognitionForState('pagehide');
-    setVoiceSessionState('idle','pagehide');
+    pauseVoiceForLifecycle('pagehide');
+  });
+  window.addEventListener('blur',()=>{
+    if(holdRecognizerActiveForLifecycle()) pauseVoiceForLifecycle('window blur');
   });
   document.addEventListener('pointerdown',e=>{
     if(!clarificationState?.active) return;
@@ -6140,7 +6175,7 @@ function wireLogButtons(){
   micBtn.addEventListener('touchstart',preventMicHoldDefault,{passive:false});
   micBtn.addEventListener('touchmove',preventMicHoldDefault,{passive:false});
   micBtn.addEventListener('touchend',preventMicHoldDefault,{passive:false});
-  micBtn.addEventListener('touchcancel',preventMicHoldDefault,{passive:false});
+  micBtn.addEventListener('touchcancel',handleMicTouchCancel,{passive:false});
   micBtn.addEventListener('contextmenu',preventPressSelection);
   micBtn.addEventListener('selectstart',preventPressSelection);
   micBtn.addEventListener('dragstart',preventPressSelection);

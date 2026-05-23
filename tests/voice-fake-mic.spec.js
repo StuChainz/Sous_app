@@ -839,6 +839,7 @@ async function runScenario(scenario) {
       localStorage.setItem('sous_onboarding_seen', '1');
       localStorage.setItem('sous_voice_feedback', silentMode ? '0' : '1');
       localStorage.setItem('sous_realtime_voice', '0');
+      localStorage.setItem('sous_voice_input_mode', 'continuous');
       localStorage.setItem('sous_voice_debug_overlay', 'true');
       localStorage.setItem('sous_voice_test_harness', '1');
       localStorage.setItem('sous_voice_fake_mic_test', '1');

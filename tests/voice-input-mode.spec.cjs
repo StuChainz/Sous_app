@@ -1,8 +1,13 @@
 const { test, expect } = require('@playwright/test');
 
-async function installHoldModePage(page, mode = 'hold') {
-  await page.addInitScript(initialMode => {
-    const mode = initialMode || 'hold';
+async function installHoldModePage(page, options = 'hold') {
+  const expectedMode = typeof options === 'string' ? options : (options.mode || 'hold');
+  await page.addInitScript(initialOptions => {
+    const opts = typeof initialOptions === 'string'
+      ? { mode: initialOptions }
+      : (initialOptions || {});
+    const mode = opts.mode || 'hold';
+    const startDelay = Number(opts.startDelay || 0);
     localStorage.clear();
     localStorage.setItem('userPlan', 'free');
     localStorage.setItem('sous_onboarding_seen', '1');
@@ -33,7 +38,7 @@ async function installHoldModePage(page, mode = 'hold') {
         this._ended = false;
         window.__mockVoiceStats.starts += 1;
         window.__mockVoiceStats.active += 1;
-        setTimeout(() => this.onstart && this.onstart(), 0);
+        setTimeout(() => this.onstart && this.onstart(), startDelay);
       }
       stop() {
         window.__mockVoiceStats.stops += 1;
@@ -60,11 +65,11 @@ async function installHoldModePage(page, mode = 'hold') {
     }
     window.SpeechRecognition = MockSpeechRecognition;
     window.webkitSpeechRecognition = MockSpeechRecognition;
-  }, mode);
+  }, options);
   await page.goto('/?sousVoiceTest=1');
   await page.waitForFunction(() => typeof window.__sousVoiceState === 'function');
   await page.evaluate(() => switchTab('log', { fresh: true, silent: true, section: 'breakfast' }));
-  await expect.poll(() => page.evaluate(() => window.__sousVoiceState().voiceInputMode)).toBe(mode);
+  await expect.poll(() => page.evaluate(() => window.__sousVoiceState().voiceInputMode)).toBe(expectedMode);
 }
 
 async function holdStart(page) {
@@ -119,6 +124,86 @@ test('hold-to-talk silence returns to idle without a recovery loop', async ({ pa
   expect(state.listenStatus).toMatch(/Hold (and speak|to speak)/);
   expect(state.meal).toHaveLength(0);
   expect(stats.starts).toBe(1);
+  expect(trace.some(event => event.event === 'session_restart_requested')).toBe(false);
+});
+
+test('very short hold release cannot leave a delayed recognizer listening', async ({ page }) => {
+  await installHoldModePage(page, { mode: 'hold', startDelay: 80 });
+
+  await page.locator('#mic-btn').dispatchEvent('pointerdown', { pointerId: 1, pointerType: 'mouse', bubbles: true });
+  await page.locator('#mic-btn').dispatchEvent('pointerup', { pointerId: 1, pointerType: 'mouse', bubbles: true });
+  await page.waitForTimeout(180);
+
+  const state = await page.evaluate(() => window.__sousVoiceState());
+  const stats = await page.evaluate(() => window.__mockVoiceStats);
+  const trace = await page.evaluate(() => window.sousVoiceDebug());
+  expect(state.state).toBe('idle');
+  expect(state.recognizerActive).toBe(false);
+  expect(state.voiceHoldActive).toBe(false);
+  expect(state.meal).toHaveLength(0);
+  expect(stats.active).toBe(0);
+  expect(trace.some(event => event.event === 'recognizer_start_blocked' && event.reason === 'hold_released_before_start')).toBe(true);
+});
+
+test('touchcancel stops an active hold-to-talk recognizer', async ({ page }) => {
+  await installHoldModePage(page);
+
+  await holdStart(page);
+  await page.locator('#mic-btn').dispatchEvent('touchcancel', { bubbles: true, cancelable: true });
+  await page.waitForTimeout(250);
+
+  const state = await page.evaluate(() => window.__sousVoiceState());
+  const stats = await page.evaluate(() => window.__mockVoiceStats);
+  const trace = await page.evaluate(() => window.sousVoiceDebug());
+  expect(state.state).toBe('idle');
+  expect(state.recognizerActive).toBe(false);
+  expect(state.voiceHoldActive).toBe(false);
+  expect(stats.active).toBe(0);
+  expect(trace.some(event => event.event === 'hold_to_talk_stop' && event.reason === 'touch cancel')).toBe(true);
+});
+
+test('pagehide during hold finalizes a pending final transcript and does not restart', async ({ page }) => {
+  await installHoldModePage(page);
+
+  await holdStart(page);
+  await emitFinal(page, 'oats 75');
+  await page.evaluate(() => window.dispatchEvent(new Event('pagehide')));
+
+  await expect.poll(() => page.evaluate(() => window.__sousVoiceState().processing), { timeout: 5000 }).toBe(false);
+  await expect.poll(() => page.evaluate(() => window.__sousVoiceState().meal.map(item => [item.name, item.weight]))).toEqual([
+    ['Oats', 75]
+  ]);
+
+  const state = await page.evaluate(() => window.__sousVoiceState());
+  const stats = await page.evaluate(() => window.__mockVoiceStats);
+  const trace = await page.evaluate(() => window.sousVoiceDebug());
+  expect(state.sessionActive).toBe(false);
+  expect(state.state).toBe('idle');
+  expect(state.restartCount).toBe(0);
+  expect(stats.active).toBe(0);
+  expect(trace.some(event => event.event === 'voice_lifecycle_pause' && event.reason === 'pagehide' && event.inputMode === 'hold')).toBe(true);
+});
+
+test('visibility loss during hold stops cleanly without adding a silent ingredient', async ({ page }) => {
+  await installHoldModePage(page);
+
+  await holdStart(page);
+  await page.evaluate(() => {
+    Object.defineProperty(document, 'hidden', { configurable: true, value: true });
+    Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'hidden' });
+    document.dispatchEvent(new Event('visibilitychange'));
+  });
+  await page.waitForTimeout(250);
+
+  const state = await page.evaluate(() => window.__sousVoiceState());
+  const stats = await page.evaluate(() => window.__mockVoiceStats);
+  const trace = await page.evaluate(() => window.sousVoiceDebug());
+  expect(state.state).toBe('idle');
+  expect(state.recognizerActive).toBe(false);
+  expect(state.voiceHoldActive).toBe(false);
+  expect(state.meal).toHaveLength(0);
+  expect(stats.active).toBe(0);
+  expect(trace.some(event => event.event === 'voice_lifecycle_pause' && event.reason === 'page hidden' && event.inputMode === 'hold')).toBe(true);
   expect(trace.some(event => event.event === 'session_restart_requested')).toBe(false);
 });
 
