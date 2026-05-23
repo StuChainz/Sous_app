@@ -727,12 +727,14 @@ function assertVoiceInvariants(scenario, result) {
 async function resetAppForScenario(page, scenario) {
   await page.goto('/?sousVoiceTest=1');
   await page.waitForFunction(() => typeof window.__sousStartVoiceTestSession === 'function');
+  await installNoopAIInterpreters(page);
   await page.evaluate(({ silentMode, log, usualMeals }) => {
     localStorage.removeItem('sous_log');
     localStorage.removeItem('sous_usual_meals');
     if (log) localStorage.setItem('sous_log', JSON.stringify(log));
     if (usualMeals) localStorage.setItem('sous_usual_meals', JSON.stringify(usualMeals));
     localStorage.setItem('sous_voice_feedback', silentMode ? '0' : '1');
+    localStorage.setItem('sous_voice_input_mode', 'continuous');
   }, {
     silentMode: scenario.startingState.silentMode !== false,
     log: scenario.startingState.log || null,
@@ -811,13 +813,29 @@ async function waitForNextMockRecognizer(page, previousCount) {
   ).toBe('listening');
 }
 
+async function installNoopAIInterpreters(page) {
+  await page.evaluate(() => {
+    const emptyDraft = section => {
+      if (typeof createMealDraft === 'function') {
+        return createMealDraft({ section, source: 'test', ingredients: [], needsConfirmation: true });
+      }
+      return { section, source: 'test', ingredients: [], needsConfirmation: true, questions: [] };
+    };
+    window.repairTranscriptWithAI = async () => [];
+    window.interpretMealActionWithAI = async () => null;
+    window.interpretMealWithAI = async ({ section = null } = {}) => emptyDraft(section);
+  });
+}
+
 async function setupMockVoiceLifecyclePage(page, { silentMode = true } = {}) {
   await page.route('**/favicon.ico', route => route.fulfill({ status: 204, body: '' }));
+  await page.route('**/api/**', route => route.fulfill({ status: 200, contentType: 'application/json', body: '{}' }));
   await page.addInitScript(({ silentMode }) => {
     localStorage.clear();
     localStorage.setItem('userPlan', 'free');
     localStorage.setItem('sous_onboarding_seen', '1');
     localStorage.setItem('sous_voice_feedback', silentMode ? '0' : '1');
+    localStorage.setItem('sous_voice_input_mode', 'continuous');
     localStorage.setItem('sous_voice_test_harness', '1');
     navigator.mediaDevices = {
       getUserMedia: async () => ({
@@ -909,6 +927,7 @@ async function setupMockVoiceLifecyclePage(page, { silentMode = true } = {}) {
 
   await page.goto('/?sousVoiceTest=1');
   await page.waitForFunction(() => typeof window.__sousStartVoiceTestSession === 'function');
+  await installNoopAIInterpreters(page);
   await page.evaluate(() => {
     switchTab('log', { fresh: true, silent: true, section: 'breakfast' });
     beginVoiceSession();
@@ -1085,12 +1104,18 @@ function validateScenarioResult(scenario, result) {
 test('mass simulated voice regression scenarios', async ({ page }) => {
   expect(scenarios.length).toBeGreaterThanOrEqual(100);
   const consoleErrors = [];
+  const apiCalls = [];
   await page.route('**/favicon.ico', route => route.fulfill({ status: 204, body: '' }));
+  await page.route('**/api/**', route => {
+    apiCalls.push(route.request().url());
+    return route.fulfill({ status: 200, contentType: 'application/json', body: '{}' });
+  });
   await page.addInitScript(() => {
     localStorage.clear();
     localStorage.setItem('userPlan', 'free');
     localStorage.setItem('sous_onboarding_seen', '1');
     localStorage.setItem('sous_voice_feedback', '0');
+    localStorage.setItem('sous_voice_input_mode', 'continuous');
     localStorage.setItem('sous_voice_test_harness', '1');
   });
   page.on('console', msg => {
@@ -1140,22 +1165,25 @@ test('mass simulated voice regression scenarios', async ({ page }) => {
   }
 
   const failed = results.filter(result => !result.ok);
-  if (failed.length || consoleErrors.length) {
-    console.log(JSON.stringify({ scenarioCount: scenarios.length, failed, consoleErrors }, null, 2));
+  if (failed.length || consoleErrors.length || apiCalls.length) {
+    console.log(JSON.stringify({ scenarioCount: scenarios.length, failed, consoleErrors, apiCalls }, null, 2));
   } else {
     console.log(`Voice mass regression passed ${scenarios.length} scenarios.`);
   }
   expect(consoleErrors, 'console errors').toEqual([]);
+  expect(apiCalls, 'unexpected /api calls').toEqual([]);
   expect(failed, 'failed voice scenarios').toEqual([]);
 });
 
 test('C simulated SpeechRecognition interim then final transcript follows turn invariants', async ({ page }) => {
   await page.route('**/favicon.ico', route => route.fulfill({ status: 204, body: '' }));
+  await page.route('**/api/**', route => route.fulfill({ status: 200, contentType: 'application/json', body: '{}' }));
   await page.addInitScript(() => {
     localStorage.clear();
     localStorage.setItem('userPlan', 'free');
     localStorage.setItem('sous_onboarding_seen', '1');
     localStorage.setItem('sous_voice_feedback', '0');
+    localStorage.setItem('sous_voice_input_mode', 'continuous');
     localStorage.setItem('sous_voice_test_harness', '1');
     navigator.mediaDevices = {
       getUserMedia: async () => ({
@@ -1220,6 +1248,7 @@ test('C simulated SpeechRecognition interim then final transcript follows turn i
 
   await page.goto('/?sousVoiceTest=1');
   await page.waitForFunction(() => typeof window.__sousStartVoiceTestSession === 'function');
+  await installNoopAIInterpreters(page);
   await page.evaluate(() => {
     switchTab('log', { fresh: true, silent: true, section: 'breakfast' });
     beginVoiceSession();
@@ -1257,11 +1286,13 @@ test('C simulated SpeechRecognition interim then final transcript follows turn i
 
 test('tap recognizer start stall hard resets and accepts the next run', async ({ page }) => {
   await page.route('**/favicon.ico', route => route.fulfill({ status: 204, body: '' }));
+  await page.route('**/api/**', route => route.fulfill({ status: 200, contentType: 'application/json', body: '{}' }));
   await page.addInitScript(() => {
     localStorage.clear();
     localStorage.setItem('userPlan', 'free');
     localStorage.setItem('sous_onboarding_seen', '1');
     localStorage.setItem('sous_voice_feedback', '0');
+    localStorage.setItem('sous_voice_input_mode', 'continuous');
     localStorage.setItem('sous_voice_test_harness', '1');
     navigator.mediaDevices = {
       getUserMedia: async () => ({
@@ -1328,6 +1359,7 @@ test('tap recognizer start stall hard resets and accepts the next run', async ({
 
   await page.goto('/?sousVoiceTest=1');
   await page.waitForFunction(() => typeof window.__sousStartVoiceTestSession === 'function');
+  await installNoopAIInterpreters(page);
   await page.evaluate(() => {
     switchTab('log', { fresh: true, silent: true, section: 'breakfast' });
     beginVoiceSession();
@@ -1616,11 +1648,13 @@ test('final transcript followed by no-speech logs once and avoids fallback', asy
 
 test('quantity success feedback owns restart when iOS audio fallback is blocked', async ({ page }) => {
   await page.route('**/favicon.ico', route => route.fulfill({ status: 204, body: '' }));
+  await page.route('**/api/**', route => route.fulfill({ status: 200, contentType: 'application/json', body: '{}' }));
   await page.addInitScript(() => {
     localStorage.clear();
     localStorage.setItem('userPlan', 'free');
     localStorage.setItem('sous_onboarding_seen', '1');
     localStorage.setItem('sous_voice_feedback', '0');
+    localStorage.setItem('sous_voice_input_mode', 'continuous');
     localStorage.setItem('sous_voice_test_harness', '1');
     navigator.mediaDevices = {
       getUserMedia: async () => ({
@@ -1674,6 +1708,7 @@ test('quantity success feedback owns restart when iOS audio fallback is blocked'
 
   await page.goto('/?sousVoiceTest=1');
   await page.waitForFunction(() => typeof window.__sousStartVoiceTestSession === 'function');
+  await installNoopAIInterpreters(page);
   await page.evaluate(() => {
     switchTab('log', { fresh: true, silent: true, section: 'breakfast' });
     beginVoiceSession();
@@ -1724,11 +1759,13 @@ test('quantity success feedback owns restart when iOS audio fallback is blocked'
 
 test('AI memory intent guardrails require confidence and local refs', async ({ page }) => {
   await page.route('**/favicon.ico', route => route.fulfill({ status: 204, body: '' }));
+  await page.route('**/api/**', route => route.fulfill({ status: 200, contentType: 'application/json', body: '{}' }));
   await page.addInitScript(() => {
     localStorage.clear();
     localStorage.setItem('userPlan', 'pro');
     localStorage.setItem('sous_onboarding_seen', '1');
     localStorage.setItem('sous_voice_feedback', '0');
+    localStorage.setItem('sous_voice_input_mode', 'continuous');
     localStorage.setItem('sous_voice_test_harness', '1');
   });
   await page.goto('/?sousVoiceTest=1');
@@ -1795,11 +1832,13 @@ test('AI memory intent guardrails require confidence and local refs', async ({ p
 
 test.fail('warning: direct transcript helper bypasses browser SpeechRecognition lifecycle', async ({ page }) => {
   await page.route('**/favicon.ico', route => route.fulfill({ status: 204, body: '' }));
+  await page.route('**/api/**', route => route.fulfill({ status: 200, contentType: 'application/json', body: '{}' }));
   await page.addInitScript(() => {
     localStorage.clear();
     localStorage.setItem('userPlan', 'free');
     localStorage.setItem('sous_onboarding_seen', '1');
     localStorage.setItem('sous_voice_feedback', '0');
+    localStorage.setItem('sous_voice_input_mode', 'continuous');
     localStorage.setItem('sous_voice_test_harness', '1');
   });
   await page.goto('/?sousVoiceTest=1');
@@ -1813,11 +1852,13 @@ test.fail('warning: direct transcript helper bypasses browser SpeechRecognition 
 
 test('non-silent voice prompts request audible feedback', async ({ page }) => {
   await page.route('**/favicon.ico', route => route.fulfill({ status: 204, body: '' }));
+  await page.route('**/api/**', route => route.fulfill({ status: 200, contentType: 'application/json', body: '{}' }));
   await page.addInitScript(() => {
     localStorage.clear();
     localStorage.setItem('userPlan', 'free');
     localStorage.setItem('sous_onboarding_seen', '1');
     localStorage.setItem('sous_voice_feedback', '1');
+    localStorage.setItem('sous_voice_input_mode', 'continuous');
     localStorage.setItem('sous_voice_test_harness', '1');
     navigator.mediaDevices = {
       getUserMedia: async () => ({
@@ -1882,6 +1923,7 @@ test('non-silent voice prompts request audible feedback', async ({ page }) => {
 
   await page.goto('/?sousVoiceTest=1');
   await page.waitForFunction(() => typeof window.__sousStartVoiceTestSession === 'function');
+  await installNoopAIInterpreters(page);
 
   await page.evaluate(() => {
     switchTab('log', { fresh: true, silent: true, section: 'breakfast' });

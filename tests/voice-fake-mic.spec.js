@@ -936,6 +936,7 @@ async function runScenario(scenario) {
 
     await page.goto('/?sousVoiceTest=1');
     await page.waitForFunction(() => typeof window.__sousVoiceState === 'function');
+    await installNoopAIInterpreters(page);
     await page.evaluate(() => {
       window.__sousVoiceTrace = () => window.sousVoiceDebug ? window.sousVoiceDebug() : [];
     });
@@ -968,6 +969,20 @@ async function runScenario(scenario) {
   } finally {
     await browser.close().catch(() => {});
   }
+}
+
+async function installNoopAIInterpreters(page) {
+  await page.evaluate(() => {
+    const emptyDraft = section => {
+      if (typeof createMealDraft === 'function') {
+        return createMealDraft({ section, source: 'test', ingredients: [], needsConfirmation: true });
+      }
+      return { section, source: 'test', ingredients: [], needsConfirmation: true, questions: [] };
+    };
+    window.repairTranscriptWithAI = async () => [];
+    window.interpretMealActionWithAI = async () => null;
+    window.interpretMealWithAI = async ({ section = null } = {}) => emptyDraft(section);
+  });
 }
 
 async function resolveRecognitionMode(fixturePath, scenario) {
