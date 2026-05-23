@@ -1,14 +1,15 @@
 const { test, expect } = require('@playwright/test');
 
-async function installHoldModePage(page) {
-  await page.addInitScript(() => {
+async function installHoldModePage(page, mode = 'hold') {
+  await page.addInitScript(initialMode => {
+    const mode = initialMode || 'hold';
     localStorage.clear();
     localStorage.setItem('userPlan', 'free');
     localStorage.setItem('sous_onboarding_seen', '1');
     localStorage.setItem('sous_voice_feedback', '0');
     localStorage.setItem('sous_realtime_voice', '0');
     localStorage.setItem('sous_voice_test_harness', '1');
-    localStorage.setItem('sous_voice_input_mode', 'hold');
+    localStorage.setItem('sous_voice_input_mode', mode);
     window.__mockVoiceStats = { starts: 0, stops: 0, ends: 0, active: 0 };
     window.__mockRecognizers = [];
     class MockSpeechRecognition {
@@ -59,11 +60,11 @@ async function installHoldModePage(page) {
     }
     window.SpeechRecognition = MockSpeechRecognition;
     window.webkitSpeechRecognition = MockSpeechRecognition;
-  });
+  }, mode);
   await page.goto('/?sousVoiceTest=1');
   await page.waitForFunction(() => typeof window.__sousVoiceState === 'function');
   await page.evaluate(() => switchTab('log', { fresh: true, silent: true, section: 'breakfast' }));
-  await expect.poll(() => page.evaluate(() => window.__sousVoiceState().voiceInputMode)).toBe('hold');
+  await expect.poll(() => page.evaluate(() => window.__sousVoiceState().voiceInputMode)).toBe(mode);
 }
 
 async function holdStart(page) {
@@ -178,6 +179,48 @@ test('hold-to-talk ignores stale callbacks from an old recognizer run', async ({
   const state = await page.evaluate(() => window.__sousVoiceState());
   const trace = await page.evaluate(() => window.sousVoiceDebug());
   expect(state.meal.map(item => item.name)).toEqual(['Oats']);
+  expect(trace.some(event => event.event === 'stale_callback_ignored')).toBe(true);
+});
+
+test('switching continuous to hold invalidates in-flight recognizer callbacks', async ({ page }) => {
+  await installHoldModePage(page, 'continuous');
+
+  await page.evaluate(() => beginVoiceSession());
+  await expect.poll(() => page.evaluate(() => window.__sousVoiceState().state), { timeout: 3000 }).toBe('listening');
+
+  await page.evaluate(() => setVoiceInputMode('hold'));
+  await page.evaluate(() => {
+    window.__mockRecognizers[window.__mockRecognizers.length - 1].__emitFinal('banana 2');
+    window.__mockRecognizers[window.__mockRecognizers.length - 1].__finish();
+  });
+  await page.waitForTimeout(900);
+
+  const state = await page.evaluate(() => window.__sousVoiceState());
+  const trace = await page.evaluate(() => window.sousVoiceDebug());
+  expect(state.voiceInputMode).toBe('hold');
+  expect(state.sessionActive).toBe(false);
+  expect(state.meal).toHaveLength(0);
+  expect(trace.some(event => event.event === 'stale_callback_ignored')).toBe(true);
+  expect(trace.some(event => event.event === 'session_restart_requested')).toBe(false);
+});
+
+test('switching hold to continuous invalidates held recognizer callbacks', async ({ page }) => {
+  await installHoldModePage(page);
+
+  await holdStart(page);
+  const holdRecognizerIndex = await page.evaluate(() => window.__mockRecognizers.length - 1);
+  await page.evaluate(() => setVoiceInputMode('continuous'));
+  await page.evaluate(index => {
+    window.__mockRecognizers[index].__emitFinal('oats 75');
+    window.__mockRecognizers[index].__finish();
+  }, holdRecognizerIndex);
+  await page.waitForTimeout(900);
+
+  const state = await page.evaluate(() => window.__sousVoiceState());
+  const trace = await page.evaluate(() => window.sousVoiceDebug());
+  expect(state.voiceInputMode).toBe('continuous');
+  expect(state.meal).toHaveLength(0);
+  expect(state.state).toBe('idle');
   expect(trace.some(event => event.event === 'stale_callback_ignored')).toBe(true);
 });
 

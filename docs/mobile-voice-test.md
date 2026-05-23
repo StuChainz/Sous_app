@@ -26,15 +26,25 @@ location.reload();
 
 The overlay is hidden for normal users. Tap `copy` to copy the current trace, or `x` to hide it until the next reload.
 
-## Core Pass
+## Hold-To-Talk Core Pass
 
-1. Start a cooking log and tap the mic.
-2. Say `100 grams chicken breast`.
-3. Confirm the overlay reaches `listening`, then `processing`, then `restarting` or `listening`.
-4. Say a correction, such as `change chicken to rice`.
-5. Confirm the last action updates and no duplicate recognizer appears.
-6. Wait silently through a no-speech case.
-7. Confirm the last error or recovery line updates and listening restarts when expected.
+1. In Profile -> Voice, select `Hold to talk`.
+2. Start a log and hold the mic.
+3. Say `100 grams chicken breast`, then release.
+4. Confirm the overlay reaches `listening`, then `processing`, then `idle`.
+5. Repeat hold-to-talk with `change chicken to rice`.
+6. Confirm the last action updates and no duplicate recognizer appears.
+7. Hold the mic briefly without speaking, then release.
+8. Confirm the state returns to `idle`, no ingredient is added, and no restart loop begins.
+
+## Mode Conflict Pass
+
+1. Select `Continuous`, start voice logging, then immediately switch to `Hold to talk`.
+2. Confirm listening stops, session shows inactive, and no late ingredient appears.
+3. Select `Hold to talk`, hold the mic, then switch to `Continuous` before releasing.
+4. Confirm any late transcript is ignored. In the copied trace, look for `stale_callback_ignored`.
+5. Start a fresh hold-to-talk input with `oats 75 grams`.
+6. Confirm exactly one ingredient row is added.
 
 ## Mobile/PWA Pass
 
@@ -46,11 +56,12 @@ The overlay is hidden for normal users. Tap `copy` to copy the current trace, or
 
 ## Modes To Cover
 
-1. Standard voice.
-2. Realtime enabled.
-3. Silent feedback mode.
-4. Low-confidence or unclear input.
-5. Correction after a successful add.
+1. Hold-to-talk.
+2. Continuous.
+3. Realtime enabled in continuous mode.
+4. Silent feedback mode.
+5. Low-confidence or unclear input.
+6. Correction after a successful add.
 
 ## Report Format
 

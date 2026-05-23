@@ -12,7 +12,7 @@ let voiceTapHardResetCount=0, voiceRecoveryCueCooldownUntil=0;
 let voiceListenStartedAt=0;
 let voiceTestEvents=[];
 let voiceTranscriptTurn=0, activeVoiceTranscriptTurn=0, lastAcceptedTranscript='', lastAcceptedTranscriptAt=0;
-let voiceSessionId=0, voiceRecognizerRunId=0;
+let voiceSessionId=0, voiceRecognizerRunId=0, voiceInputModeEpoch=0;
 let voiceOutcomeTurns=new Set();
 let voiceTranscriptClaims=new Set(), voiceValidTurns=new Map(), voiceIngredientClaims=new Set();
 let voicePromptOwner=null;
@@ -56,6 +56,8 @@ function voiceOwnerSnapshot(extra={}){
   return {
     sessionId:voiceSessionId,
     recognizerRunId:voiceRecognizerRunId,
+    inputMode:getVoiceInputMode(),
+    modeEpoch:voiceInputModeEpoch,
     turnId:activeVoiceTranscriptTurn||null,
     promptOwner:voicePromptOwner?{...voicePromptOwner}:null,
     sessionActive:!!voiceSessionActive,
@@ -66,6 +68,8 @@ function voiceOwnerSnapshot(extra={}){
 function isCurrentVoiceOwner(owner={}){
   if(owner.sessionId!=null&&owner.sessionId!==voiceSessionId) return false;
   if(owner.recognizerRunId!=null&&owner.recognizerRunId!==voiceRecognizerRunId) return false;
+  if(owner.modeEpoch!=null&&owner.modeEpoch!==voiceInputModeEpoch) return false;
+  if(owner.inputMode&&owner.inputMode!==getVoiceInputMode()) return false;
   if(owner.turnId!=null&&owner.turnId!==activeVoiceTranscriptTurn) return false;
   return true;
 }
@@ -86,6 +90,11 @@ function nextVoiceRecognizerRunId(source,reason){
   voiceRecognizerRunId++;
   voiceDebugTrace('voice_owner_changed',{ownerType:'recognizer_run',source,recognizerRunId:voiceRecognizerRunId,reason});
   return voiceRecognizerRunId;
+}
+function nextVoiceInputModeEpoch(previous,next,reason){
+  voiceInputModeEpoch++;
+  voiceDebugTrace('voice_owner_changed',{ownerType:'input_mode',previous,next,inputMode:getVoiceInputMode(),modeEpoch:voiceInputModeEpoch,reason});
+  return voiceInputModeEpoch;
 }
 
 function voiceDebugClarificationSnapshot(){
@@ -678,8 +687,16 @@ function setVoiceInputMode(mode){
   try{localStorage.setItem(VOICE_INPUT_MODE_KEY,next);}catch(e){}
   if(previous!==next){
     voiceDebugTrace('voice_input_mode_changed',{previous,next});
-    if(next==='hold'&&voiceSessionActive) endVoiceSession('Hold to speak');
-    else if(previous==='hold'&&voiceHoldActive) stopHoldToTalk('voice mode changed');
+    nextVoiceInputModeEpoch(previous,next,'voice input mode changed');
+    if(voiceSessionActive||voiceHoldActive||tapRec||tapRecStarting||tapRecStopping||voiceCurrentlyListening||isRecording||processingTranscript||isSpeaking||sousRealtime||sousRealtimeStarting||clarificationRec){
+      stopAllVoiceActivity('voice input mode changed');
+    } else {
+      invalidateVoiceTurns('voice input mode changed');
+      clearVoiceRestartTimer();
+      clearVoiceRecognizerStartTimer();
+      clearVoiceListeningWatchdog();
+    }
+    if(next==='hold') setHoldIdlePrompt('Hold to speak');
   }
   updateVoiceInputModeControls();
   return next;
@@ -784,10 +801,14 @@ function finishSkippedVoiceFeedback(onEnd){
     scheduleVoiceSessionRestart(VOICE_RESTART_DEFAULT_MS);
   }
 }
-function startVoiceListeningWatchdog(source='tap'){
+function startVoiceListeningWatchdog(source='tap',owner=voiceOwnerSnapshot({source})){
   clearVoiceListeningWatchdog();
   voiceListeningWatchdogTimer=setTimeout(()=>{
     voiceListeningWatchdogTimer=null;
+    if(!isCurrentVoiceOwner(owner)){
+      traceStaleVoiceCallback('voice_listening_watchdog',owner,{source});
+      return;
+    }
     if(!voiceSessionActive||voiceSessionState!=='listening'||processingTranscript||isSpeaking) return;
     voiceDebugTrace('voice_recovery',{issue:'listening_stalled',source});
     voiceDebugTrace('voice_error',{source,error:'listening_stalled'});
@@ -817,6 +838,8 @@ function voiceContextFromOwner(owner,turnId=null){
     source:'voice',
     sessionId:owner.sessionId,
     recognizerRunId:owner.recognizerRunId,
+    inputMode:owner.inputMode,
+    modeEpoch:owner.modeEpoch,
     turnId
   };
 }
@@ -826,13 +849,16 @@ function isVoiceContext(context){
 function isVoiceTurnValid(context,source='voice_turn'){
   if(!isVoiceContext(context)) return true;
   const turn=voiceValidTurns.get(context.turnId);
-  const valid=!!turn&&!turn.invalidated&&turn.sessionId===context.sessionId&&turn.recognizerRunId===context.recognizerRunId;
+  const modeMatches=(context.modeEpoch==null||context.modeEpoch===voiceInputModeEpoch)&&(!context.inputMode||context.inputMode===getVoiceInputMode());
+  const valid=!!turn&&!turn.invalidated&&turn.sessionId===context.sessionId&&turn.recognizerRunId===context.recognizerRunId&&modeMatches;
   if(!valid){
     traceStaleVoiceCallback(source,context,{
       reason:'voice_turn_invalid',
       turnId:context.turnId,
       sessionId:context.sessionId,
-      recognizerRunId:context.recognizerRunId
+      recognizerRunId:context.recognizerRunId,
+      inputMode:context.inputMode||null,
+      modeEpoch:context.modeEpoch??null
     });
   }
   return valid;
@@ -910,6 +936,8 @@ function beginVoiceTranscriptTurn(transcript,context=null){
     voiceValidTurns.set(turnId,{
       sessionId:context.sessionId,
       recognizerRunId:context.recognizerRunId,
+      inputMode:context.inputMode||getVoiceInputMode(),
+      modeEpoch:context.modeEpoch??voiceInputModeEpoch,
       startedAt:Date.now()
     });
   }
@@ -1189,14 +1217,19 @@ function scheduleVoiceSessionRestart(delay=VOICE_RESTART_DEFAULT_MS){
     return;
   }
   clearVoiceRestartTimer();
+  const restartOwner=voiceOwnerSnapshot({source:'restart'});
   const safeDelay=Math.max(VOICE_RESTART_MIN_MS,Math.min(700,Number(delay)||VOICE_RESTART_DEFAULT_MS));
   logVoiceState('restart scheduled',{delay:safeDelay});
-  voiceDebugTrace('session_restart',{phase:'requested',delay:safeDelay,turnId:activeVoiceTranscriptTurn||null});
-  voiceDebugTrace('session_restart_requested',{delay:safeDelay,turnId:activeVoiceTranscriptTurn||null});
+  voiceDebugTrace('session_restart',{phase:'requested',delay:safeDelay,turnId:activeVoiceTranscriptTurn||null,inputMode:restartOwner.inputMode,modeEpoch:restartOwner.modeEpoch});
+  voiceDebugTrace('session_restart_requested',{delay:safeDelay,turnId:activeVoiceTranscriptTurn||null,inputMode:restartOwner.inputMode,modeEpoch:restartOwner.modeEpoch});
   traceVoiceDecision('restart_requested',{delay:safeDelay,turnId:activeVoiceTranscriptTurn||null});
   if(!isSpeaking&&!processingTranscript) setVoiceSessionState('restarting','restart scheduled',{delay:safeDelay});
   voiceRestartTimer=setTimeout(()=>{
     voiceRestartTimer=null;
+    if(!isCurrentVoiceOwner(restartOwner)){
+      traceStaleVoiceCallback('session_restart_timer',restartOwner,{source:'restart'});
+      return;
+    }
     const block=voiceRestartBlockReason();
     if(block){
       logRestartBlocked(block);
@@ -5576,7 +5609,8 @@ async function startSousRealtimeVoice(){
   try{if(clarificationRec)clarificationRec.stop();}catch(e){}
   clarificationRec=null;
   nextVoiceRecognizerRunId('realtime','recognition start requested');
-  voiceDebugTrace('recognizer_start',{source:'realtime',phase:'requested'});
+  const realtimeOwner=voiceOwnerSnapshot({source:'realtime'});
+  voiceDebugTrace('recognizer_start',{source:'realtime',phase:'requested',inputMode:realtimeOwner.inputMode,modeEpoch:realtimeOwner.modeEpoch});
   hideVoiceCorrectBar();
   pauseAlwaysOn();
   const el=document.getElementById('transcript-text'); if(el) el.textContent='—';
@@ -5596,6 +5630,11 @@ async function startSousRealtimeVoice(){
     });
     const tokenData=await tokenRes.json().catch(()=>({}));
     if(!tokenRes.ok) throw new Error(tokenData.error||'Realtime session failed');
+    if(!isCurrentVoiceOwner(realtimeOwner)){
+      sousRealtimeStarting=false;
+      traceStaleVoiceCallback('realtime_session_started',realtimeOwner,{source:'realtime'});
+      return;
+    }
     const secret=realtimeClientSecret(tokenData);
     if(!secret) throw new Error('Realtime client secret missing');
 
@@ -5608,12 +5647,23 @@ async function startSousRealtimeVoice(){
         autoGainControl:true
       }
     });
+    if(!isCurrentVoiceOwner(realtimeOwner)){
+      sousRealtimeStarting=false;
+      try{stream&&stream.getTracks&&stream.getTracks().forEach(track=>track.stop());}catch(e){}
+      traceStaleVoiceCallback('realtime_stream_ready',realtimeOwner,{source:'realtime'});
+      return;
+    }
     stream.getAudioTracks().forEach(track=>pc.addTrack(track,stream));
     const audio=document.createElement('audio');
     audio.autoplay=true;
     pc.ontrack=e=>{audio.srcObject=e.streams[0];};
     sousRealtime={active:true,pc,dc,stream,audio,textBuffer:'',idleTimer:null};
     dc.addEventListener('open',()=>{
+      if(!isCurrentVoiceOwner(realtimeOwner)){
+        traceStaleVoiceCallback('realtime_open',realtimeOwner,{source:'realtime'});
+        stopSousRealtimeVoice(false);
+        return;
+      }
       console.log('[Sous Realtime] connected');
       sousRealtimeStarting=false;
       isRecording=true;
@@ -5624,15 +5674,23 @@ async function startSousRealtimeVoice(){
       console.log('[Sous Voice] listening');
       logVoiceState('recognition actually started',{source:'realtime'});
       setMicState('recording');
-      startVoiceListeningWatchdog('realtime');
+      startVoiceListeningWatchdog('realtime',realtimeOwner);
       clearTimeout(sousRealtime.idleTimer);
       sousRealtime.idleTimer=setTimeout(()=>stopSousRealtimeVoice(true),60000);
     });
     dc.addEventListener('message',e=>{
+      if(!isCurrentVoiceOwner(realtimeOwner)){
+        traceStaleVoiceCallback('realtime_message',realtimeOwner,{source:'realtime'});
+        return;
+      }
       try{handleRealtimeServerEvent(JSON.parse(e.data));}
       catch(err){console.log('[Sous Realtime] error', err.message);}
     });
     pc.addEventListener('connectionstatechange',()=>{
+      if(!isCurrentVoiceOwner(realtimeOwner)){
+        traceStaleVoiceCallback('realtime_connectionstatechange',realtimeOwner,{source:'realtime',state:pc.connectionState});
+        return;
+      }
       if(['failed','disconnected','closed'].includes(pc.connectionState)){
         const wasListening=voiceSessionState==='listening';
         stopSousRealtimeVoice(false);
@@ -5654,6 +5712,11 @@ async function startSousRealtimeVoice(){
       body:offer.sdp
     });
     if(!sdpRes.ok) throw new Error('Realtime connection failed');
+    if(!isCurrentVoiceOwner(realtimeOwner)){
+      traceStaleVoiceCallback('realtime_sdp_ready',realtimeOwner,{source:'realtime'});
+      stopSousRealtimeVoice(false);
+      return;
+    }
     await pc.setRemoteDescription({type:'answer',sdp:await sdpRes.text()});
   }catch(e){
     console.log('[Sous Realtime] error', e.message);
@@ -5689,6 +5752,14 @@ function startTapRec(opts={}){
   if(opts.sessionRestart&&!canRestartVoiceListening()) return;
   const holdToTalk=!!opts.holdToTalk;
   const recognizerSource=holdToTalk?'hold':'tap';
+  if(holdToTalk&&!isHoldVoiceInputMode()){
+    voiceDebugTrace('recognizer_start_blocked',{source:recognizerSource,reason:'hold_start_outside_hold_mode',inputMode:getVoiceInputMode(),modeEpoch:voiceInputModeEpoch});
+    return;
+  }
+  if(!holdToTalk&&isHoldVoiceInputMode()){
+    voiceDebugTrace('recognizer_start_blocked',{source:recognizerSource,reason:'tap_start_in_hold_mode',inputMode:getVoiceInputMode(),modeEpoch:voiceInputModeEpoch});
+    return;
+  }
   logVoiceState('recognition start requested',{sessionRestart:!!opts.sessionRestart,holdToTalk});
   hideVoiceCorrectBar();
   const block=voiceRestartBlockReason();
@@ -5922,8 +5993,8 @@ function startHoldToTalk(reason='hold start'){
     return true;
   }
   if(isSpeaking){
-    try{window.speechSynthesis&&window.speechSynthesis.cancel();}catch(e){}
-    setVoiceSpeaking(false,'hold started during speech',null,{restart:false});
+    voiceDebugTrace('hold_to_talk_ignored',{phase:'start',reason:'speaking'});
+    return true;
   }
   hideVoiceCorrectBar();
   clearVoiceRestartTimer();
