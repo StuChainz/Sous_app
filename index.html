@@ -181,6 +181,7 @@ html,body{height:100%;height:var(--app-height);min-height:-webkit-fill-available
 .bug-report-sheet{max-width:390px;}
 .bug-report-textarea{width:100%;min-height:120px;resize:vertical;background:var(--bg);border:.5px solid var(--border);border-radius:var(--radius-sm);color:var(--text);font-family:'Geist',sans-serif;font-size:14px;line-height:1.45;padding:12px;outline:none;margin-bottom:14px;}
 .bug-report-textarea:focus{border-color:var(--accent-2);}
+.bug-report-output{width:100%;min-height:160px;display:none;resize:vertical;background:var(--bg);border:.5px solid var(--border);border-radius:var(--radius-sm);color:var(--text);font-family:'Geist Mono',monospace;font-size:11px;line-height:1.45;padding:10px;outline:none;margin-top:10px;white-space:pre;}
 .bug-report-status{min-height:18px;color:var(--text-muted);font-size:12px;line-height:1.4;margin-top:10px;}
 @media (max-height:620px){
   .onboarding-dialog{padding-top:10px;}
@@ -1208,6 +1209,19 @@ html,body{height:100%;height:var(--app-height);min-height:-webkit-fill-available
       </div>
 
       <div class="section">
+        <div class="section-label">Diagnostics</div>
+        <div class="card">
+          <div class="form-row" style="border-bottom:none;">
+            <div>
+              <div class="form-row-label">Diagnostics report</div>
+              <div class="form-row-sub">Export browser, voice, photo, barcode, and safe count summaries</div>
+            </div>
+            <button class="btn-secondary" type="button" id="profile-diagnostics-btn" style="flex:0 0 auto;width:auto;padding:8px 12px;"><i class="ti ti-bug"></i> Report</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="section">
         <div class="section-label">Help</div>
         <div class="card">
           <div class="form-row" style="border-bottom:none;">
@@ -1248,10 +1262,12 @@ html,body{height:100%;height:var(--app-height);min-height:-webkit-fill-available
     </div>
     <textarea class="bug-report-textarea" id="bug-report-note" placeholder="What did you say or tap? What did Jot do instead?"></textarea>
     <div class="modal-btns">
-      <button class="modal-btn primary" type="button" id="bug-report-copy">Copy bug report</button>
+      <button class="modal-btn primary" type="button" id="bug-report-copy">Copy report</button>
+      <button class="modal-btn secondary" type="button" id="bug-report-download">Download report</button>
       <button class="modal-btn secondary" type="button" id="bug-report-cancel">Cancel</button>
     </div>
     <div class="bug-report-status" id="bug-report-status" aria-live="polite"></div>
+    <textarea class="bug-report-output" id="bug-report-output" readonly aria-label="Diagnostics report JSON" data-testid="bug-report-output"></textarea>
   </div>
 </div>
 
@@ -1750,7 +1766,7 @@ window.sousApiUrl=path=>`${window.SOUS_API_BASE}${path}`;
 <script src="js/profile.js?v=8"></script>
 <script src="js/recipes.js?v=8"></script>
 <script src="js/onboarding.js?v=1"></script>
-<script src="js/test-mode.js?v=4"></script>
+<script src="js/test-mode.js?v=5"></script>
 <script src="js/app.js?v=19"></script>
 <script src="js/ai-interpreter.js?v=3"></script>
 <script src="js/barcode.js?v=2"></script>

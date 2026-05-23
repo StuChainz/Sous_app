@@ -260,26 +260,209 @@
     };
   }
 
-  function buildBugReport(note=''){
-    let appVersion=null;
+  function safeJsonParse(raw,fallback){
     try{
-      appVersion=typeof SOUS_CACHE_VERSION!=='undefined'?SOUS_CACHE_VERSION:null;
+      if(raw==null) return fallback;
+      const parsed=JSON.parse(raw);
+      return parsed==null?fallback:parsed;
+    }catch(e){return fallback;}
+  }
+
+  function getScriptVersions(){
+    const versions={};
+    document.querySelectorAll('script[src]').forEach(script=>{
+      try{
+        const url=new URL(script.getAttribute('src'),location.href);
+        if(!/\/js\//.test(url.pathname)) return;
+        versions[url.pathname.split('/').pop()]=url.searchParams.get('v')||null;
+      }catch(e){}
+    });
+    return versions;
+  }
+
+  function getAppVersionInfo(){
+    let appVersion=null;
+    let buildIdentifier=null;
+    let serviceWorkerController=null;
+    try{
+      appVersion=window.SOUS_APP_VERSION||document.querySelector('meta[name="app-version"]')?.content||null;
     }catch(e){}
-    const photoEstimateState=getPhotoEstimateState();
+    try{
+      buildIdentifier=window.SOUS_BUILD_ID||document.querySelector('meta[name="build-id"]')?.content||null;
+    }catch(e){}
+    try{
+      serviceWorkerController=navigator.serviceWorker?.controller?.scriptURL||null;
+    }catch(e){}
     return {
+      appName:'Jot',
+      appVersion,
+      buildIdentifier,
+      serviceWorkerController,
+      scriptVersions:getScriptVersions()
+    };
+  }
+
+  function getSelectedDate(){
+    try{
+      if(typeof selectedLogDate!=='undefined') return selectedLogDate||null;
+    }catch(e){}
+    return document.getElementById('date-picker')?.value||null;
+  }
+
+  function getVoiceInputModeSummary(){
+    try{
+      if(typeof window.getVoiceInputMode==='function') return window.getVoiceInputMode();
+    }catch(e){}
+    try{return localStorage.getItem('sous_voice_input_mode')||null;}catch(e){return null;}
+  }
+
+  function getVoiceStatusSummary(voiceState){
+    const state=voiceState&&typeof voiceState==='object'?voiceState:null;
+    return {
+      inputMode:getVoiceInputModeSummary(),
+      state:state?.state||null,
+      sessionActive:state?.sessionActive??null,
+      recognizerActive:state?.recognizerActive??null,
+      listening:state?.voiceCurrentlyListening??state?.isRecording??null,
+      processing:state?.processing??null,
+      speaking:state?.speaking??null,
+      restartCount:state?.restartCount??null,
+      activeScreen:state?.activeScreen||null,
+      lastCorrectionText:state?.voiceCorrectText||null
+    };
+  }
+
+  function getSafeVoiceState(voiceState){
+    const state=voiceState&&typeof voiceState==='object'?voiceState:null;
+    if(!state) return null;
+    return {
+      state:state.state||null,
+      sessionActive:state.sessionActive??null,
+      testSessionActive:state.testSessionActive??null,
+      recognizerActive:state.recognizerActive??null,
+      voiceCurrentlyListening:state.voiceCurrentlyListening??null,
+      isRecording:state.isRecording??null,
+      processing:state.processing??null,
+      speaking:state.speaking??null,
+      voiceInputMode:state.voiceInputMode||getVoiceInputModeSummary(),
+      voiceHoldActive:state.voiceHoldActive??null,
+      restartCount:state.restartCount??null,
+      activeScreen:state.activeScreen||null,
+      listenStatus:state.listenStatus||null,
+      voiceCorrectText:state.voiceCorrectText||null,
+      currentTab:state.currentTab||getCurrentTab(),
+      currentMealItemCount:Array.isArray(state.meal)?state.meal.length:null,
+      reviewItemCount:Array.isArray(state.reviewIngredientNames)?state.reviewIngredientNames.length:null,
+      hasClarification:!!state.clarification
+    };
+  }
+
+  function countUsualMealsSafe(value){
+    return Object.values(value||{}).reduce((sum,list)=>sum+(Array.isArray(list)?list.length:0),0);
+  }
+
+  function countLoggedMealsSafe(log){
+    return Object.values(log||{}).reduce((sum,day)=>sum+(Array.isArray(day?.meals)?day.meals.length:0),0);
+  }
+
+  function storageItemCount(value,type){
+    if(type==='array') return Array.isArray(value)?value.length:null;
+    if(type==='object') return value&&typeof value==='object'&&!Array.isArray(value)?Object.keys(value).length:null;
+    return null;
+  }
+
+  function summariseStorageKey(key,type='json'){
+    let raw=null;
+    try{raw=localStorage.getItem(key);}catch(e){}
+    const present=raw!=null;
+    const summary={present,bytes:present?raw.length:0,type};
+    if(!present) return summary;
+    if(type==='string') return summary;
+    const fallback=type==='array'?[]:{};
+    const parsed=safeJsonParse(raw,fallback);
+    summary.count=storageItemCount(parsed,type);
+    return summary;
+  }
+
+  function getLocalStorageSummary(){
+    const read=key=>{try{return localStorage.getItem(key);}catch(e){return null;}};
+    const log=safeJsonParse(read('sous_log'),{});
+    const recipes=safeJsonParse(read('sous_recipes'),[]);
+    const usualMeals=safeJsonParse(read('sous_usual_meals'),{});
+    const mealMemories=safeJsonParse(read('sous_meal_memories_v1'),[]);
+    const customFoods=safeJsonParse(read('userCustomFoods'),[]);
+    const knownKeys={
+      sous_profile:summariseStorageKey('sous_profile','object'),
+      sous_weights:summariseStorageKey('sous_weights','array'),
+      sous_log:summariseStorageKey('sous_log','object'),
+      sous_recipes:summariseStorageKey('sous_recipes','array'),
+      sous_recent_ingredients:summariseStorageKey('sous_recent_ingredients','array'),
+      sous_usual_meals:summariseStorageKey('sous_usual_meals','object'),
+      sous_meal_memories_v1:summariseStorageKey('sous_meal_memories_v1','array'),
+      userCustomFoods:summariseStorageKey('userCustomFoods','array'),
+      userFoodOverrides:summariseStorageKey('userFoodOverrides','object'),
+      sous_custom_serving_units:summariseStorageKey('sous_custom_serving_units','object'),
+      sous_voice_input_mode:summariseStorageKey('sous_voice_input_mode','string'),
+      sous_voice_feedback:summariseStorageKey('sous_voice_feedback','string'),
+      sous_realtime_voice:summariseStorageKey('sous_realtime_voice','string'),
+      sous_test_mode:summariseStorageKey('sous_test_mode','string')
+    };
+    let totalKeys=0, sousKeyCount=0, knownPresentCount=0;
+    try{
+      totalKeys=localStorage.length;
+      for(let i=0;i<localStorage.length;i++){
+        const key=localStorage.key(i)||'';
+        if(key.startsWith('sous_')) sousKeyCount++;
+      }
+      knownPresentCount=Object.values(knownKeys).filter(item=>item.present).length;
+    }catch(e){}
+    return {
+      totalKeys,
+      sousKeyCount,
+      knownPresentCount,
+      unknownKeyCount:Math.max(0,totalKeys-knownPresentCount),
+      knownKeys,
+      sensitiveCounts:{
+        logDayCount:Object.keys(log||{}).length,
+        totalMealCount:countLoggedMealsSafe(log),
+        recipeCount:Array.isArray(recipes)?recipes.length:0,
+        usualMealCount:countUsualMealsSafe(usualMeals),
+        mealMemoryCount:Array.isArray(mealMemories)?mealMemories.length:0,
+        customFoodCount:Array.isArray(customFoods)?customFoods.length:0
+      }
+    };
+  }
+
+  function getCurrentMealSummary(){
+    const rows=getMealRowsFromVoiceState();
+    return {
+      itemCount:Array.isArray(rows)?rows.length:0,
+      hasPendingQuantity:!!getPendingQuantity(),
+      hasPendingClarification:!!getPendingClarification()
+    };
+  }
+
+  function buildDiagnosticsReport(note=''){
+    const photoEstimateState=getPhotoEstimateState();
+    const voiceState=getVoiceState();
+    return {
+      app:'Jot',
+      reportType:'beta-diagnostics',
+      schemaVersion:1,
       testerNote:String(note||'').trim(),
       timestamp:new Date().toISOString(),
-      appVersion,
+      ...getAppVersionInfo(),
       currentURL:location.href,
       userAgent:navigator.userAgent,
       standalonePWA:getStandaloneMode(),
       online:navigator.onLine,
       currentTab:getCurrentTab(),
       currentScreen:getCurrentScreen(),
-      currentMealRows:getMealRowsFromVoiceState(),
-      pendingQuantityState:getPendingQuantity(),
-      pendingClarificationState:getPendingClarification(),
-      voiceState:getVoiceState(),
+      selectedDate:getSelectedDate(),
+      currentMealSummary:getCurrentMealSummary(),
+      currentVoiceInputMode:getVoiceInputModeSummary(),
+      voiceStatus:getVoiceStatusSummary(voiceState),
+      voiceState:getSafeVoiceState(voiceState),
       lastTranscriptText:getLastTranscriptText(),
       voiceTrace:getVoiceTrace(),
       voiceDecisionTrace:getVoiceDecisionTrace(),
@@ -293,12 +476,17 @@
       barcodeTimingTrace:getBarcodeTimingTrace(),
       lastPhotoEstimateError:getLastPhotoError(),
       lastBarcodeError:getLastBarcodeError(),
+      localStorageSummary:getLocalStorageSummary(),
       recentConsoleErrors:consoleErrors.slice(-20)
     };
   }
 
+  function buildBugReport(note=''){
+    return buildDiagnosticsReport(note);
+  }
+
   function reportText(note=''){
-    return JSON.stringify(buildBugReport(note),null,2);
+    return JSON.stringify(buildDiagnosticsReport(note),null,2);
   }
 
   function fallbackCopy(text){
@@ -331,10 +519,40 @@
     const text=reportText(note);
     const copied=await copyText(text);
     if(!copied) {
-      console.info('[Sous bug report]',text);
-      throw new Error('Clipboard copy failed. Bug report was printed to the console.');
+      throw new Error('Clipboard copy failed. Select and copy the report text below.');
     }
     return text;
+  }
+
+  function downloadBugReport(note=''){
+    const report=buildDiagnosticsReport(note);
+    const stamp=report.timestamp.replace(/[:.]/g,'-').slice(0,19);
+    const blob=new Blob([JSON.stringify(report,null,2)],{type:'application/json'});
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement('a');
+    a.href=url;
+    a.download='jot-diagnostics-'+stamp+'.json';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(()=>URL.revokeObjectURL(url),1000);
+    return report;
+  }
+
+  function showFallbackReport(text){
+    const output=document.getElementById('bug-report-output');
+    if(!output) return;
+    output.value=text;
+    output.style.display='block';
+    output.focus();
+    output.select();
+  }
+
+  function hideFallbackReport(){
+    const output=document.getElementById('bug-report-output');
+    if(!output) return;
+    output.value='';
+    output.style.display='none';
   }
 
   function enableTestMode(){
@@ -358,18 +576,34 @@
     const closeBtn=document.getElementById('bug-report-close');
     const cancelBtn=document.getElementById('bug-report-cancel');
     const copyBtn=document.getElementById('bug-report-copy');
+    const downloadBtn=document.getElementById('bug-report-download');
 
     bugButton?.addEventListener('click',openBugModal);
+    document.getElementById('profile-diagnostics-btn')?.addEventListener('click',openBugModal);
     closeBtn?.addEventListener('click',closeBugModal);
     cancelBtn?.addEventListener('click',closeBugModal);
     modal?.addEventListener('click',event=>{if(event.target===modal) closeBugModal();});
     copyBtn?.addEventListener('click',async()=>{
       setStatus('Copying...');
+      hideFallbackReport();
+      const text=reportText(noteInput?.value||'');
       try{
-        await copyBugReport(noteInput?.value||'');
-        setStatus('Copied. Send the error log to Stu on WhatsApp.');
+        const copied=await copyText(text);
+        if(!copied) throw new Error('Clipboard copy failed. Select and copy the report text below.');
+        setStatus('Copied. Send the diagnostics JSON to Stu on WhatsApp.');
       }catch(error){
+        showFallbackReport(text);
         setStatus(error.message||'Could not copy bug report.');
+      }
+    });
+    downloadBtn?.addEventListener('click',()=>{
+      try{
+        hideFallbackReport();
+        downloadBugReport(noteInput?.value||'');
+        setStatus('Downloaded diagnostics JSON.');
+      }catch(error){
+        showFallbackReport(reportText(noteInput?.value||''));
+        setStatus('Download failed. Select and copy the report text below.');
       }
     });
     document.addEventListener('keydown',event=>{
@@ -381,6 +615,8 @@
   window.__sousEnableTestMode=enableTestMode;
   window.__sousDisableTestMode=disableTestMode;
   window.__sousCopyBugReport=copyBugReport;
+  window.__sousDownloadBugReport=downloadBugReport;
+  window.__sousBuildDiagnosticsReport=buildDiagnosticsReport;
   window.__sousBuildBugReport=buildBugReport;
   window.__sousRecentConsoleErrors=()=>consoleErrors.slice();
 
