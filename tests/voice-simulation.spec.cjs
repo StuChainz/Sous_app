@@ -6,6 +6,7 @@ async function bootVoiceHarness(page) {
     localStorage.setItem('userPlan', 'free');
     localStorage.setItem('sous_onboarding_seen', '1');
     localStorage.setItem('sous_voice_feedback', '0');
+    localStorage.setItem('sous_voice_input_mode', 'continuous');
   });
   await page.goto('/');
   await page.waitForFunction(() => typeof window.__sousStartVoiceTestSession === 'function');

@@ -6,7 +6,7 @@ let tapRec=null, alwaysOnRec=null, clarificationRec=null, isRecording=false, alw
 let voiceSessionActive=false, voiceCurrentlyListening=false, processingTranscript=false, voiceSessionStoppedManually=false, voiceSessionUseRealtime=false, voiceTestSessionActive=false;
 let voiceRestartTimer=null, voiceProcessingTimer=null, voiceSpeakingTimer=null, voiceListeningWatchdogTimer=null, voiceRecognizerStartTimer=null, voiceNoSpeechRetries=0;
 let voiceSessionState='idle', tapRecStarting=false, tapRecStopping=false, sousRealtimeStarting=false, voicePausedForVisibility=false, voiceMicWarmupActive=false;
-let voiceInputMode='continuous', voiceHoldActive=false, voiceHoldStopRequested=false, voiceHoldSuppressClickUntil=0;
+let voiceInputMode='hold', voiceHoldActive=false, voiceHoldStopRequested=false, voiceHoldSuppressClickUntil=0;
 let voiceRestartCount=0, voiceSuccessCueCount=0, voiceFlowCueCooldownUntil=0, voiceDebugOverlayEl=null, voiceDebugOverlayTimer=null, voiceDebugOverlayDismissed=false, voiceDebugOverlayUpdateQueued=false;
 let voiceTapHardResetCount=0, voiceRecoveryCueCooldownUntil=0;
 let voiceListenStartedAt=0;
@@ -22,6 +22,7 @@ let modalSelectedFood=null, modalActiveTab='search';
 let undoSnapshot=null;
 let _editBaseValues=null,_editFoodKey=null,_pendingOverride=null;
 let currentMealSection=null;
+let mealSaveInProgress=false;
 let _inlineEditId=null,_inlineManualMacros=false,_confirmManualMacros=false;
 let _pendingFoodChoice=null;
 let sousRealtime=null;
@@ -4407,6 +4408,9 @@ function defaultSectionFromTime(){
   return 'snacks';
 }
 function showSummary(announce=true){
+  mealSaveInProgress=false;
+  const saveBtn=document.getElementById('save-meal-btn');
+  if(saveBtn) saveBtn.disabled=false;
   if(!currentMealSection) currentMealSection=defaultSectionFromTime();
   const sel=document.getElementById('sum-section-select');
   if(sel) sel.value=currentMealSection;
@@ -4907,6 +4911,11 @@ function saveMealToLog(saveAsUsual=false){
   if(typeof clearDraft==='function') clearDraft();
   if(saveAsUsual&&window.updateUsualMeals) window.updateUsualMeals(mealObj,typedName);
   meal.forEach(i=>window.addToRecentIngredients(i));
+}
+function setMealSaveInProgress(active){
+  mealSaveInProgress=!!active;
+  const saveBtn=document.getElementById('save-meal-btn');
+  if(saveBtn) saveBtn.disabled=mealSaveInProgress;
 }
 
 // ═══════════════════════════════════════════
@@ -6212,12 +6221,26 @@ function wireLogButtons(){
   document.getElementById('remember-meal-save-btn')?.addEventListener('click',saveCurrentMealMemory);
   document.getElementById('sum-section-select').addEventListener('change',e=>{currentMealSection=e.target.value;});
   document.getElementById('save-meal-btn').addEventListener('click',()=>{
+    if(mealSaveInProgress){
+      voiceDebugTrace('meal_save_ignored',{reason:'already_saving'});
+      return;
+    }
+    if(!meal.length){
+      showToast('Add ingredients first!');
+      return;
+    }
+    setMealSaveInProgress(true);
     const saveAsUsual=!!document.getElementById('sum-save-usual')?.checked;
-    saveMealToLog(saveAsUsual);
+    try{
+      saveMealToLog(saveAsUsual);
+    }catch(e){
+      setMealSaveInProgress(false);
+      throw e;
+    }
     showToast(saveAsUsual?'Meal logged and saved for quick add 🎉':'Meal logged 🎉',2500);
     speakCachedResponse('logged');
     currentQuickMode=false;
-    setTimeout(()=>{meal=[];itemQueue=[];nextIngId=1;stopAllRec();switchTab('home');},1800);
+    setTimeout(()=>{meal=[];itemQueue=[];nextIngId=1;setMealSaveInProgress(false);stopAllRec();switchTab('home');},1800);
   });
   // Add modal
   document.getElementById('modal-close-btn').addEventListener('click',closeAddModal);

@@ -8,7 +8,7 @@
     "test:e2e": "playwright test --workers=1 tests/onboarding.spec.cjs tests/bug-report.spec.cjs tests/render-safety.spec.cjs tests/date-utils.spec.cjs tests/usual-meals.spec.cjs tests/consumable-presets.spec.cjs tests/ai-entitlement.spec.cjs tests/pwa-cache.spec.cjs tests/profile-units.spec.cjs",
     "test:onboarding": "playwright test tests/onboarding.spec.cjs",
     "test:bug-report": "playwright test tests/bug-report.spec.cjs",
-    "test:voice": "playwright test tests/voice-simulation.spec.cjs tests/voice-input-mode.spec.cjs",
+    "test:voice": "playwright test tests/voice-simulation.spec.cjs tests/voice-input-mode.spec.cjs tests/core-logger-beta-gate.spec.cjs",
     "test:voice:mishearing": "playwright test tests/voice-mishearing-matrix.spec.cjs",
     "test:voice:mass": "playwright test tests/voice-mass-regression.spec.js",
     "test:voice:fake-mic": "playwright test tests/voice-fake-mic.spec.js",
