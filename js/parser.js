@@ -112,6 +112,11 @@ function foodQuantityMode(food){
 }
 function quantityServingForFood(qty,food){
   if(!qty||!food) return null;
+  if(qty.grams!=null&&qty.unit){
+    const serving=findServingUnit(food,qty.unit);
+    const count=qty.count!=null?qty.count:null;
+    if(serving&&serving.grams&&count!=null) return {label:serving.label,quantity:count,grams:serving.grams};
+  }
   if(qty.count!=null){
     const serving=findServingUnit(food,qty.unit);
     if(serving&&serving.grams) return {label:serving.label,quantity:qty.count,grams:serving.grams};
@@ -131,7 +136,13 @@ function quantityServingForFood(qty,food){
 }
 function quantityToGramsForFood(qty,food){
   if(!qty) return null;
-  if(qty.grams!=null) return qty.grams;
+  if(qty.grams!=null){
+    if(qty.unit&&food){
+      const serving=findServingUnit(food,qty.unit);
+      if(serving&&serving.grams&&qty.count!=null) return Math.round(Number(serving.grams)*qty.count);
+    }
+    return qty.grams;
+  }
   if(qty.multiplier!=null) return food?Math.round((food.w||100)*qty.multiplier):null;
   if(qty.naturalUnit){
     const unit=NATURAL_QUANTITY_UNITS[qty.naturalUnit];
@@ -172,16 +183,16 @@ function extractQuantity(seg){
   const numberPattern='\\d+(?:\\.\\d+)?|a|an|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|couple';
   // "one and a half cups milk"
   let m=s.match(new RegExp('\\b('+numberPattern+')\\s+and\\s+a\\s+half\\s*('+UNIT_PATTERN+')','i'));
-  if(m){const num=parseSpokenNumber(m[1]);const unit=normalizeUnit(m[2]);if(num!=null)return{grams:(num+0.5)*(UNIT_TO_GRAMS[unit]||1)};}
+  if(m){const num=parseSpokenNumber(m[1]);const unit=normalizeUnit(m[2]);if(num!=null)return{grams:(num+0.5)*(UNIT_TO_GRAMS[unit]||1),unit,count:num+0.5};}
   // "half a cup milk" / "quarter cup oats" → explicit fraction of a unit
   m=s.match(new RegExp('\\b(half|quarter)\\s+(?:a\\s+|an\\s+)?('+UNIT_PATTERN+')','i'));
-  if(m){const unit=normalizeUnit(m[2]);return{grams:(m[1].toLowerCase()==='half'?0.5:0.25)*(UNIT_TO_GRAMS[unit]||1)};}
+  if(m){const unit=normalizeUnit(m[2]);const count=m[1].toLowerCase()==='half'?0.5:0.25;return{grams:count*(UNIT_TO_GRAMS[unit]||1),unit,count};}
   // "half [food]" → half the food's default serving
   if(/\bhalf\b/i.test(s)) return{multiplier:0.5};
   if(/\bquarter\b/i.test(s)) return{multiplier:0.25};
   // Number + explicit unit → grams
   m=s.match(new RegExp('\\b('+numberPattern+')\\s*('+UNIT_PATTERN+')','i'));
-  if(m){const num=parseSpokenNumber(m[1]);const unit=normalizeUnit(m[2]);if(num!=null)return{grams:num*(UNIT_TO_GRAMS[unit]||1)};}
+  if(m){const num=parseSpokenNumber(m[1]);const unit=normalizeUnit(m[2]);if(num!=null)return{grams:num*(UNIT_TO_GRAMS[unit]||1),unit,count:num};}
   // Number + count word → count ("1 slice bread"); caller scales by food.w
   m=s.match(new RegExp('\\b('+numberPattern+')\\s*(?:of\\s+)?('+COUNT_UNIT_PATTERN+')\\b','i'));
   if(m){const num=parseSpokenNumber(m[1]);if(num!=null)return{count:num,unit:normalizeCountUnit(m[2])};}
@@ -196,7 +207,7 @@ function extractQuantity(seg){
   if(m) return{count:1,unit:'scoop'};
   // Unit alone, no leading number → implied 1 of that unit ("tablespoon olive oil")
   m=s.match(new RegExp('\\b('+UNIT_PATTERN+')','i'));
-  if(m){const unit=normalizeUnit(m[1]);return{grams:UNIT_TO_GRAMS[unit]};}
+  if(m){const unit=normalizeUnit(m[1]);return{grams:UNIT_TO_GRAMS[unit],unit,count:1};}
   // Bare number, no unit. Food-specific quantity mode decides grams/count/slices.
   m=s.match(new RegExp('\\b('+numberPattern+')\\b','i'));
   if(m){const num=parseSpokenNumber(m[1]);if(num!=null)return{bareNumber:num};}
@@ -572,10 +583,18 @@ function splitOnSeparators(text){
 // Split parts further where a new quantity begins mid-segment.
 function splitOnNewQuantity(parts){
   const re=/(?=\b\d+(?:\.\d+)?\s*(?:g\b|kg\b|ml\b|l\b|tbsp\b|tsp\b|oz\b|cups?\b|calories\b|kcal\b))/i;
+  const spokenQuantityRe=new RegExp('(?=\\b(?:a|an|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|couple)\\s+(?:'+COUNT_UNIT_PATTERN+')\\b)','i');
+  const unitFirstRe=/(?=\b(?:cup|cups|tbsp|tsp)\s+(?:of\s+)?[a-z])/i;
   const leadingQuantityRe=/^(\d+(?:\.\d+)?\s*(?:g\b|kg\b|ml\b|l\b|tbsp\b|tsp\b|oz\b|cups?\b|calories\b|kcal\b))\s*(.*)$/i;
   const hasQuantityRe=/\b\d+(?:\.\d+)?\s*(?:g\b|kg\b|ml\b|l\b|tbsp\b|tsp\b|oz\b|cups?\b|calories\b|kcal\b)/i;
+  const hasAnyQuantityRe=new RegExp('(?:\\b\\d+(?:\\.\\d+)?\\s*(?:g\\b|kg\\b|ml\\b|l\\b|tbsp\\b|tsp\\b|oz\\b|cups?\\b|calories\\b|kcal\\b)|\\b(?:a|an|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|couple)\\s+(?:'+COUNT_UNIT_PATTERN+')\\b|\\b(?:cup|cups|tbsp|tsp)\\s+(?:of\\s+)?[a-z])','i');
   return parts.flatMap(part=>{
-    const chunks=part.split(re).map(s=>s.trim()).filter(Boolean);
+    const chunks=part
+      .split(re)
+      .flatMap(chunk=>chunk.split(spokenQuantityRe))
+      .flatMap(chunk=>chunk.split(unitFirstRe))
+      .map(s=>s.trim())
+      .filter(Boolean);
     if(chunks.length<=1) return [part];
     const merged=[];
     chunks.forEach(chunk=>{
@@ -584,6 +603,8 @@ function splitOnNewQuantity(parts){
       if(m&&prev&&!hasQuantityRe.test(prev)){
         merged[merged.length-1]=`${prev} ${m[1]}`.trim();
         if(m[2]) merged.push(m[2].trim());
+      } else if(prev&&!hasAnyQuantityRe.test(prev)&&hasAnyQuantityRe.test(chunk)){
+        merged[merged.length-1]=`${prev} ${chunk}`.trim();
       } else {
         merged.push(chunk);
       }
@@ -664,7 +685,6 @@ function parseSingleSegment(seg){
   if(custom) return custom;
 
   const qty=extractQuantity(seg);
-  const explicitGrams=qty&&qty.grams!=null?qty.grams:null;
   // Check ambiguous triggers (parser-level first, then food-data AMBIG)
   for(const ag of [...PARSER_AMBIG,...AMBIG]){
     for(const trig of ag.trigger){
@@ -683,10 +703,7 @@ function parseSingleSegment(seg){
   const bestFood=findFoodByText(seg);
   if(!bestFood) return null;
   // Resolve grams: explicit weight → multiplier×food.w → count×food.w → food default
-  let grams=explicitGrams;
-  if(grams==null&&qty){
-    grams=quantityToGramsForFood(qty,bestFood);
-  }
+  let grams=qty?quantityToGramsForFood(qty,bestFood):null;
   const serving=qty?quantityServingForFood(qty,bestFood):null;
   return{...foodScale(bestFood,grams),rawFood:bestFood,confidence:'high',needsConfirm:false,weightSpecified:grams!==null,heardName:seg,...(serving?{serving}: {})};
 }

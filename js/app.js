@@ -1183,6 +1183,7 @@ function showMultiFoodFallback(rawPhrase,beforeItems,afterItems){
         ?_foodChoiceDisplayName(term):null)||term;
       return{
         term,displayName,
+        quantity:typeof extractQuantity==='function'?extractQuantity(term):null,
         selectedFood:null,
         customName:'',customKcal:'',customProtein:'',customCarbs:'',customFat:'',
         skipped:false,showCreate:false,
@@ -1321,7 +1322,20 @@ function mrfCommit(){
     if(seg.skipped) continue;
     if(seg.selectedFood){
       const food=seg.selectedFood;
-      items.push({...foodScale(food,food.w),rawFood:food,confidence:'manual',needsConfirm:false,weightSpecified:false});
+      const grams=typeof quantityToGramsForFood==='function'
+        ?quantityToGramsForFood(seg.quantity,food)
+        :seg.quantity?.grams;
+      const serving=typeof quantityServingForFood==='function'
+        ?quantityServingForFood(seg.quantity,food)
+        :null;
+      items.push({
+        ...foodScale(food,grams!=null?grams:food.w),
+        rawFood:food,
+        confidence:'manual',
+        needsConfirm:false,
+        weightSpecified:grams!=null,
+        ...(serving?{serving}: {})
+      });
     } else if(seg.showCreate&&seg.customName.trim()){
       const name=seg.customName.trim();
       const kcal=parseFloat(seg.customKcal)||0;
@@ -1331,7 +1345,8 @@ function mrfCommit(){
       const cf=typeof addCustomFood==='function'
         ?addCustomFood({name,w:100,kcal,p:protein,c:carbs,f:fat,fi:0,icon:'ti-clipboard',type:'solid'})
         :{name,w:100,kcal,p:protein,c:carbs,f:fat,fi:0,icon:'ti-clipboard',type:'solid'};
-      items.push({...foodScale(cf,100),rawFood:cf,confidence:'manual',needsConfirm:false,weightSpecified:false});
+      const grams=seg.quantity?.grams!=null?Math.max(1,Math.round(seg.quantity.grams)):100;
+      items.push({...foodScale(cf,grams),rawFood:cf,confidence:'manual',needsConfirm:false,weightSpecified:seg.quantity?.grams!=null});
     }
   }
   _multiResolvePending=null;

@@ -3093,7 +3093,7 @@ function handleParsed(results,rawText='',voiceContext=null){
       const qty=typeof extractQuantity==='function'?extractQuantity(rt):null;
       const rawName=_foodChoiceDisplayName(rt)||_normaliseChoiceText(rt)||rt;
       if(typeof showMultiFoodFallback==='function'){
-        showMultiFoodFallback(rawName,[],[]);
+        showMultiFoodFallback(rt,[],[]);
       } else {
         showFoodChoiceReview({
           rawName,
@@ -4699,7 +4699,7 @@ function openEditModal(id){
   if(item.weight&&!item.customMacro){
     const food=item.rawFood||(typeof findFoodByText==='function'?findFoodByText(item.name):null);
     if(food){
-      const r=item.weight/100;
+      const r=item.weight/(food.w||100);
       _editBaseValues={kcal:Math.round(food.kcal*r),protein:Math.round(food.p*r*10)/10,carbs:Math.round(food.c*r*10)/10,fat:Math.round(food.f*r*10)/10,fibre:Math.round((food.fi||0)*r*10)/10};
       _editFoodKey=food.name;
     }
@@ -4717,6 +4717,14 @@ function _refreshAfterEdit(){
   const active=document.querySelector('.log-screen.active')?.id;
   if(active==='ls-listening') renderCurrentMeal(); else showSummary(false);
 }
+function _editMacrosChanged(kcal,protein,carbs,fat,fibre){
+  if(!_editBaseValues) return true;
+  return kcal!==_editBaseValues.kcal||
+    Math.abs(protein-_editBaseValues.protein)>0.05||
+    Math.abs(carbs-_editBaseValues.carbs)>0.05||
+    Math.abs(fat-_editBaseValues.fat)>0.05||
+    Math.abs(fibre-(_editBaseValues.fibre||0))>0.05;
+}
 function saveEdit(){
   const id=parseInt(document.getElementById('edit-ing-id').value);
   const name=document.getElementById('edit-name').value.trim();
@@ -4733,7 +4741,18 @@ function saveEdit(){
   const item=meal.find(i=>i.id===id);
   if(!item) return;
   snapshotMeal();
-  item.name=name; item.weight=weight; item.kcal=kcal; item.protein=protein; item.carbs=carbs; item.fat=fat; item.fibre=fibre;
+  const food=item.rawFood||(typeof findFoodByText==='function'?findFoodByText(name):null);
+  const macrosChanged=_editMacrosChanged(kcal,protein,carbs,fat,fibre);
+  if(food&&weight&&weight>0&&!item.customMacro&&!macrosChanged){
+    if(typeof recalcMealItemFromFood==='function') recalcMealItemFromFood(item,food,weight);
+    else {
+      const r=weight/(food.w||100);
+      Object.assign(item,{name:food.name,weight:Math.round(weight),kcal:Math.round(food.kcal*r),protein:Math.round(food.p*r*10)/10,carbs:Math.round(food.c*r*10)/10,fat:Math.round(food.f*r*10)/10,fibre:Math.round((food.fi||0)*r*10)/10,icon:food.icon,type:food.type||'solid',rawFood:food});
+    }
+    item.name=name||item.name;
+  } else {
+    item.name=name; item.weight=weight; item.kcal=kcal; item.protein=protein; item.carbs=carbs; item.fat=fat; item.fibre=fibre;
+  }
   if(unitResult.unit&&typeof setCustomServingUnit==='function'){
     const unitKey=item.rawFood?.name||_editFoodKey||name;
     setCustomServingUnit(unitKey,unitResult.unit);
@@ -4746,8 +4765,7 @@ function saveEdit(){
   _persistDraft();
   closeEditModal(); _refreshAfterEdit(); showToast('Updated ✓');
   if(_editBaseValues&&weight&&_editFoodKey){
-    const changed=kcal!==_editBaseValues.kcal||Math.abs(protein-_editBaseValues.protein)>0.05||Math.abs(carbs-_editBaseValues.carbs)>0.05||Math.abs(fat-_editBaseValues.fat)>0.05;
-    if(changed){
+    if(macrosChanged){
       const r=100/weight;
       _pendingOverride={key:_editFoodKey,name:name,macros:{kcal:Math.round(kcal*r),protein:Math.round(protein*r*10)/10,carbs:Math.round(carbs*r*10)/10,fat:Math.round(fat*r*10)/10,fibre:Math.round(fibre*r*10)/10}};
       _showOverridePrompt(name);

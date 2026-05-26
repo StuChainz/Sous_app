@@ -30,6 +30,17 @@ async function mealRows(page) {
   })));
 }
 
+async function mealDetails(page) {
+  return page.evaluate(() => window.__sousVoiceState().meal.map(item => ({
+    name: item.name,
+    weight: item.weight,
+    kcal: item.kcal,
+    protein: item.protein,
+    carbs: item.carbs,
+    fat: item.fat
+  })));
+}
+
 async function bootHoldRecognizerHarness(page) {
   await page.addInitScript(() => {
     localStorage.clear();
@@ -179,6 +190,66 @@ test('clarification flow preserves type and quantity answer', async ({ page }) =
 
   await expect.poll(() => mealRows(page)).toEqual([{ name: 'Cheddar', weight: 30 }]);
   await expect.poll(() => page.evaluate(() => window.__sousVoiceState().clarification)).toBe(null);
+});
+
+test('manual unresolved food selection preserves typed grams', async ({ page }) => {
+  await bootVoiceHarness(page);
+
+  await page.locator('#text-input').fill('70g cookie');
+  await page.locator('#text-input').press('Enter');
+  await expect.poll(() => activeScreen(page)).toBe('ls-multi-resolve');
+  await page.locator('#ls-multi-resolve button', { hasText: 'Chocolate chip cookie' }).first().click();
+  await page.locator('#ls-multi-resolve button', { hasText: 'Add 1 ingredient to meal' }).click();
+
+  await expect.poll(() => mealRows(page)).toEqual([{ name: 'Chocolate chip cookie', weight: 70 }]);
+});
+
+test('editing current meal weight recalculates macros and totals', async ({ page }) => {
+  await bootVoiceHarness(page);
+
+  await sendTranscript(page, '50g egg');
+  await expect.poll(() => mealRows(page)).toEqual([{ name: 'Egg', weight: 50 }]);
+  const before = await page.evaluate(() => {
+    const item = window.__sousVoiceState().meal[0];
+    return {
+      item: { kcal: item.kcal, protein: item.protein, carbs: item.carbs, fat: item.fat },
+      total: sumMacros(window.__sousVoiceState().meal)
+    };
+  });
+
+  await page.locator('#current-meal-list button[title="Edit"]').first().click();
+  await expect(page.locator('#edit-modal')).toBeVisible();
+  await page.locator('#edit-weight').fill('100');
+  await page.locator('#edit-save-btn').click();
+
+  await expect.poll(() => mealDetails(page)).toEqual([
+    { name: 'Egg', weight: 100, kcal: 156, protein: 12, carbs: 1.2, fat: 10 }
+  ]);
+  const after = await page.evaluate(() => {
+    const item = window.__sousVoiceState().meal[0];
+    return {
+      item: { kcal: item.kcal, protein: item.protein, carbs: item.carbs, fat: item.fat },
+      total: sumMacros(window.__sousVoiceState().meal)
+    };
+  });
+  expect(after.item.kcal).toBeGreaterThan(before.item.kcal * 1.9);
+  expect(after.total.kcal).toBe(after.item.kcal);
+});
+
+test('spoken serving quantities stay attached across a multi-item phrase', async ({ page }) => {
+  await bootVoiceHarness(page);
+
+  await sendTranscript(page, 'two sausages two eggs one slice of cheese cup of pineapple');
+
+  await expect.poll(() => mealRows(page)).toEqual([
+    { name: 'Sausages', weight: 120 },
+    { name: 'Egg', weight: 100 },
+    { name: 'Cheddar', weight: 25 },
+    { name: 'Pineapple', weight: 165 }
+  ]);
+  const cheddar = (await mealRows(page)).find(item => item.name === 'Cheddar');
+  expect(cheddar.weight).toBeGreaterThanOrEqual(20);
+  expect(cheddar.weight).toBeLessThanOrEqual(35);
 });
 
 test('hold-to-talk ignores duplicate final transcript from one recognizer run', async ({ page }) => {
