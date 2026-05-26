@@ -1833,7 +1833,7 @@ html,body{height:100%;height:var(--app-height);min-height:-webkit-fill-available
 <!-- Chart.js CDN -->
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4/dist/chart.umd.min.js"></script>
 <script>
-window.SOUS_API_BASE=location.hostname.endsWith('github.io')?'https://sous-app.onrender.com':'';
+window.SOUS_API_BASE=(location.hostname.endsWith('github.io')||location.protocol==='capacitor:')?'https://sous-app.onrender.com':'';
 window.sousApiUrl=path=>`${window.SOUS_API_BASE}${path}`;
 </script>
 

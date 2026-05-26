@@ -1,5 +1,6 @@
 *.DS_Store
 node_modules/
+www/
 .env
 .env.*
 !.env.example
