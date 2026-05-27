@@ -3065,7 +3065,8 @@ function deleteMealFromHome(id){
   const day=log[selectedLogDate];
   if(!day) return;
   day.meals=day.meals.filter(m=>m.id!==id);
-  day.totals=sumMacros(day.meals.map(m=>m.totals));
+  if(day.meals.length===0) delete log[selectedLogDate];
+  else day.totals=sumMacros(day.meals.map(m=>m.totals));
   saveLog(log);
   renderHome();
   if(typeof speakCachedResponse==='function') speakCachedResponse('deleted');

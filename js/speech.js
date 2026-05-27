@@ -4901,7 +4901,6 @@ function generateMealNameFromIngredients(ingredients,fallbackSection){
 function saveMealToLog(saveAsUsual=false){
   invalidateVoiceTurns('meal saved');
   const date=(typeof selectedLogDate!=='undefined'?selectedLogDate:todayStr()),log=getLog();
-  if(!log[date]) log[date]={meals:[],totals:{kcal:0,protein:0,carbs:0,fat:0,fibre:0}};
   const section=currentMealSection||defaultSectionFromTime();
   const nameInput=document.getElementById('sum-meal-name');
   const typedName=nameInput?(nameInput.value.trim()||''):'';
@@ -4921,6 +4920,7 @@ function saveMealToLog(saveAsUsual=false){
     log[editDate].totals=sumMacros(log[editDate].meals.map(m=>m.totals));
     currentEditMealId=null; currentEditMealDate=null;
   } else {
+    if(!log[date]) log[date]={meals:[],totals:{kcal:0,protein:0,carbs:0,fat:0,fibre:0}};
     mealObj.id=Date.now();
     log[date].meals.push(mealObj);
     log[date].totals=sumMacros(log[date].meals.map(m=>m.totals));
