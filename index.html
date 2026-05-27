@@ -470,6 +470,8 @@ html,body{height:100%;height:var(--app-height);min-height:-webkit-fill-available
 .preview-macro-grid{display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:6px;}
 .pmg-cell{background:var(--card);border-radius:8px;padding:6px 4px;text-align:center;}
 .pmg-val{font-size:13px;font-weight:500;color:var(--text);font-family:'Geist Mono',monospace;}
+.pmg-cell .custom-input{background:transparent;border:0;border-radius:6px;padding:2px 0 4px;text-align:center;font-size:13px;font-weight:500;color:var(--text);font-family:'Geist Mono',monospace;}
+.pmg-cell.kcal .custom-input{color:var(--accent);}
 .pmg-lbl{font-size:9px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.04em;}
 .pmg-cell.kcal .pmg-val{color:var(--accent);}
 .custom-form{display:flex;flex-direction:column;gap:10px;}
@@ -1528,11 +1530,12 @@ html,body{height:100%;height:var(--app-height);min-height:-webkit-fill-available
           <input type="number" class="custom-input" id="barcode-serving-grams" min="1" step="1">
         </div>
         <div class="preview-macro-grid" style="margin-bottom:12px;">
-          <div class="pmg-cell kcal"><div class="pmg-val" id="barcode-kcal">0</div><div class="pmg-lbl">kcal</div></div>
-          <div class="pmg-cell"><div class="pmg-val" id="barcode-protein">0</div><div class="pmg-lbl">protein</div></div>
-          <div class="pmg-cell"><div class="pmg-val" id="barcode-carbs">0</div><div class="pmg-lbl">carbs</div></div>
-          <div class="pmg-cell"><div class="pmg-val" id="barcode-fat">0</div><div class="pmg-lbl">fat</div></div>
+          <label class="pmg-cell kcal"><input type="number" class="custom-input" id="barcode-kcal" min="0" step="1" value="0"><div class="pmg-lbl">kcal</div></label>
+          <label class="pmg-cell"><input type="number" class="custom-input" id="barcode-protein" min="0" step="0.1" value="0"><div class="pmg-lbl">protein</div></label>
+          <label class="pmg-cell"><input type="number" class="custom-input" id="barcode-carbs" min="0" step="0.1" value="0"><div class="pmg-lbl">carbs</div></label>
+          <label class="pmg-cell"><input type="number" class="custom-input" id="barcode-fat" min="0" step="0.1" value="0"><div class="pmg-lbl">fat</div></label>
         </div>
+        <div id="barcode-warning" class="barcode-status" data-tone="warn" style="display:none;margin-bottom:8px;"></div>
         <div style="font-size:12px;color:var(--text-muted);line-height:1.45;">Barcode data comes from Open Food Facts. Check the serving before adding.</div>
       </div>
     </div>
@@ -1905,7 +1908,7 @@ window.sousApiUrl=path=>`${window.SOUS_API_BASE}${path}`;
 <script src="js/test-mode.js?v=7"></script>
 <script src="js/app.js?v=21"></script>
 <script src="js/ai-interpreter.js?v=3"></script>
-<script src="js/barcode.js?v=2"></script>
+<script src="js/barcode.js?v=3"></script>
 
 </body>
 </html>

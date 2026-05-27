@@ -73,6 +73,11 @@ function barcodeRound(value) {
   return Number.isFinite(number) && number >= 0 ? Math.round(number * 10) / 10 : 0;
 }
 
+function barcodeReadNumber(id, fallback = 0) {
+  const value = Number(document.getElementById(id)?.value);
+  return Number.isFinite(value) && value >= 0 ? value : fallback;
+}
+
 function barcodeCacheGet(code) {
   try {
     const cache = JSON.parse(localStorage.getItem(BARCODE_CACHE_KEY) || '{}');
@@ -89,6 +94,12 @@ function barcodeCacheSet(code, product) {
     const entries = Object.entries(cache).sort((a, b) => (b[1].cachedAt || 0) - (a[1].cachedAt || 0));
     localStorage.setItem(BARCODE_CACHE_KEY, JSON.stringify(Object.fromEntries(entries.slice(0, 80))));
   } catch (e) {}
+}
+
+function barcodeCustomFoodGet(code) {
+  if (typeof getCustomFoods !== 'function') return null;
+  const cleanCode = barcodeCleanCode(code);
+  return (getCustomFoods() || []).find(food => barcodeCleanCode(food?.barcode) === cleanCode) || null;
 }
 
 function barcodeModal() {
@@ -108,7 +119,15 @@ function barcodeShowPanel(panel) {
     if (el) el.style.display = name === panel ? 'block' : 'none';
   });
   const addBtn = document.getElementById('barcode-add-btn');
-  if (addBtn) addBtn.style.display = panel === 'review' ? 'block' : 'none';
+  if (addBtn) {
+    addBtn.style.display = panel === 'review' ? 'block' : 'none';
+    addBtn.dataset.confirmExtreme = '';
+  }
+  const warning = document.getElementById('barcode-warning');
+  if (warning && panel !== 'review') {
+    warning.style.display = 'none';
+    warning.textContent = '';
+  }
 }
 
 function barcodeStopScanning() {
@@ -318,6 +337,34 @@ async function barcodeHandleDetected(code, source = 'camera') {
   barcodeTrace('barcode_detected', { barcode: code, source });
   barcodeStopScanning();
   barcodeSetStatus('Looking up product...');
+  const custom = barcodeCustomFoodGet(code);
+  if (custom) {
+    barcodeTrace('lookup_finished', { barcode: code, cacheHit: false, customHit: true, ok: true });
+    barcodeRenderReview({
+      ...custom,
+      barcode: code,
+      source: 'custom_barcode',
+      sourceId: custom.sourceId || ('custom-barcode:' + code),
+      servingBasis: custom.servingBasis || 'per100g',
+      defaultAmount: custom.w || custom.weight || 100,
+      nutritionPer100g: custom.nutritionPer100g || {
+        calories: custom.kcal,
+        protein: custom.p,
+        carbs: custom.c,
+        fat: custom.f,
+        fibre: custom.fi
+      },
+      diagnostics: {
+        barcode: code,
+        source: 'custom_barcode',
+        rawNutritionFields: {},
+        normalizedNutritionFields: custom.nutritionPer100g || {},
+        servingBasis: custom.servingBasis || 'per100g',
+        sanityWarnings: []
+      }
+    }, true);
+    return;
+  }
   const cached = barcodeCacheGet(code);
   barcodeTrace('lookup_started', { barcode: code, cacheHit: !!cached });
   if (cached) {
@@ -339,8 +386,12 @@ async function barcodeHandleDetected(code, source = 'camera') {
     barcodeState.lookingUp = false;
     barcodeRememberError(e, 'lookup');
     barcodeTrace('lookup_finished', { barcode: code, cacheHit: false, ok: false });
-    barcodeSetStatus(String(e.message || 'Product lookup failed.'), 'warn');
-    barcodeShowManualEntry(code);
+    if (/not found/i.test(String(e.message || ''))) {
+      barcodeRenderManualProduct(code);
+    } else {
+      barcodeSetStatus(String(e.message || 'Product lookup failed.'), 'warn');
+      barcodeShowManualEntry(code);
+    }
   }
 }
 
@@ -365,18 +416,51 @@ function barcodeLookupManual() {
   barcodeHandleDetected(code, 'manual');
 }
 
+function barcodeRenderManualProduct(code) {
+  barcodeRenderReview({
+    barcode: code,
+    name: 'Barcode ' + code,
+    brand: '',
+    quantity: '',
+    servingGrams: 100,
+    packageGrams: null,
+    defaultAmount: 100,
+    servingBasis: 'manual',
+    imageUrl: '',
+    source: 'manual_barcode',
+    sourceId: 'custom-barcode:' + code,
+    nutritionPer100g: { calories: 0, protein: 0, carbs: 0, fat: 0, fibre: 0 },
+    nutritionPerServing: null,
+    nutritionPerPackage: null,
+    raw: {},
+    diagnostics: {
+      barcode: code,
+      source: 'manual_barcode',
+      rawNutritionFields: {},
+      normalizedNutritionFields: {
+        nutritionPer100g: { calories: 0, protein: 0, carbs: 0, fat: 0, fibre: 0 }
+      },
+      servingBasis: 'manual',
+      sanityWarnings: ['not_found_manual_entry']
+    },
+    type: 'solid'
+  }, false);
+  barcodeSetStatus('Not found — add manually', 'warn');
+}
+
 function barcodeRenderReview(product, cached) {
   barcodeState.lookingUp = false;
   barcodeState.product = product;
   barcodeShowPanel('review');
   const name = product.name || 'Scanned product';
   const brand = product.brand ? product.brand + ' - ' : '';
-  const qty = product.servingGrams || 100;
+  const qty = product.defaultAmount || product.servingGrams || product.packageGrams || 100;
   document.getElementById('barcode-product-name').value = name;
   document.getElementById('barcode-serving-grams').value = qty;
   document.getElementById('barcode-review-title').textContent = brand + name;
   document.getElementById('barcode-review-meta').textContent = [
     product.quantity,
+    barcodeBasisLabel(product),
     product.barcode,
     cached ? 'cached' : ''
   ].filter(Boolean).join(' - ');
@@ -390,12 +474,13 @@ function barcodeRenderReview(product, cached) {
   barcodeTrace('product_rendered', {
     barcode: product.barcode || barcodeState.currentCode || null,
     cached: !!cached,
-    hasImage: !!product.imageUrl
+    hasImage: !!product.imageUrl,
+    diagnostics: barcodeDiagnostics(product)
   });
 }
 
-function barcodeNutrition() {
-  const n = barcodeState.product?.nutritionPer100g || {};
+function barcodeBucket(source) {
+  const n = source || {};
   return {
     kcal: barcodeRound(n.calories),
     protein: barcodeRound(n.protein),
@@ -405,42 +490,187 @@ function barcodeNutrition() {
   };
 }
 
+function barcodeBasisLabel(product = barcodeState.product) {
+  const basis = product?.servingBasis || 'per100g';
+  if (basis === 'perServing') return 'per serving';
+  if (basis === 'perPackage') return 'per package';
+  if (basis === 'manual') return 'manual entry';
+  return 'per 100g';
+}
+
+function barcodeSourceNutrition(product = barcodeState.product, grams = null) {
+  if (!product) return { kcal: 0, protein: 0, carbs: 0, fat: 0, fibre: 0 };
+  const amount = Math.max(1, Number(grams) || Number(product.defaultAmount) || 100);
+  if (product.servingBasis === 'perServing' && product.nutritionPerServing) {
+    const base = barcodeBucket(product.nutritionPerServing);
+    const ratio = product.servingGrams ? amount / product.servingGrams : 1;
+    return {
+      kcal: Math.round(base.kcal * ratio),
+      protein: barcodeRound(base.protein * ratio),
+      carbs: barcodeRound(base.carbs * ratio),
+      fat: barcodeRound(base.fat * ratio),
+      fibre: barcodeRound(base.fibre * ratio)
+    };
+  }
+  if (product.servingBasis === 'perPackage' && product.nutritionPerPackage) {
+    const base = barcodeBucket(product.nutritionPerPackage);
+    const ratio = product.packageGrams ? amount / product.packageGrams : 1;
+    return {
+      kcal: Math.round(base.kcal * ratio),
+      protein: barcodeRound(base.protein * ratio),
+      carbs: barcodeRound(base.carbs * ratio),
+      fat: barcodeRound(base.fat * ratio),
+      fibre: barcodeRound(base.fibre * ratio)
+    };
+  }
+  const per100 = barcodeBucket(product.nutritionPer100g);
+  const ratio = amount / 100;
+  return {
+    kcal: Math.round(per100.kcal * ratio),
+    protein: barcodeRound(per100.protein * ratio),
+    carbs: barcodeRound(per100.carbs * ratio),
+    fat: barcodeRound(per100.fat * ratio),
+    fibre: barcodeRound(per100.fibre * ratio)
+  };
+}
+
+function barcodeNutritionPer100(product = barcodeState.product) {
+  if (!product) return { kcal: 0, protein: 0, carbs: 0, fat: 0, fibre: 0 };
+  if (product.nutritionPer100g) return barcodeBucket(product.nutritionPer100g);
+  if (product.servingBasis === 'perServing' && product.nutritionPerServing && product.servingGrams) {
+    const n = barcodeBucket(product.nutritionPerServing);
+    const ratio = 100 / product.servingGrams;
+    return { kcal: Math.round(n.kcal * ratio), protein: barcodeRound(n.protein * ratio), carbs: barcodeRound(n.carbs * ratio), fat: barcodeRound(n.fat * ratio), fibre: barcodeRound(n.fibre * ratio) };
+  }
+  if (product.servingBasis === 'perPackage' && product.nutritionPerPackage && product.packageGrams) {
+    const n = barcodeBucket(product.nutritionPerPackage);
+    const ratio = 100 / product.packageGrams;
+    return { kcal: Math.round(n.kcal * ratio), protein: barcodeRound(n.protein * ratio), carbs: barcodeRound(n.carbs * ratio), fat: barcodeRound(n.fat * ratio), fibre: barcodeRound(n.fibre * ratio) };
+  }
+  return { kcal: 0, protein: 0, carbs: 0, fat: 0, fibre: 0 };
+}
+
+function barcodeCurrentValues() {
+  const grams = Math.max(1, Math.round(Number(document.getElementById('barcode-serving-grams')?.value) || 100));
+  return {
+    grams,
+    kcal: Math.round(barcodeReadNumber('barcode-kcal')),
+    protein: barcodeRound(barcodeReadNumber('barcode-protein')),
+    carbs: barcodeRound(barcodeReadNumber('barcode-carbs')),
+    fat: barcodeRound(barcodeReadNumber('barcode-fat')),
+    fibre: barcodeRound(barcodeSourceNutrition(barcodeState.product, grams).fibre)
+  };
+}
+
+function barcodeSanityWarnings(values = barcodeCurrentValues(), product = barcodeState.product) {
+  const warnings = [];
+  const per100 = barcodeNutritionPer100(product);
+  const totalMacros = values.protein + values.carbs + values.fat;
+  const per100Macros = per100.protein + per100.carbs + per100.fat;
+  const amountIsMass = !product ||
+    product.servingBasis === 'per100g' ||
+    (product.servingBasis === 'perServing' && !!product.servingGrams) ||
+    (product.servingBasis === 'perPackage' && !!product.packageGrams) ||
+    product.servingBasis === 'manual';
+  if (per100.kcal > 900) warnings.push({ code: 'kcal_per_100g_over_900', level: 'confirm', text: 'Calories per 100g look unusually high.' });
+  if (values.kcal > 2000) warnings.push({ code: 'total_kcal_over_2000', level: 'confirm', text: 'This single item is over 2,000 kcal.' });
+  if (per100Macros > 105) warnings.push({ code: 'macros_per_100g_physically_impossible', level: 'block', text: 'Macros per 100g are physically impossible.' });
+  if (amountIsMass && totalMacros > values.grams * 1.05 + 1) warnings.push({ code: 'macros_total_exceeds_amount', level: 'block', text: 'Macros exceed the amount eaten.' });
+  return warnings;
+}
+
+function barcodeDiagnostics(product = barcodeState.product, values = null, warnings = null) {
+  const warningCodes = (warnings || []).map(w => w.code);
+  return {
+    barcode: product?.barcode || barcodeState.currentCode || null,
+    source: product?.source || null,
+    rawNutritionFields: product?.diagnostics?.rawNutritionFields || {},
+    normalizedNutritionFields: product?.diagnostics?.normalizedNutritionFields || {
+      nutritionPer100g: product?.nutritionPer100g || null,
+      nutritionPerServing: product?.nutritionPerServing || null,
+      nutritionPerPackage: product?.nutritionPerPackage || null
+    },
+    servingBasis: product?.servingBasis || 'per100g',
+    sanityWarning: warningCodes.length ? warningCodes.join(',') : '',
+    editedValues: values || null
+  };
+}
+
+function barcodeShowWarnings(warnings) {
+  const el = document.getElementById('barcode-warning');
+  if (!el) return;
+  if (!warnings.length) {
+    el.style.display = 'none';
+    el.textContent = '';
+    return;
+  }
+  el.style.display = 'block';
+  el.textContent = warnings.map(w => w.text).join(' ');
+}
+
 function barcodeUpdatePreview() {
   if (!barcodeState.product) return;
+  const addBtn = document.getElementById('barcode-add-btn');
+  if (addBtn) addBtn.dataset.confirmExtreme = '';
   const grams = Math.max(1, Math.round(Number(document.getElementById('barcode-serving-grams')?.value) || 100));
-  const n = barcodeNutrition();
-  const ratio = grams / 100;
-  const values = {
-    kcal: Math.round(n.kcal * ratio),
-    protein: barcodeRound(n.protein * ratio),
-    carbs: barcodeRound(n.carbs * ratio),
-    fat: barcodeRound(n.fat * ratio)
-  };
+  const values = barcodeSourceNutrition(barcodeState.product, grams);
   Object.entries(values).forEach(([key, value]) => {
     const el = document.getElementById('barcode-' + key);
-    if (el) el.textContent = value;
+    if (el) el.value = key === 'kcal' ? Math.round(value) : barcodeRound(value);
   });
+  const warnings = barcodeSanityWarnings(barcodeCurrentValues());
+  barcodeShowWarnings(warnings);
+  barcodeTrace('nutrition_preview_updated', barcodeDiagnostics(barcodeState.product, barcodeCurrentValues(), warnings));
+}
+
+function barcodeReviewEdited() {
+  const addBtn = document.getElementById('barcode-add-btn');
+  if (addBtn) addBtn.dataset.confirmExtreme = '';
+  if (!barcodeState.product) return;
+  const warnings = barcodeSanityWarnings(barcodeCurrentValues());
+  barcodeShowWarnings(warnings);
 }
 
 function barcodeAddReviewedProduct() {
   const product = barcodeState.product;
   if (!product) return;
   const name = (document.getElementById('barcode-product-name')?.value || product.name || '').trim();
-  const grams = Math.max(1, Math.round(Number(document.getElementById('barcode-serving-grams')?.value) || 100));
   if (!name) {
     barcodeSetStatus('Keep a product name before adding.', 'warn');
     return;
   }
-  const n = barcodeNutrition();
+  const values = barcodeCurrentValues();
+  const warnings = barcodeSanityWarnings(values, product);
+  barcodeShowWarnings(warnings);
+  barcodeTrace('product_add_attempt', barcodeDiagnostics(product, values, warnings));
+  if (warnings.some(w => w.level === 'block')) {
+    barcodeSetStatus('Check the nutrition numbers before adding.', 'warn');
+    return;
+  }
+  const addBtn = document.getElementById('barcode-add-btn');
+  if (warnings.some(w => w.level === 'confirm') && addBtn?.dataset.confirmExtreme !== 'true') {
+    if (addBtn) addBtn.dataset.confirmExtreme = 'true';
+    barcodeSetStatus('Nutrition looks unusually high. Edit it or tap Add again to confirm.', 'warn');
+    return;
+  }
+  const per100 = barcodeNutritionPer100(product);
+  const per100FromValues = {
+    kcal: barcodeRound(values.kcal * 100 / values.grams),
+    protein: barcodeRound(values.protein * 100 / values.grams),
+    carbs: barcodeRound(values.carbs * 100 / values.grams),
+    fat: barcodeRound(values.fat * 100 / values.grams),
+    fibre: barcodeRound(values.fibre * 100 / values.grams)
+  };
+  const n = product.servingBasis === 'per100g' || product.servingBasis === 'manual' ? per100FromValues : per100;
   const food = {
     id: 'barcode_' + product.barcode,
     name,
-    w: 100,
-    kcal: n.kcal,
-    p: n.protein,
-    c: n.carbs,
-    f: n.fat,
-    fi: n.fibre,
+    w: values.grams,
+    kcal: values.kcal,
+    p: values.protein,
+    c: values.carbs,
+    f: values.fat,
+    fi: values.fibre,
     icon: 'ti-barcode',
     type: product.type || 'solid',
     kw: [name, product.brand].filter(Boolean),
@@ -454,26 +684,28 @@ function barcodeAddReviewedProduct() {
     source: product.source || 'openfoodfacts',
     sourceId: product.sourceId || ('off:' + product.barcode),
     barcode: product.barcode,
-    brand: product.brand || ''
+    brand: product.brand || '',
+    servingBasis: product.servingBasis || 'per100g',
+    diagnostics: barcodeDiagnostics(product, values, warnings)
   };
-  const item = typeof foodScale === 'function'
-    ? { ...foodScale(food, grams), rawFood: food }
-    : {
-      name,
-      weight: grams,
-      kcal: Math.round(n.kcal * grams / 100),
-      protein: barcodeRound(n.protein * grams / 100),
-      carbs: barcodeRound(n.carbs * grams / 100),
-      fat: barcodeRound(n.fat * grams / 100),
-      fibre: barcodeRound(n.fibre * grams / 100),
-      icon: 'ti-barcode',
-      type: food.type,
-      rawFood: food
-    };
+  const item = {
+    name,
+    weight: values.grams,
+    kcal: values.kcal,
+    protein: values.protein,
+    carbs: values.carbs,
+    fat: values.fat,
+    fibre: values.fibre,
+    icon: 'ti-barcode',
+    type: food.type,
+    rawFood: food
+  };
   item.source = 'barcode';
   item.barcode = product.barcode;
   item.brand = product.brand || '';
   item.weightSpecified = true;
+  item.barcodeDiagnostics = food.diagnostics;
+  if (product.source === 'manual_barcode' && typeof addCustomFood === 'function') addCustomFood(food);
   if (typeof addIngredientToMeal === 'function') addIngredientToMeal(item, { source: 'barcode' });
   if (typeof showToast === 'function') showToast('Added ' + name);
   closeBarcodeScanner();
@@ -490,6 +722,9 @@ function initBarcode() {
   document.getElementById('barcode-manual-lookup-btn')?.addEventListener('click', barcodeLookupManual);
   document.getElementById('barcode-add-btn')?.addEventListener('click', barcodeAddReviewedProduct);
   document.getElementById('barcode-serving-grams')?.addEventListener('input', barcodeUpdatePreview);
+  ['barcode-product-name', 'barcode-kcal', 'barcode-protein', 'barcode-carbs', 'barcode-fat'].forEach(id => {
+    document.getElementById(id)?.addEventListener('input', barcodeReviewEdited);
+  });
   document.getElementById('barcode-manual-input')?.addEventListener('keydown', event => {
     if (event.key === 'Enter') barcodeLookupManual();
   });

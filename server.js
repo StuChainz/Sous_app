@@ -1040,6 +1040,12 @@ function cleanMacro(value) {
   return Number.isFinite(number) && number >= 0 ? Math.round(number * 10) / 10 : 0;
 }
 
+function cleanBarcodeNutrient(value) {
+  if (value === undefined || value === null || value === '') return null;
+  const number = Number(value);
+  return Number.isFinite(number) && number >= 0 ? Math.round(number * 10) / 10 : null;
+}
+
 function pickNutriment(nutriments, keys) {
   for (const key of keys) {
     if (nutriments && nutriments[key] !== undefined && nutriments[key] !== null && nutriments[key] !== '') {
@@ -1047,6 +1053,64 @@ function pickNutriment(nutriments, keys) {
     }
   }
   return 0;
+}
+
+const BARCODE_NUTRIENT_KEYS = {
+  calories: 'energy-kcal',
+  protein: 'proteins',
+  carbs: 'carbohydrates',
+  fat: 'fat',
+  fibre: 'fiber'
+};
+
+function pickBarcodeNutrient(nutriments, baseKey, suffixes) {
+  for (const suffix of suffixes) {
+    const key = suffix ? `${baseKey}_${suffix}` : baseKey;
+    const value = cleanBarcodeNutrient(nutriments && nutriments[key]);
+    if (value !== null) return value;
+  }
+  return null;
+}
+
+function barcodeNutritionBucket(nutriments, suffixes) {
+  return Object.fromEntries(Object.entries(BARCODE_NUTRIENT_KEYS).map(([key, sourceKey]) => [
+    key,
+    pickBarcodeNutrient(nutriments, sourceKey, suffixes)
+  ]));
+}
+
+function barcodeBucketHasValues(bucket) {
+  return !!bucket && Object.values(bucket).some(value => value !== null);
+}
+
+function barcodeScaleBucket(bucket, ratio) {
+  if (!barcodeBucketHasValues(bucket) || !ratio) return null;
+  return Object.fromEntries(Object.entries(bucket).map(([key, value]) => [
+    key,
+    value === null ? null : cleanBarcodeNutrient(value * ratio)
+  ]));
+}
+
+function barcodeSourceNutritionFields(nutriments) {
+  const out = {};
+  Object.values(BARCODE_NUTRIENT_KEYS).forEach(base => {
+    ['', '_value', '_100g', '_serving', '_product', '_unit'].forEach(suffix => {
+      const key = base + suffix;
+      if (nutriments && Object.prototype.hasOwnProperty.call(nutriments, key)) out[key] = nutriments[key];
+    });
+  });
+  return out;
+}
+
+function barcodeSanityWarnings({ per100g, total, grams }) {
+  const warnings = [];
+  const per100MacroTotal = ['protein', 'carbs', 'fat'].reduce((sum, key) => sum + (Number(per100g && per100g[key]) || 0), 0);
+  const totalMacroTotal = ['protein', 'carbs', 'fat'].reduce((sum, key) => sum + (Number(total && total[key]) || 0), 0);
+  if ((Number(per100g && per100g.calories) || 0) > 900) warnings.push('kcal_per_100g_over_900');
+  if ((Number(total && total.calories) || 0) > 2000) warnings.push('total_kcal_over_2000');
+  if (per100MacroTotal > 105) warnings.push('macros_per_100g_physically_impossible');
+  if (grams && totalMacroTotal > grams * 1.05 + 1) warnings.push('macros_total_exceeds_amount');
+  return warnings;
 }
 
 function normaliseBarcodeProduct(code, product) {
@@ -1065,13 +1129,50 @@ function normaliseBarcodeProduct(code, product) {
   const servingUnit = String(product && product.serving_quantity_unit || '').trim().toLowerCase();
   const productQuantity = cleanMacro(product && product.product_quantity);
   const productUnit = String(product && product.product_quantity_unit || '').trim().toLowerCase();
+  const nutritionDataPer = String(product && product.nutrition_data_per || '').trim().toLowerCase();
   const servingGrams = servingQuantity && (!servingUnit || ['g', 'ml'].includes(servingUnit))
     ? servingQuantity
     : productQuantity && (!productUnit || ['g', 'ml'].includes(productUnit))
       ? productQuantity
       : null;
+  const packageGrams = productQuantity && (!productUnit || ['g', 'ml'].includes(productUnit))
+    ? productQuantity
+    : null;
   const quantityUnit = servingUnit || productUnit;
   const type = ['ml', 'l', 'cl'].includes(quantityUnit) ? 'liquid' : 'solid';
+  const per100g = barcodeNutritionBucket(nutriments, ['100g']);
+  const perServing = barcodeNutritionBucket(nutriments, ['serving']);
+  const perPackage = barcodeNutritionBucket(nutriments, ['product']);
+  const labelValueBucket = barcodeNutritionBucket(nutriments, ['value', '']);
+
+  if (nutritionDataPer === '100g' && !barcodeBucketHasValues(per100g)) Object.assign(per100g, labelValueBucket);
+  if (nutritionDataPer === 'serving' && !barcodeBucketHasValues(perServing)) Object.assign(perServing, labelValueBucket);
+  if (['package', 'product'].includes(nutritionDataPer) && !barcodeBucketHasValues(perPackage)) Object.assign(perPackage, labelValueBucket);
+
+  let servingBasis = 'unknown';
+  let defaultAmount = servingGrams || packageGrams || 100;
+  let normalizedPer100g = barcodeBucketHasValues(per100g) ? per100g : null;
+  let normalizedTotal = null;
+
+  if (barcodeBucketHasValues(per100g)) {
+    servingBasis = 'per100g';
+    normalizedTotal = barcodeScaleBucket(per100g, defaultAmount / 100);
+  } else if (barcodeBucketHasValues(perServing)) {
+    servingBasis = 'perServing';
+    defaultAmount = servingGrams || 1;
+    normalizedTotal = perServing;
+    if (servingGrams) normalizedPer100g = barcodeScaleBucket(perServing, 100 / servingGrams);
+  } else if (barcodeBucketHasValues(perPackage)) {
+    servingBasis = 'perPackage';
+    defaultAmount = packageGrams || 1;
+    normalizedTotal = perPackage;
+    if (packageGrams) normalizedPer100g = barcodeScaleBucket(perPackage, 100 / packageGrams);
+  } else {
+    normalizedPer100g = { calories: null, protein: null, carbs: null, fat: null, fibre: null };
+    normalizedTotal = { calories: null, protein: null, carbs: null, fat: null, fibre: null };
+  }
+  const amountIsMass = servingBasis === 'per100g' || (servingBasis === 'perServing' && !!servingGrams) || (servingBasis === 'perPackage' && !!packageGrams);
+  const sanityWarnings = barcodeSanityWarnings({ per100g: normalizedPer100g, total: normalizedTotal, grams: amountIsMass ? defaultAmount : null });
 
   return {
     barcode: code,
@@ -1079,21 +1180,34 @@ function normaliseBarcodeProduct(code, product) {
     brand: String(product && product.brands || '').split(',')[0].trim(),
     quantity: String(product && product.quantity || product && product.serving_size || '').trim(),
     servingGrams,
+    packageGrams,
+    defaultAmount,
+    servingBasis,
     imageUrl: String(product && product.image_front_small_url || '').trim(),
     source: 'openfoodfacts',
     sourceId: `off:${code}`,
-    nutritionPer100g: {
-      calories: pickNutriment(nutriments, ['energy-kcal_100g', 'energy-kcal', 'energy-kcal_value']),
-      protein: pickNutriment(nutriments, ['proteins_100g', 'proteins', 'proteins_value']),
-      carbs: pickNutriment(nutriments, ['carbohydrates_100g', 'carbohydrates', 'carbohydrates_value']),
-      fat: pickNutriment(nutriments, ['fat_100g', 'fat', 'fat_value']),
-      fibre: pickNutriment(nutriments, ['fiber_100g', 'fiber', 'fiber_value', 'fibre_100g', 'fibre'])
-    },
+    nutritionPer100g: normalizedPer100g || { calories: null, protein: null, carbs: null, fat: null, fibre: null },
+    nutritionPerServing: barcodeBucketHasValues(perServing) ? perServing : null,
+    nutritionPerPackage: barcodeBucketHasValues(perPackage) ? perPackage : null,
     raw: {
       productName: product && product.product_name || '',
       brands: product && product.brands || '',
       quantity: product && product.quantity || '',
-      servingSize: product && product.serving_size || ''
+      servingSize: product && product.serving_size || '',
+      nutritionDataPer
+    },
+    diagnostics: {
+      barcode: code,
+      source: 'openfoodfacts',
+      rawNutritionFields: barcodeSourceNutritionFields(nutriments),
+      normalizedNutritionFields: {
+        nutritionPer100g: normalizedPer100g,
+        nutritionPerServing: barcodeBucketHasValues(perServing) ? perServing : null,
+        nutritionPerPackage: barcodeBucketHasValues(perPackage) ? perPackage : null,
+        defaultTotal: normalizedTotal
+      },
+      servingBasis,
+      sanityWarnings
     },
     type
   };
@@ -1769,6 +1883,7 @@ app.get('/api/barcode/:code', async (req, res) => {
     'serving_quantity_unit',
     'product_quantity',
     'product_quantity_unit',
+    'nutrition_data_per',
     'nutriments',
     'image_front_small_url'
   ].join(',');
@@ -2209,6 +2324,7 @@ module.exports = {
     resolveReservedConsumables,
     remainingAfterMenuRows,
     validateMenuOcrName,
-    normaliseMenuScanResult
+    normaliseMenuScanResult,
+    normaliseBarcodeProduct
   }
 };
