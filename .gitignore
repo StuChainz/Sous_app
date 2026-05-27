@@ -7,3 +7,6 @@ www/
 .claude/
 .claude/worktrees/
 test-results/
+build/
+*.xcarchive
+*.ipa
