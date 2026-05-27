@@ -45,6 +45,7 @@ app.set('trust proxy', 1);
 app.use(express.json({ limit: '6mb' }));
 const allowedOrigins = [
   /^http:\/\/localhost(:\d+)?$/,
+  'capacitor://localhost',
   'https://stuchainz.github.io'
 ];
 app.use(cors({
