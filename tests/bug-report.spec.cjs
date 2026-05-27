@@ -1,4 +1,7 @@
 const { test, expect } = require('@playwright/test');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
 
 async function boot(page, path = '/') {
   await page.addInitScript(() => {
@@ -21,7 +24,9 @@ test('test query shows bug button and opens report modal', async ({ page }) => {
   await expect.poll(() => page.evaluate(() => localStorage.getItem('sous_test_mode'))).toBe('1');
   await page.getByTestId('bug-report-button').click();
   await expect(page.getByTestId('bug-report-modal')).toBeVisible();
-  await expect(page.getByText('What went wrong?')).toBeVisible();
+  await expect(page.getByText('Report a bug')).toBeVisible();
+  await expect(page.getByText('What were you trying to do?')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Send to Stu' })).toBeVisible();
 });
 
 test('profile diagnostics button opens report modal', async ({ page }) => {
@@ -64,7 +69,7 @@ test('helpers enable and disable test mode', async ({ page }) => {
   await expect.poll(() => page.evaluate(() => localStorage.getItem('sous_test_mode'))).toBe('0');
 });
 
-test('diagnostics report includes note, app state, traces, storage counts, and console errors', async ({ page }) => {
+test('diagnostics report includes tester context, app state, traces, storage counts, and console errors', async ({ page }) => {
   await boot(page, '/?test=1');
 
   await page.evaluate(() => {
@@ -89,22 +94,35 @@ test('diagnostics report includes note, app state, traces, storage counts, and c
     }));
   });
 
-  const report = await page.evaluate(() => window.__sousBuildDiagnosticsReport('Mic stopped after banana'));
+  const report = await page.evaluate(() => window.__sousBuildDiagnosticsReport(
+    'Mic stopped after banana',
+    'Logged breakfast by voice'
+  ));
 
   expect(report.app).toBe('Jot');
   expect(report.reportType).toBe('beta-diagnostics');
+  expect(report.testerIntent).toBe('Logged breakfast by voice');
   expect(report.testerNote).toBe('Mic stopped after banana');
   expect(report.currentURL).toContain('test=1');
+  expect(report.currentApiBaseUrl).toBe('');
   expect(report.userAgent).toBeTruthy();
   expect(typeof report.standalonePWA).toBe('boolean');
+  expect(typeof report.runningAsPWA).toBe('boolean');
+  expect(typeof report.runningAsCapacitor).toBe('boolean');
+  expect(report.runtime).toEqual(expect.objectContaining({
+    capacitor: expect.any(Boolean),
+    pwa: expect.any(Boolean)
+  }));
   expect(typeof report.online).toBe('boolean');
   expect(report.currentTab).toBe('home');
   expect(report.currentScreen).toBe('pane-home');
   expect(report.selectedDate).toBeTruthy();
   expect(report.currentVoiceInputMode).toBeTruthy();
+  expect(report.currentVoiceFeedbackMode).toBe('silent');
   expect(report.currentMealSummary.itemCount).toBe(0);
   expect(report.voiceStatus).toEqual(expect.objectContaining({
-    inputMode: expect.any(String)
+    inputMode: expect.any(String),
+    feedbackMode: 'silent'
   }));
   expect(Object.prototype.hasOwnProperty.call(report, 'lastTranscriptText')).toBe(true);
   expect(Array.isArray(report.voiceTrace)).toBe(true);
@@ -125,6 +143,7 @@ test('diagnostics report includes note, app state, traces, storage counts, and c
     customFoodCount: 1
   }));
   expect(report.localStorageSummary.knownKeys.sous_log.present).toBe(true);
+  expect(report.localStorageSummary.knownKeys.sous_voice_feedback_mode.present).toBe(true);
   expect(report.recentConsoleErrors.some(error => error.message === 'Synthetic tester error')).toBe(true);
 
   const text = JSON.stringify(report);
@@ -139,13 +158,66 @@ test('copy helper writes JSON bug report text to clipboard', async ({ page, cont
   await context.grantPermissions(['clipboard-read', 'clipboard-write']);
   await boot(page, '/?test=1');
 
-  await page.evaluate(() => window.__sousCopyBugReport('Copy helper note'));
+  await page.evaluate(() => window.__sousCopyBugReport('Copy helper note', 'Edited a saved meal'));
   const clipboardText = await page.evaluate(() => navigator.clipboard.readText());
   const report = JSON.parse(clipboardText);
 
   expect(report.testerNote).toBe('Copy helper note');
+  expect(report.testerIntent).toBe('Edited a saved meal');
   expect(report.currentURL).toContain('test=1');
   expect(report.reportType).toBe('beta-diagnostics');
+});
+
+test('send to Stu posts diagnostics with tester fields and ignores double tap', async ({ page }) => {
+  const submissions = [];
+  await page.route('**/api/bug-report', async route => {
+    submissions.push(route.request().postDataJSON());
+    await new Promise(resolve => setTimeout(resolve, 80));
+    await route.fulfill({
+      status: 201,
+      contentType: 'application/json',
+      body: JSON.stringify({ ok: true, id: 'bug_123' })
+    });
+  });
+  await boot(page, '/?test=1');
+
+  await page.getByTestId('bug-report-button').click();
+  await page.locator('#bug-report-intent').fill('Scanned a photo');
+  await page.locator('#bug-report-note').fill('Photo came back as pasta');
+  await page.evaluate(() => {
+    document.getElementById('bug-report-send').click();
+    document.getElementById('bug-report-send').click();
+  });
+
+  await expect(page.locator('#bug-report-status')).toContainText('Sent to Stu. Report bug_123');
+  expect(submissions).toHaveLength(1);
+  expect(submissions[0]).toEqual(expect.objectContaining({
+    testerIntent: 'Scanned a photo',
+    testerNote: 'Photo came back as pasta',
+    reportType: 'beta-diagnostics'
+  }));
+});
+
+test('failed send leaves copy fallback available with report JSON', async ({ page }) => {
+  await page.route('**/api/bug-report', route => route.fulfill({
+    status: 500,
+    contentType: 'application/json',
+    body: JSON.stringify({ error: 'Temporary issue' })
+  }));
+  await boot(page, '/?test=1');
+
+  await page.getByTestId('bug-report-button').click();
+  await page.locator('#bug-report-intent').fill('Tried to save dinner');
+  await page.locator('#bug-report-note').fill('Save button did nothing');
+  await page.locator('#bug-report-send').click();
+
+  await expect(page.locator('#bug-report-status')).toContainText('Copy Report is still available');
+  await expect(page.locator('#bug-report-copy')).toBeVisible();
+  await expect(page.getByTestId('bug-report-output')).toBeVisible();
+  const fallbackText = await page.getByTestId('bug-report-output').inputValue();
+  const report = JSON.parse(fallbackText);
+  expect(report.testerIntent).toBe('Tried to save dinner');
+  expect(report.testerNote).toBe('Save button did nothing');
 });
 
 test('clipboard failure shows selectable diagnostics JSON fallback', async ({ page }) => {
@@ -160,14 +232,69 @@ test('clipboard failure shows selectable diagnostics JSON fallback', async ({ pa
   });
 
   await page.getByTestId('bug-report-button').click();
+  await page.locator('#bug-report-intent').fill('Logged breakfast by voice');
   await page.locator('#bug-report-note').fill('Clipboard blocked');
   await page.locator('#bug-report-copy').click();
 
   await expect(page.getByTestId('bug-report-output')).toBeVisible();
   const fallbackText = await page.getByTestId('bug-report-output').inputValue();
   const report = JSON.parse(fallbackText);
+  expect(report.testerIntent).toBe('Logged breakfast by voice');
   expect(report.testerNote).toBe('Clipboard blocked');
   await expect(page.locator('#bug-report-status')).toContainText('Clipboard copy failed');
+});
+
+test('backend stores bug report JSONL with safe request metadata', async () => {
+  const tempDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'sous-bug-reports-'));
+  const modulePath = require.resolve('../server.js');
+  delete require.cache[modulePath];
+  process.env.SOUS_BUG_REPORT_DIR = tempDir;
+  process.env.SOUS_BUG_REPORT_MAX_BYTES = String(256 * 1024);
+  const { app } = require('../server.js');
+  const server = await new Promise(resolve => {
+    const started = app.listen(0, '127.0.0.1', () => resolve(started));
+  });
+  const address = server.address();
+
+  try {
+    const res = await fetch(`http://127.0.0.1:${address.port}/api/bug-report`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'User-Agent': 'Sous test agent'
+      },
+      body: JSON.stringify({
+        testerIntent: 'Logged breakfast by voice',
+        testerNote: 'Mic stopped',
+        apiKey: 'sk-test-secret-value'
+      })
+    });
+    const body = await res.json();
+    expect(res.status).toBe(201);
+    expect(body).toEqual({ ok: true, id: expect.any(String) });
+
+    const files = await fs.promises.readdir(tempDir);
+    expect(files).toHaveLength(1);
+    const lines = (await fs.promises.readFile(path.join(tempDir, files[0]), 'utf8')).trim().split('\n');
+    const stored = JSON.parse(lines[0]);
+    expect(stored.id).toBe(body.id);
+    expect(stored.receivedAt).toBeTruthy();
+    expect(stored.request).toEqual(expect.objectContaining({
+      method: 'POST',
+      path: '/api/bug-report',
+      userAgent: 'Sous test agent',
+      payloadBytes: expect.any(Number)
+    }));
+    expect(stored.report.testerIntent).toBe('Logged breakfast by voice');
+    expect(stored.report.testerNote).toBe('Mic stopped');
+    expect(stored.report.apiKey).toBe('[REDACTED]');
+  } finally {
+    await new Promise(resolve => server.close(resolve));
+    delete process.env.SOUS_BUG_REPORT_DIR;
+    delete process.env.SOUS_BUG_REPORT_MAX_BYTES;
+    delete require.cache[modulePath];
+    await fs.promises.rm(tempDir, { recursive: true, force: true });
+  }
 });
 
 test('photo estimate offers camera and camera roll inputs', async ({ page }) => {
@@ -195,6 +322,79 @@ test('photo estimate offers camera and camera roll inputs', async ({ page }) => 
     libraryCapture: null,
     hasCameraOpener: true,
     hasLibraryOpener: true
+  });
+});
+
+test('single-item photo correction updates meal title before saving', async ({ page }) => {
+  let adjustPayload = null;
+  await page.route('**/api/photo-estimate-adjust', route => {
+    adjustPayload = route.request().postDataJSON();
+    return route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        items: [{
+          name: 'Lasagne',
+          quantity: 1,
+          unit: 'serving',
+          grams: 350,
+          kcal: 630,
+          protein: 32,
+          carbs: 54,
+          fat: 30,
+          fibre: 4,
+          confidence: 'medium',
+          reason: 'Corrected whole-photo estimate identity.'
+        }],
+        summary: 'Corrected to lasagne.',
+        warnings: []
+      })
+    });
+  });
+  await boot(page);
+
+  await page.evaluate(() => {
+    window.renderPhotoEstimateReview({
+      mealName: 'cheese ravioli and meat sauce',
+      confidence: 'medium',
+      items: [{
+        name: 'cheese ravioli and meat sauce',
+        estimatedGrams: 350,
+        calories: 610,
+        protein: 28,
+        carbs: 58,
+        fat: 27,
+        confidence: 'medium',
+        notes: ''
+      }],
+      totals: { calories: 610, protein: 28, carbs: 58, fat: 27 }
+    });
+  });
+
+  await expect(page.locator('#photo-estimate-modal')).toBeVisible();
+  await expect(page.locator('#photo-meal-name')).toHaveValue('cheese ravioli and meat sauce');
+
+  await page.locator('#photo-adjust-input').fill("it's lasagne");
+  await page.locator('#photo-adjust-btn').click();
+
+  await expect.poll(() => page.locator('#photo-items-list input[aria-label="Food name"]').evaluateAll(inputs => inputs.map(input => input.value))).toEqual(['Lasagne']);
+  await expect(page.locator('#photo-meal-name')).toHaveValue('Lasagne');
+  await expect(page.locator('#photo-estimate-title')).toContainText('Review Lasagne');
+  expect(adjustPayload.correction).toBe("it's lasagne");
+  expect(adjustPayload.previousEstimate.mealName).toBe('cheese ravioli and meat sauce');
+
+  await page.locator('#photo-estimate-save-btn').click();
+  const saved = await page.evaluate(() => {
+    const day = Object.values(JSON.parse(localStorage.getItem('sous_log') || '{}'))[0];
+    const meal = day?.meals?.[0];
+    return {
+      mealName: meal?.name,
+      itemNames: meal?.ingredients?.map(item => item.name)
+    };
+  });
+  expect(saved).toEqual({
+    mealName: 'Lasagne',
+    itemNames: ['Lasagne']
   });
 });
 

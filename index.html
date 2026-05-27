@@ -28,8 +28,20 @@
   let theme=fromSaved();
   try{
     theme=fromSaved(JSON.parse(localStorage.getItem('sous_theme')||'{}')||{});
-    // Keep legacy sous_* keys for compatibility; default new installs to hold-to-talk.
+    // Keep legacy sous_* keys for compatibility; default new installs to hold-to-talk and silent feedback.
     if(!localStorage.getItem('sous_voice_input_mode'))localStorage.setItem('sous_voice_input_mode','hold');
+    const feedbackMode=localStorage.getItem('sous_voice_feedback_mode');
+    const legacyFeedback=localStorage.getItem('sous_voice_feedback');
+    if(feedbackMode!=='silent'&&feedbackMode!=='voice'){
+      if(legacyFeedback==='0'||legacyFeedback==='1'){
+        localStorage.setItem('sous_voice_feedback_mode',legacyFeedback==='1'?'voice':'silent');
+      } else {
+        localStorage.setItem('sous_voice_feedback_mode','silent');
+        localStorage.setItem('sous_voice_feedback','0');
+      }
+    } else if(legacyFeedback!=='0'&&legacyFeedback!=='1'){
+      localStorage.setItem('sous_voice_feedback',feedbackMode==='voice'?'1':'0');
+    }
   }catch(e){}
   document.documentElement.setAttribute('data-mode',theme.mode);
   document.documentElement.setAttribute('data-hl',theme.hl);
@@ -164,7 +176,7 @@ html,body{height:100%;height:var(--app-height);min-height:-webkit-fill-available
 .onboarding-brand-dot{width:8px;height:8px;border-radius:50%;background:var(--accent);box-shadow:0 0 12px var(--accent-glow);}
 .onboarding-skip{background:transparent;border:none;color:var(--text-muted);font-family:'Geist',sans-serif;font-size:13px;font-weight:500;padding:8px;cursor:pointer;}
 .onboarding-skip:hover{color:var(--accent);}
-.onboarding-cards{flex:1;display:flex;align-items:center;min-height:0;}
+.onboarding-cards{flex:1;display:flex;align-items:center;min-height:0;overflow-y:auto;padding:12px 0;}
 .onboarding-card{display:none;width:100%;animation:fadeIn .22s ease;}
 .onboarding-card.active{display:block;}
 .onboarding-icon{width:54px;height:54px;border-radius:18px;background:var(--accent-soft);color:var(--accent);display:flex;align-items:center;justify-content:center;font-size:28px;margin-bottom:22px;}
@@ -172,6 +184,25 @@ html,body{height:100%;height:var(--app-height);min-height:-webkit-fill-available
 .onboarding-title{font-size:34px;line-height:1.06;font-weight:500;color:var(--text);letter-spacing:0;margin-bottom:14px;}
 .onboarding-body{font-size:16px;line-height:1.55;color:var(--text-muted);max-width:34ch;}
 .onboarding-note{border:.5px solid var(--border);background:var(--card);border-radius:var(--radius-sm);padding:12px 14px;margin-top:18px;color:var(--text-muted);font-size:12px;line-height:1.45;}
+.onboarding-mini-form{display:grid;gap:10px;margin-top:18px;}
+.onboarding-field{display:flex;align-items:center;justify-content:space-between;gap:12px;background:var(--card);border:.5px solid var(--border);border-radius:var(--radius-sm);padding:10px 12px;}
+.onboarding-field label{font-size:13px;color:var(--text);font-weight:600;}
+.onboarding-field input,.onboarding-field select{width:130px;background:var(--bg);border:.5px solid var(--border);border-radius:8px;color:var(--text);font-family:'Geist',sans-serif;font-size:14px;padding:8px 9px;outline:none;}
+.onboarding-field input{text-align:right;font-family:'Geist Mono',monospace;}
+.onboarding-feature-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:18px;}
+.onboarding-feature-card{background:var(--card);border:.5px solid var(--border);border-radius:var(--radius-sm);padding:12px;}
+.onboarding-feature-card i{font-size:20px;color:var(--accent);margin-bottom:8px;display:block;}
+.onboarding-feature-card b{display:block;color:var(--text);font-size:13px;margin-bottom:2px;}
+.onboarding-feature-card span{display:block;color:var(--text-muted);font-size:11px;line-height:1.35;}
+.onboarding-coach{position:absolute;left:14px;right:14px;bottom:calc(var(--bottom-nav-space) + 12px);z-index:110;display:none;gap:10px;align-items:flex-start;background:var(--raised);border:.5px solid var(--border-strong);border-radius:var(--radius-sm);box-shadow:0 10px 30px rgba(0,0,0,.2);padding:12px;pointer-events:none;}
+.onboarding-coach.show{display:flex;}
+.onboarding-coach-icon{width:30px;height:30px;border-radius:10px;background:var(--accent-soft);color:var(--accent);display:flex;align-items:center;justify-content:center;flex:0 0 auto;}
+.onboarding-coach-body{flex:1;min-width:0;}
+.onboarding-coach-title{font-size:15px;font-weight:600;color:var(--text);margin-bottom:2px;}
+.onboarding-coach-text{font-size:12px;line-height:1.35;color:var(--text-muted);}
+.onboarding-coach-actions{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;}
+.onboarding-coach-actions button{width:auto;flex:0 0 auto;padding:8px 10px;font-size:12px;pointer-events:auto;}
+.onboarding-highlight{position:relative;z-index:105;box-shadow:0 0 0 3px var(--accent-soft),0 0 0 1px var(--accent)!important;}
 .onboarding-dots{display:flex;align-items:center;justify-content:center;gap:7px;margin:10px 0 16px;flex-shrink:0;}
 .onboarding-dot{width:7px;height:7px;border-radius:50%;background:var(--border-strong);}
 .onboarding-dot.active{background:var(--accent);}
@@ -182,8 +213,10 @@ html,body{height:100%;height:var(--app-height);min-height:-webkit-fill-available
 .bug-report-button.show{display:flex;}
 .bug-report-button i{font-size:16px;}
 .bug-report-sheet{max-width:390px;}
+.bug-report-label{display:block;color:var(--text);font-size:13px;font-weight:600;margin:4px 0 8px;}
+.bug-report-input{width:100%;background:var(--bg);border:.5px solid var(--border);border-radius:var(--radius-sm);color:var(--text);font-family:'Geist',sans-serif;font-size:14px;line-height:1.45;padding:12px;outline:none;margin-bottom:14px;}
 .bug-report-textarea{width:100%;min-height:120px;resize:vertical;background:var(--bg);border:.5px solid var(--border);border-radius:var(--radius-sm);color:var(--text);font-family:'Geist',sans-serif;font-size:14px;line-height:1.45;padding:12px;outline:none;margin-bottom:14px;}
-.bug-report-textarea:focus{border-color:var(--accent-2);}
+.bug-report-input:focus,.bug-report-textarea:focus{border-color:var(--accent-2);}
 .bug-report-output{width:100%;min-height:160px;display:none;resize:vertical;background:var(--bg);border:.5px solid var(--border);border-radius:var(--radius-sm);color:var(--text);font-family:'Geist Mono',monospace;font-size:11px;line-height:1.45;padding:10px;outline:none;margin-top:10px;white-space:pre;}
 .bug-report-status{min-height:18px;color:var(--text-muted);font-size:12px;line-height:1.4;margin-top:10px;}
 @media (max-height:620px){
@@ -192,6 +225,8 @@ html,body{height:100%;height:var(--app-height);min-height:-webkit-fill-available
   .onboarding-title{font-size:28px;}
   .onboarding-body{font-size:14px;}
   .onboarding-note{margin-top:12px;}
+  .onboarding-feature-grid{grid-template-columns:1fr;}
+  .onboarding-coach{left:10px;right:10px;bottom:calc(var(--bottom-nav-space) + 8px);}
 }
 @keyframes fadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
 @keyframes blink{0%,100%{opacity:1}50%{opacity:.3}}
@@ -1201,6 +1236,13 @@ html,body{height:100%;height:var(--app-height);min-height:-webkit-fill-available
               <button class="seg-btn" data-val="continuous" onclick="setVoiceInputMode('continuous')">Continuous</button>
             </div>
           </div>
+          <div class="form-row" style="border-bottom:none;">
+            <div class="form-row-label">Feedback</div>
+            <div class="segment" id="seg-voice-feedback-mode">
+              <button class="seg-btn active" data-val="silent" onclick="setVoiceFeedbackMode('silent')">Silent</button>
+              <button class="seg-btn" data-val="voice" onclick="setVoiceFeedbackMode('voice')">Voice</button>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -1284,7 +1326,7 @@ html,body{height:100%;height:var(--app-height);min-height:-webkit-fill-available
               <div class="form-row-label">First-run guide</div>
               <div class="form-row-sub">Replay the quick Jot basics</div>
             </div>
-            <button class="btn-secondary" type="button" onclick="window.__sousShowOnboarding()" style="flex:0 0 auto;width:auto;padding:8px 12px;">Open</button>
+            <button class="btn-secondary" type="button" id="profile-onboarding-btn" onclick="window.__sousShowOnboarding()" style="flex:0 0 auto;width:auto;padding:8px 12px;">Open</button>
           </div>
         </div>
       </div>
@@ -1312,12 +1354,16 @@ html,body{height:100%;height:var(--app-height);min-height:-webkit-fill-available
 <div class="modal-overlay" id="bug-report-modal" aria-hidden="true" data-testid="bug-report-modal">
   <div class="modal-sheet bug-report-sheet" role="dialog" aria-modal="true" aria-labelledby="bug-report-title">
     <div class="modal-header">
-      <span class="modal-title" id="bug-report-title">What went wrong?</span>
+      <span class="modal-title" id="bug-report-title">Report a bug</span>
       <button class="modal-close" type="button" id="bug-report-close" aria-label="Close bug report">x</button>
     </div>
+    <label class="bug-report-label" for="bug-report-intent">What were you trying to do?</label>
+    <input class="bug-report-input" id="bug-report-intent" placeholder="Logged breakfast by voice, edited a saved meal, scanned a photo">
+    <label class="bug-report-label" for="bug-report-note">What went wrong? Anything else?</label>
     <textarea class="bug-report-textarea" id="bug-report-note" placeholder="What did you say or tap? What did Jot do instead?"></textarea>
     <div class="modal-btns">
-      <button class="modal-btn primary" type="button" id="bug-report-copy">Copy report</button>
+      <button class="modal-btn primary" type="button" id="bug-report-send">Send to Stu</button>
+      <button class="modal-btn secondary" type="button" id="bug-report-copy">Copy report</button>
       <button class="modal-btn secondary" type="button" id="bug-report-download">Download report</button>
       <button class="modal-btn secondary" type="button" id="bug-report-cancel">Cancel</button>
     </div>
@@ -1330,40 +1376,35 @@ html,body{height:100%;height:var(--app-height);min-height:-webkit-fill-available
 <div class="onboarding-overlay" id="onboarding-overlay" role="dialog" aria-modal="true" aria-labelledby="onboarding-title" aria-describedby="onboarding-body" aria-hidden="true" data-testid="onboarding-overlay">
   <div class="onboarding-dialog">
     <div class="onboarding-top">
-      <div class="onboarding-brand"><span class="onboarding-brand-dot"></span><span>Jot basics</span></div>
+      <div class="onboarding-brand"><span class="onboarding-brand-dot"></span><span>First log</span></div>
       <button class="onboarding-skip" type="button" id="onboarding-skip" aria-label="Skip onboarding">Skip</button>
     </div>
     <div class="onboarding-cards" id="onboarding-cards">
       <section class="onboarding-card active" data-onboarding-card>
-        <div class="onboarding-icon"><i class="ti ti-bug"></i></div>
-        <div class="onboarding-step">1 / 5</div>
-        <h2 class="onboarding-title" id="onboarding-title">Testing? Tap Bug</h2>
-        <p class="onboarding-body" id="onboarding-body">If something goes wrong, tap the Bug button and copy the report. Add what you expected, then send the error log to Stu on WhatsApp.</p>
+        <div class="onboarding-icon"><i class="ti ti-user"></i></div>
+        <div class="onboarding-step">Profile</div>
+        <h2 class="onboarding-title" id="onboarding-title">Quick setup</h2>
+        <p class="onboarding-body" id="onboarding-body">Just enough for targets. You can change it later.</p>
+        <div class="onboarding-mini-form">
+          <div class="onboarding-field"><label for="onboarding-age">Age</label><input id="onboarding-age" type="number" min="13" max="120" inputmode="numeric"></div>
+          <div class="onboarding-field"><label for="onboarding-sex">Sex</label><select id="onboarding-sex"><option value="male">Male</option><option value="female">Female</option></select></div>
+          <div class="onboarding-field"><label for="onboarding-height">Height cm</label><input id="onboarding-height" type="number" min="90" max="240" inputmode="decimal"></div>
+          <div class="onboarding-field"><label for="onboarding-weight">Weight kg</label><input id="onboarding-weight" type="number" min="20" max="400" step="0.1" inputmode="decimal"></div>
+          <div class="onboarding-field"><label for="onboarding-goal">Goal</label><select id="onboarding-goal"><option value="maintain">Maintain</option><option value="lose">Lose</option><option value="gain">Gain</option></select></div>
+        </div>
       </section>
       <section class="onboarding-card" data-onboarding-card>
-        <div class="onboarding-icon"><i class="ti ti-user-circle"></i></div>
-        <div class="onboarding-step">2 / 5</div>
-        <h2 class="onboarding-title">Set up Profile</h2>
-        <p class="onboarding-body">Open the Profile tab first. Add your basics, goal, activity level, and bodyweight so Jot can show useful targets while you test.</p>
-      </section>
-      <section class="onboarding-card" data-onboarding-card>
-        <div class="onboarding-icon"><i class="ti ti-microphone"></i></div>
-        <div class="onboarding-step">3 / 5</div>
-        <h2 class="onboarding-title">Hold, speak, release</h2>
-        <p class="onboarding-body">Hold the mic and try phrases like “oats, banana and whey” or “200ml milk”. Release to review what Jot heard.</p>
-      </section>
-      <section class="onboarding-card" data-onboarding-card>
-        <div class="onboarding-icon"><i class="ti ti-adjustments"></i></div>
-        <div class="onboarding-step">4 / 5</div>
-        <h2 class="onboarding-title">Review and correct</h2>
-        <p class="onboarding-body">Everything is editable before saving. Say “make that 150g”, “remove banana”, or tap any item to change it.</p>
-        <p class="onboarding-note">AI helps interpret unclear food logging intent, but Jot does not invent nutrition or save meals without review.</p>
-      </section>
-      <section class="onboarding-card" data-onboarding-card>
-        <div class="onboarding-icon"><i class="ti ti-bolt"></i></div>
-        <div class="onboarding-step">5 / 5</div>
-        <h2 class="onboarding-title">Jot gets faster over time</h2>
-        <p class="onboarding-body">Use recent, usual, and repeated meals to log your real food in seconds.</p>
+        <div class="onboarding-icon"><i class="ti ti-sparkles"></i></div>
+        <div class="onboarding-step">More ways</div>
+        <h2 class="onboarding-title">Useful extras</h2>
+        <p class="onboarding-body">After your first save, these are here when you need them.</p>
+        <div class="onboarding-feature-grid">
+          <div class="onboarding-feature-card"><i class="ti ti-camera"></i><b>Photo meals</b><span>Estimate from a plate.</span></div>
+          <div class="onboarding-feature-card"><i class="ti ti-menu-2"></i><b>Menu scan</b><span>Pick restaurant options.</span></div>
+          <div class="onboarding-feature-card"><i class="ti ti-barcode"></i><b>Barcode scan</b><span>Add packaged foods.</span></div>
+          <div class="onboarding-feature-card"><i class="ti ti-repeat"></i><b>Repeat meals</b><span>Reuse usuals quickly.</span></div>
+        </div>
+        <div class="onboarding-note">If something feels wrong: Bug → Send to Stu</div>
       </section>
     </div>
     <div class="onboarding-dots" id="onboarding-dots" aria-hidden="true"></div>
@@ -1371,6 +1412,14 @@ html,body{height:100%;height:var(--app-height);min-height:-webkit-fill-available
       <button class="btn-secondary" type="button" id="onboarding-back">Back</button>
       <button class="btn-primary" type="button" id="onboarding-next">Next</button>
     </div>
+  </div>
+</div>
+<div class="onboarding-coach" id="onboarding-coach" aria-live="polite" data-testid="onboarding-coach">
+  <div class="onboarding-coach-icon"><i class="ti ti-pointer"></i></div>
+  <div class="onboarding-coach-body">
+    <div class="onboarding-coach-title" id="onboarding-coach-title">Hold to speak</div>
+    <div class="onboarding-coach-text" id="onboarding-coach-text">Try "2 eggs and toast" or type it below.</div>
+    <div class="onboarding-coach-actions" id="onboarding-coach-actions"></div>
   </div>
 </div>
 
@@ -1846,14 +1895,14 @@ window.sousApiUrl=path=>`${window.SOUS_API_BASE}${path}`;
 <script src="js/consumable-presets.js?v=1"></script>
 <script src="js/parser.js?v=12"></script>
 <script src="js/meal-memory.js?v=1"></script>
-<script src="js/ai-response-cache.js?v=7"></script>
-<script src="js/speech.js?v=27"></script>
+<script src="js/ai-response-cache.js?v=8"></script>
+<script src="js/speech.js?v=28"></script>
 <script src="js/history.js?v=10"></script>
 <script src="js/profile.js?v=9"></script>
 <script src="js/recipes.js?v=8"></script>
-<script src="js/backup.js?v=2"></script>
-<script src="js/onboarding.js?v=1"></script>
-<script src="js/test-mode.js?v=5"></script>
+<script src="js/backup.js?v=3"></script>
+<script src="js/onboarding.js?v=3"></script>
+<script src="js/test-mode.js?v=7"></script>
 <script src="js/app.js?v=21"></script>
 <script src="js/ai-interpreter.js?v=3"></script>
 <script src="js/barcode.js?v=2"></script>

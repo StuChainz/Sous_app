@@ -33,9 +33,6 @@ xcodebuild \
   -destination 'generic/platform=iOS' \
   -archivePath "$ARCHIVE_PATH" \
   -allowProvisioningUpdates \
-  -authenticationKeyPath "$ASC_KEY_PATH" \
-  -authenticationKeyID "$ASC_KEY_ID" \
-  -authenticationKeyIssuerID "$ASC_ISSUER_ID" \
   DEVELOPMENT_TEAM="$APPLE_TEAM_ID" \
   clean archive
 
@@ -44,10 +41,7 @@ xcodebuild \
   -archivePath "$ARCHIVE_PATH" \
   -exportPath "$EXPORT_PATH" \
   -exportOptionsPlist "$EXPORT_OPTIONS" \
-  -allowProvisioningUpdates \
-  -authenticationKeyPath "$ASC_KEY_PATH" \
-  -authenticationKeyID "$ASC_KEY_ID" \
-  -authenticationKeyIssuerID "$ASC_ISSUER_ID"
+  -allowProvisioningUpdates
 
 IPA_PATH="$(find "$EXPORT_PATH" -maxdepth 1 -name '*.ipa' -print -quit)"
 if [[ -z "$IPA_PATH" ]]; then
@@ -56,7 +50,8 @@ if [[ -z "$IPA_PATH" ]]; then
 fi
 
 xcrun altool \
-  --upload-package "$IPA_PATH" \
-  --api-key "$ASC_KEY_ID" \
-  --api-issuer "$ASC_ISSUER_ID" \
-  --wait
+  --upload-app \
+  -f "$IPA_PATH" \
+  --type ios \
+  --apiKey "$ASC_KEY_ID" \
+  --apiIssuer "$ASC_ISSUER_ID"

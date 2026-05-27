@@ -1044,7 +1044,8 @@ async function handleTranscript(transcript,rawText,voiceContext=null){
       source:'handleTranscript',
       transcript:transcript.trim(),
       escalationReason,
-      results:typeof voiceDebugResultSummary==='function'?voiceDebugResultSummary(results):results
+      results:typeof voiceDebugResultSummary==='function'?voiceDebugResultSummary(results):results,
+      diagnostics:typeof parserDiagnostics==='function'?parserDiagnostics(transcript,results):null
     });
     voiceDebugTrace('voice_decision',{
       step:'parser_escalation',
@@ -2247,6 +2248,26 @@ function normalisePhotoAdjustItems(adjustment){
     notes:item.reason||item.notes||''
   })).filter(item=>item.name);
 }
+function photoAdjustWholeMealName(data,previousDraft,items){
+  const explicit=String(data?.mealName||data?.title||'').trim();
+  if(explicit) return explicit;
+  const previousItems=Array.isArray(previousDraft?.items)?previousDraft.items:[];
+  if(previousItems.length===1&&items.length===1){
+    return String(items[0]?.name||'').trim();
+  }
+  return '';
+}
+function applyPhotoEstimateMealName(name){
+  const clean=String(name||'').trim();
+  if(!clean||!_photoEstimateDraft) return;
+  _photoEstimateDraft.mealName=clean;
+  const input=document.getElementById('photo-meal-name');
+  if(input) input.value=clean;
+  const title=document.getElementById('photo-estimate-title');
+  if(title&&/^review photo estimate$/i.test(title.textContent||'')){
+    title.textContent=`Review ${clean}`;
+  }
+}
 function clonePhotoEstimateDraft(draft=_photoEstimateDraft){
   if(!draft) return null;
   try{return JSON.parse(JSON.stringify(draft));}
@@ -2422,13 +2443,15 @@ function buildPhotoAdjustPayload(correction){
 function applyPhotoAdjustResult(data){
   const items=normalisePhotoAdjustItems(data);
   if(!items.length) throw new Error('No revised rows returned.');
+  const mealName=photoAdjustWholeMealName(data,_photoEstimateDraft,items);
   _photoEstimateDraft={
     ..._photoEstimateDraft,
     items,
     notes:[data.summary||'',...(Array.isArray(data.warnings)?data.warnings:[])].filter(Boolean).join('\n')
   };
+  applyPhotoEstimateMealName(mealName);
   renderPhotoEstimateItemRows();
-  photoEstimateTrace('photo_adjust_replaced_rows',{itemCount:items.length});
+  photoEstimateTrace('photo_adjust_replaced_rows',{itemCount:items.length,mealNameUpdated:!!mealName});
   const revertBtn=document.getElementById('photo-adjust-revert-btn');
   if(revertBtn) revertBtn.style.display=_photoEstimatePreviousDraft?'inline-flex':'none';
   _photoEstimateManualDirty=false;
@@ -3092,7 +3115,7 @@ function updateHome(){ if(currentTab==='home') renderHome(); }
 // ═══════════════════════════════════════════
 // PWA — MANIFEST + SERVICE WORKER
 // ═══════════════════════════════════════════
-const SOUS_CACHE_VERSION='sous-v22';
+const SOUS_CACHE_VERSION='sous-v24';
 
 window.__sousClearCachesAndReload=async function(){
   if('serviceWorker' in navigator){
@@ -3217,6 +3240,7 @@ window.__sousPhotoTimingTrace=()=>_photoEstimateTrace.slice(-100);
 window.__sousLastPhotoError=()=>_photoEstimateLastError?{..._photoEstimateLastError}:null;
 window.__sousPhotoEstimateState=()=>({
   hasPhotoEstimate:!!_photoEstimateDraft,
+  mealName:_photoEstimateDraft?.mealName||null,
   photoEstimateItemCount:Array.isArray(_photoEstimateDraft?.items)?_photoEstimateDraft.items.length:0,
   photoAdjustInProgress:!!_photoEstimateAdjustInProgress,
   lastPhotoAdjustError:_photoEstimateLastAdjustError?{..._photoEstimateLastAdjustError}:null

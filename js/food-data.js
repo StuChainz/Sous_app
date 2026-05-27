@@ -789,6 +789,7 @@ function getPreferredFoods(countryCode){
 
 const AMBIG=[
   {trigger:['chicken'],  options:['Chicken breast','Chicken thigh'],      question:'Chicken breast or thigh?'},
+  {trigger:['beef'],     options:['Beef steak','Beef mince'],             question:'Beef steak or mince?'},
   {trigger:['rice'],     options:['Brown rice','White rice'],              question:'Brown rice or white rice?'},
   {trigger:['fish'],     options:['Salmon','Tuna','Cod','Sea bass'],       question:'Which fish — salmon, tuna, cod or sea bass?'},
   {trigger:['tuna'],     options:['Tuna','Tuna canned'],                   question:'Fresh tuna or canned tuna?'},

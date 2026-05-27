@@ -580,18 +580,26 @@ function splitOnSeparators(text){
     .map(s=>s.replace(/__ANDAHALF__/g,'and a half').trim())
     .filter(Boolean);
 }
+function parserTextLooksFoodLike(text){
+  const cleaned=cleanSegment(stripSegmentPrefix(normaliseLogText(text||''))).replace(/^of\s+/,'').trim();
+  if(!cleaned) return false;
+  if(typeof getFoodTextMatch==='function'&&getFoodTextMatch(cleaned,{includeCustom:true})) return true;
+  const groups=[...(typeof PARSER_AMBIG!=='undefined'?PARSER_AMBIG:[]),...(typeof AMBIG!=='undefined'?AMBIG:[])];
+  return groups.some(group=>(group.trigger||[]).some(trigger=>cleaned===normaliseLogText(trigger)));
+}
 // Split parts further where a new quantity begins mid-segment.
 function splitOnNewQuantity(parts){
+  const numberPattern='\\d+(?:\\.\\d+)?|a|an|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|couple';
   const re=/(?=\b\d+(?:\.\d+)?\s*(?:g\b|kg\b|ml\b|l\b|tbsp\b|tsp\b|oz\b|cups?\b|calories\b|kcal\b))/i;
-  const spokenQuantityRe=new RegExp('(?=\\b(?:a|an|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|couple)\\s+(?:'+COUNT_UNIT_PATTERN+')\\b)','i');
+  const countQuantityRe=new RegExp('(?=\\b(?:'+numberPattern+')\\s+(?:'+COUNT_UNIT_PATTERN+')\\b)','i');
   const unitFirstRe=/(?=\b(?:cup|cups|tbsp|tsp)\s+(?:of\s+)?[a-z])/i;
   const leadingQuantityRe=/^(\d+(?:\.\d+)?\s*(?:g\b|kg\b|ml\b|l\b|tbsp\b|tsp\b|oz\b|cups?\b|calories\b|kcal\b))\s*(.*)$/i;
   const hasQuantityRe=/\b\d+(?:\.\d+)?\s*(?:g\b|kg\b|ml\b|l\b|tbsp\b|tsp\b|oz\b|cups?\b|calories\b|kcal\b)/i;
-  const hasAnyQuantityRe=new RegExp('(?:\\b\\d+(?:\\.\\d+)?\\s*(?:g\\b|kg\\b|ml\\b|l\\b|tbsp\\b|tsp\\b|oz\\b|cups?\\b|calories\\b|kcal\\b)|\\b(?:a|an|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|couple)\\s+(?:'+COUNT_UNIT_PATTERN+')\\b|\\b(?:cup|cups|tbsp|tsp)\\s+(?:of\\s+)?[a-z])','i');
+  const hasAnyQuantityRe=new RegExp('(?:\\b\\d+(?:\\.\\d+)?\\s*(?:g\\b|kg\\b|ml\\b|l\\b|tbsp\\b|tsp\\b|oz\\b|cups?\\b|calories\\b|kcal\\b)|\\b(?:'+numberPattern+')\\s+(?:'+COUNT_UNIT_PATTERN+')\\b|\\b(?:cup|cups|tbsp|tsp)\\s+(?:of\\s+)?[a-z])','i');
   return parts.flatMap(part=>{
     const chunks=part
       .split(re)
-      .flatMap(chunk=>chunk.split(spokenQuantityRe))
+      .flatMap(chunk=>chunk.split(countQuantityRe))
       .flatMap(chunk=>chunk.split(unitFirstRe))
       .map(s=>s.trim())
       .filter(Boolean);
@@ -600,10 +608,11 @@ function splitOnNewQuantity(parts){
     chunks.forEach(chunk=>{
       const m=chunk.match(leadingQuantityRe);
       const prev=merged[merged.length-1];
-      if(m&&prev&&!hasQuantityRe.test(prev)){
+      const leadingQuantityTargetsFood=!!(m&&m[2]&&parserTextLooksFoodLike(m[2]));
+      if(m&&prev&&!hasAnyQuantityRe.test(prev)&&!leadingQuantityTargetsFood){
         merged[merged.length-1]=`${prev} ${m[1]}`.trim();
         if(m[2]) merged.push(m[2].trim());
-      } else if(prev&&!hasAnyQuantityRe.test(prev)&&hasAnyQuantityRe.test(chunk)){
+      } else if(prev&&!hasAnyQuantityRe.test(prev)&&hasAnyQuantityRe.test(chunk)&&!leadingQuantityTargetsFood){
         merged[merged.length-1]=`${prev} ${chunk}`.trim();
       } else {
         merged.push(chunk);
@@ -727,6 +736,30 @@ function parseText(text){
     }
   }
   return results;
+}
+function parserDiagnosticItemSummary(item){
+  if(!item) return null;
+  if(item.command) return {type:'command',command:item.command,target:item.target||null,replacement:item.replacement||null,quantityText:item.quantityText||null};
+  if(item.ambiguous) return {type:'ambiguous',label:item.label||null,amount:item.amount??null,matches:(item.matches||[]).map(food=>food.name).slice(0,4)};
+  return {type:'food',name:item.name||null,weight:item.weight??null,weightSpecified:!!item.weightSpecified,rawFood:item.rawFood?.name||null,heardName:item.heardName||null};
+}
+function parserDiagnostics(text,results=null){
+  const normalized=normaliseLogText(text||'');
+  const segments=splitIngredients(normalized);
+  return {
+    normalized,
+    segments:segments.map(seg=>{
+      const multi=parseBareFoodListSegment(seg);
+      const parsed=multi||[parseSingleSegment(seg)].filter(Boolean);
+      return {
+        segment:seg,
+        parsed:parsed.map(parserDiagnosticItemSummary).filter(Boolean),
+        status:parsed.length?'parsed':'unmatched'
+      };
+    }),
+    resultCount:Array.isArray(results)?results.length:null,
+    results:Array.isArray(results)?results.map(parserDiagnosticItemSummary).filter(Boolean):null
+  };
 }
 function parseRecipeText(text){
   const lines=text.split(/\n/).map(l=>l.trim()).filter(l=>l.length>2);

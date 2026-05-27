@@ -17,7 +17,8 @@ const JOT_BACKUP_KEYS=[
   {key:'sous_theme',type:'object',fallback:{mode:'light',hl:'yellow'}},
   {key:'userCountry',type:'string',fallback:'GLOBAL'},
   {key:'sous_voice_input_mode',type:'string',fallback:'hold',allowed:['hold','continuous']},
-  {key:'sous_voice_feedback',type:'string',fallback:'1',allowed:['0','1']},
+  {key:'sous_voice_feedback_mode',type:'string',fallback:'silent',allowed:['silent','voice'],optional:true},
+  {key:'sous_voice_feedback',type:'string',fallback:'0',allowed:['0','1']},
   {key:'sous_realtime_voice',type:'string',fallback:'0',allowed:['0','1']}
 ];
 
@@ -103,7 +104,10 @@ function validateJotBackup(backup){
   if(backup.schemaVersion!==JOT_BACKUP_SCHEMA_VERSION) return {ok:false,error:'This backup uses an unsupported schema version.'};
   if(!backup.data||typeof backup.data!=='object'||Array.isArray(backup.data)) return {ok:false,error:'Backup data is missing.'};
   for(const def of JOT_BACKUP_KEYS){
-    if(!Object.prototype.hasOwnProperty.call(backup.data,def.key)) return {ok:false,error:'Backup is missing '+def.key+'.'};
+    if(!Object.prototype.hasOwnProperty.call(backup.data,def.key)){
+      if(def.optional) continue;
+      return {ok:false,error:'Backup is missing '+def.key+'.'};
+    }
     const value=backup.data[def.key];
     if(!backupValueMatchesType(value,def.type)) return {ok:false,error:def.key+' has the wrong data type.'};
     if(def.allowed&&!def.allowed.includes(value)) return {ok:false,error:def.key+' has an unsupported value.'};
@@ -125,7 +129,10 @@ function formatJotBackupSummary(counts){
 
 function writeJotBackupData(data){
   JOT_BACKUP_KEYS.forEach(def=>{
-    const value=data[def.key];
+    let value=Object.prototype.hasOwnProperty.call(data,def.key)?data[def.key]:def.fallback;
+    if(def.key==='sous_voice_feedback_mode'&&!Object.prototype.hasOwnProperty.call(data,def.key)){
+      value=data.sous_voice_feedback==='1'?'voice':'silent';
+    }
     localStorage.setItem(def.key,def.type==='string'?value:JSON.stringify(value));
   });
 }
@@ -136,6 +143,7 @@ function refreshJotAfterImport(){
     if(typeof applyTheme==='function'&&typeof readStoredTheme==='function') applyTheme(readStoredTheme(),false);
     if(typeof syncThemeUI==='function') syncThemeUI();
     if(typeof setVoiceInputMode==='function') setVoiceInputMode(localStorage.getItem('sous_voice_input_mode')||'hold');
+    if(typeof setVoiceFeedbackMode==='function') setVoiceFeedbackMode(localStorage.getItem('sous_voice_feedback_mode')||'silent');
   }catch(e){}
   try{
     if(typeof profState!=='undefined') profState={};

@@ -7,7 +7,7 @@ let voiceSessionActive=false, voiceCurrentlyListening=false, processingTranscrip
 let voiceRestartTimer=null, voiceProcessingTimer=null, voiceSpeakingTimer=null, voiceListeningWatchdogTimer=null, voiceRecognizerStartTimer=null, voiceNoSpeechRetries=0;
 let voiceSessionState='idle', tapRecStarting=false, tapRecStopping=false, sousRealtimeStarting=false, voicePausedForVisibility=false, voiceMicWarmupActive=false;
 let voiceInputMode='hold', voiceHoldActive=false, voiceHoldStopRequested=false, voiceHoldSuppressClickUntil=0;
-let voiceRestartCount=0, voiceSuccessCueCount=0, voiceFlowCueCooldownUntil=0, voiceDebugOverlayEl=null, voiceDebugOverlayTimer=null, voiceDebugOverlayDismissed=false, voiceDebugOverlayUpdateQueued=false;
+let voiceRestartCount=0, voiceSuccessCueCount=0, voiceSuccessCueIndex=0, voiceFlowCueCooldownUntil=0, voiceDebugOverlayEl=null, voiceDebugOverlayTimer=null, voiceDebugOverlayDismissed=false, voiceDebugOverlayUpdateQueued=false;
 let voiceTapHardResetCount=0, voiceRecoveryCueCooldownUntil=0;
 let voiceListenStartedAt=0;
 let voiceTestEvents=[];
@@ -47,6 +47,10 @@ const VOICE_FLOW_CUE_COOLDOWN_MS=18000;
 const VOICE_FLOW_CUE_CHANCE=0.55;
 const VOICE_SESSION_STATES=new Set(['idle','listening','processing','speaking','restarting','error']);
 const VOICE_INPUT_MODE_KEY='sous_voice_input_mode';
+const VOICE_FEEDBACK_MODE_KEY='sous_voice_feedback_mode';
+const VOICE_FEEDBACK_LEGACY_KEY='sous_voice_feedback';
+const VOICE_SUCCESS_CUE_KEYS=['got_it','added_that','logged'];
+const VOICE_SUCCESS_FEEDBACK_KEYS=new Set(['added','added_that','logged','done','got_it']);
 const VOICE_DEBUG_KEY='sous_voice_debug_trace';
 const VOICE_DEBUG_OVERLAY_KEY='sous_voice_debug_overlay';
 const VOICE_DEBUG_LIMIT=200;
@@ -132,9 +136,9 @@ function voiceDebugResultSummary(results){
 function voiceDebugContextSnapshot(){
   const nav=typeof navigator!=='undefined'?navigator:null;
   const win=typeof window!=='undefined'?window:null;
-  let standalone=false, silentMode=false, realtimeEnabled=false;
+  let standalone=false, feedbackMode='silent', realtimeEnabled=false;
   try{standalone=!!(win&&win.matchMedia&&win.matchMedia('(display-mode: standalone)').matches)||!!nav?.standalone;}catch(e){}
-  try{silentMode=localStorage.getItem('sous_voice_feedback')==='0';}catch(e){}
+  try{feedbackMode=typeof getVoiceFeedbackMode==='function'?getVoiceFeedbackMode():(localStorage.getItem(VOICE_FEEDBACK_LEGACY_KEY)==='1'?'voice':'silent');}catch(e){}
   try{realtimeEnabled=localStorage.getItem('sous_realtime_voice')==='1'||new URLSearchParams(location.search).get('realtime')==='1';}catch(e){}
   return {
     visibility:typeof document!=='undefined'?document.visibilityState:null,
@@ -144,7 +148,8 @@ function voiceDebugContextSnapshot(){
     speechRecognition:!!(win&&(win.SpeechRecognition||win.webkitSpeechRecognition)),
     speechSynthesis:!!(win&&win.speechSynthesis),
     realtimeEnabled,
-    silentMode,
+    feedbackMode,
+    silentMode:feedbackMode==='silent',
     currentTab:typeof currentTab!=='undefined'?currentTab:null,
     logScreen:typeof document!=='undefined'?(document.querySelector('.log-screen.active')?.id||null):null
   };
@@ -480,6 +485,7 @@ function voiceLifecycleSnapshot(opts={}){
     processing:!!processingTranscript,
     speaking:!!isSpeaking,
     voiceInputMode:getVoiceInputMode(),
+    voiceFeedbackMode:getVoiceFeedbackMode(),
     voiceHoldActive:!!voiceHoldActive,
     restartCount:voiceRestartCount
   };
@@ -606,6 +612,7 @@ function updateVoiceDebugOverlay(){
   const s=voiceDebugOverlaySnapshot();
   const rows=[
     ['state',s.state],
+    ['feedback',s.voiceFeedbackMode],
     ['recognizer',s.recognizerActive?'yes':'no'],
     ['session',s.sessionActive?'yes':'no'],
     ['transcript',s.lastTranscript],
@@ -664,20 +671,51 @@ function cookingModeEnabled(){
 function normalizeVoiceInputMode(mode){
   return mode==='hold'?'hold':'continuous';
 }
+function normalizeVoiceFeedbackMode(mode){
+  return mode==='voice'?'voice':'silent';
+}
 function getVoiceInputMode(){
   try{
     voiceInputMode=normalizeVoiceInputMode(localStorage.getItem(VOICE_INPUT_MODE_KEY)||voiceInputMode);
   }catch(e){ voiceInputMode=normalizeVoiceInputMode(voiceInputMode); }
   return voiceInputMode;
 }
+function getVoiceFeedbackMode(){
+  try{
+    const stored=localStorage.getItem(VOICE_FEEDBACK_MODE_KEY);
+    if(stored==='voice'||stored==='silent') return stored;
+    const legacy=localStorage.getItem(VOICE_FEEDBACK_LEGACY_KEY);
+    if(legacy==='1') return 'voice';
+    if(legacy==='0') return 'silent';
+  }catch(e){}
+  return 'silent';
+}
 function isHoldVoiceInputMode(){
   return getVoiceInputMode()==='hold'&&!cookingModeEnabled();
+}
+function updateVoiceFeedbackModeControls(){
+  const mode=getVoiceFeedbackMode();
+  document.querySelectorAll('#seg-voice-feedback-mode .seg-btn').forEach(btn=>{
+    btn.classList.toggle('active',btn.dataset.val===mode);
+  });
+}
+function setVoiceFeedbackMode(mode){
+  const next=normalizeVoiceFeedbackMode(mode);
+  const previous=getVoiceFeedbackMode();
+  try{
+    localStorage.setItem(VOICE_FEEDBACK_MODE_KEY,next);
+    localStorage.setItem(VOICE_FEEDBACK_LEGACY_KEY,next==='voice'?'1':'0');
+  }catch(e){}
+  updateVoiceFeedbackModeControls();
+  if(previous!==next) voiceDebugTrace('voice_feedback_mode_changed',{previous,next});
+  return next;
 }
 function updateVoiceInputModeControls(){
   const mode=getVoiceInputMode();
   document.querySelectorAll('#seg-voice-input-mode .seg-btn').forEach(btn=>{
     btn.classList.toggle('active',btn.dataset.val===mode);
   });
+  updateVoiceFeedbackModeControls();
   const mic=document.getElementById('mic-btn');
   if(mic){
     mic.setAttribute('aria-label',mode==='hold'?'Hold to speak':'Start voice logging');
@@ -710,6 +748,8 @@ function setVoiceInputMode(mode){
 }
 window.setVoiceInputMode=setVoiceInputMode;
 window.getVoiceInputMode=getVoiceInputMode;
+window.setVoiceFeedbackMode=setVoiceFeedbackMode;
+window.getVoiceFeedbackMode=getVoiceFeedbackMode;
 function setVoiceHintText(id,text){
   const el=document.getElementById(id);
   if(el) el.textContent=text;
@@ -799,8 +839,23 @@ function clearVoiceTimers(){
   clearVoiceRecognizerStartTimer();
 }
 function isVoiceSilentMode(){
-  try{return typeof localStorage!=='undefined'&&localStorage.getItem('sous_voice_feedback')==='0';}
-  catch(e){return false;}
+  return getVoiceFeedbackMode()==='silent';
+}
+function voiceFeedbackHaptic(key=null){
+  if(!VOICE_SUCCESS_FEEDBACK_KEYS.has(key)) return;
+  try{
+    if(typeof navigator!=='undefined'&&typeof navigator.vibrate==='function'){
+      navigator.vibrate(20);
+      voiceDebugTrace('voice_haptic_feedback',{key,pattern:20,feedbackMode:getVoiceFeedbackMode()});
+    }
+  }catch(e){}
+}
+function traceSilentVoiceFeedback(key=null,extra={}){
+  const payload={key,route:'silent',feedbackMode:getVoiceFeedbackMode(),reason:'feedback_mode_silent',...extra};
+  voiceDebugTrace('feedback_audio',payload);
+  voiceDebugTrace('voice_feedback_blocked',payload);
+  voiceDebugTrace('silent_mode_skipped_feedback',payload);
+  voiceFeedbackHaptic(key);
 }
 function finishSkippedVoiceFeedback(onEnd){
   if(onEnd){setTimeout(onEnd,0);return;}
@@ -1317,6 +1372,7 @@ async function beginVoiceSession(){
   stopAllVoiceActivity('session starting');
   voiceRestartCount=0;
   voiceSuccessCueCount=0;
+  voiceSuccessCueIndex=0;
   voiceFlowCueCooldownUntil=0;
   voiceRecoveryCueCooldownUntil=0;
   voiceOutcomeTurns=new Set();
@@ -1365,6 +1421,7 @@ function stopAllVoiceActivity(reason){
   processingTranscript=false;
   voiceSessionUseRealtime=false;
   voiceNoSpeechRetries=0;
+  voiceSuccessCueIndex=0;
   voiceRecoveryCueCooldownUntil=0;
   voiceMicWarmupActive=false;
   tapRecStarting=false;
@@ -1960,6 +2017,7 @@ function sousVoiceStateSnapshot(){
       :'',
     reviewIngredientNames:Array.from(document.querySelectorAll('#mc-list > div')).map(card=>card.querySelector('select option:checked')?.textContent||card.textContent||'').filter(Boolean),
     currentTab:typeof currentTab!=='undefined'?currentTab:null,
+    voiceFeedbackMode:getVoiceFeedbackMode(),
     clarification:voiceDebugClarificationSnapshot(),
     meal:meal.map(item=>({
       id:item.id,
@@ -3410,9 +3468,7 @@ function speak(text,onEnd,opts={}){
   if(isVoiceSilentMode()){
     console.log('[Sous Voice] silent mode enabled');
     if(!opts.skipCache){
-      voiceDebugTrace('feedback_audio',{key:null,route:'silent'});
-      voiceDebugTrace('voice_feedback_blocked',{key:null,route:'silent',text});
-      voiceDebugTrace('silent_mode_skipped_feedback',{key:null,route:'silent',text});
+      traceSilentVoiceFeedback(cachedKey,{text});
     }
     finishSkippedVoiceFeedback(onEnd);
     return;
@@ -3508,9 +3564,7 @@ function speakRecoveryThenListen(onResult){
 
 function speakCachedResponse(key,data={},onEnd,opts={}){
   if(isVoiceSilentMode()){
-    voiceDebugTrace('feedback_audio',{key,route:'silent'});
-    voiceDebugTrace('voice_feedback_blocked',{key,route:'silent'});
-    voiceDebugTrace('silent_mode_skipped_feedback',{key,route:'silent'});
+    traceSilentVoiceFeedback(key);
     finishSkippedVoiceFeedback(onEnd);
     return;
   }
@@ -3615,9 +3669,14 @@ function maybeSpeakFlowCue(reason,onEnd){
   speakCachedResponse('flow',{},onEnd);
   return true;
 }
+function nextVoiceSuccessCueKey(){
+  const key=VOICE_SUCCESS_CUE_KEYS[voiceSuccessCueIndex%VOICE_SUCCESS_CUE_KEYS.length];
+  voiceSuccessCueIndex=(voiceSuccessCueIndex+1)%VOICE_SUCCESS_CUE_KEYS.length;
+  return key;
+}
 function speakSuccessCue(onEnd){
   voiceSuccessCueCount++;
-  speakCachedResponse('added',{},()=>{
+  speakCachedResponse(nextVoiceSuccessCueKey(),{},()=>{
     const spokeFlowCue=maybeSpeakFlowCue('after_success',onEnd);
     if(!spokeFlowCue&&!onEnd&&voiceSessionActive&&document.querySelector('.log-screen.active')?.id==='ls-listening'){
       scheduleVoiceSessionRestart(VOICE_RESTART_DEFAULT_MS);
@@ -4437,7 +4496,7 @@ function showSummary(announce=true){
     list.appendChild(d);
   });
   showLogScreen('summary');
-  if(announce) speakCachedResponse('done');
+  if(announce) voiceDebugTrace('voice_success_feedback_suppressed',{key:'done',reason:'summary_review_waits_for_save',feedbackMode:getVoiceFeedbackMode()});
 }
 
 function defaultMealMemoryPhrases(name){
@@ -5925,7 +5984,7 @@ function buildAlwaysOn(){
       return;
     }
     const results=parseText(t);
-    voiceDebugTrace('parser_result',{source:'always_on',transcript:t,results:voiceDebugResultSummary(results)});
+    voiceDebugTrace('parser_result',{source:'always_on',transcript:t,results:voiceDebugResultSummary(results),diagnostics:typeof parserDiagnostics==='function'?parserDiagnostics(t,results):null});
     if(results&&results.length) handleParsed(results);
   };
   r.onerror=e=>{alwaysOnActive=false;if(e.error==='not-allowed')document.getElementById('perm-warn').style.display='block';else if(cookingModeEnabled()&&e.error!=='aborted'&&e.error!=='no-speech')setTimeout(restartAlwaysOn,1000);};

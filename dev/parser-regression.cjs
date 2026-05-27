@@ -48,6 +48,7 @@ const tests = [
   {input:'two chicken thighs', expect:{minItems:1, names:['Chicken thigh'], quantity:true}},
   {input:'200g turkey mince', expect:{minItems:1, names:['Turkey mince'], quantity:true}},
   {input:'steak 180g', expect:{minItems:1, names:['Beef steak'], quantity:true}},
+  {input:'50g beef', expect:{minItems:1, names:['Beef steak'], quantity:true, weights:[{name:'beef', weight:50}]}},
   {input:'beef mince 250g', expect:{minItems:1, names:['Beef mince'], quantity:true}},
   {input:'bacon two rashers', expect:{minItems:1, names:['Bacon'], quantity:true}},
   {input:'two sausages', expect:{minItems:1, quantity:true}},
@@ -146,6 +147,8 @@ const tests = [
 
   {input:'chicken breast rice and broccoli', expect:{minItems:3, names:['Chicken breast','Broccoli']}},
   {input:'100g chicken 200g rice 50g broccoli', expect:{minItems:3, quantity:true, confirm:true}},
+  {input:'2 slices of bread 50g beef 10g mayonnaise', expect:{minItems:3, names:['Bread','Beef steak','Mayonnaise'], quantity:true, weights:[{name:'bread', weight:80},{name:'beef', weight:50},{name:'Mayonnaise', weight:10}]}},
+  {input:'De slice of bread 50 g of beef 10 g of mayonnaise 10 g of a wood', expect:{minItems:3, names:['Beef steak','Mayonnaise'], quantity:true, weights:[{name:'beef', weight:50},{name:'Mayonnaise', weight:10}], absentNames:['Wood']}},
   {input:'salmon potatoes and green beans', expect:{minItems:3, names:['Salmon','Potato','Green beans']}},
   {input:'eggs toast and avocado', expect:{minItems:3}},
   {input:'oats whey banana and milk', expect:{minItems:4}},
@@ -383,6 +386,11 @@ function runOne(context, test, index){
       const actual = weightForExpectedName(record.parsedResults, weightCheck.name);
       if(actual !== weightCheck.weight){
         record.failures.push(`expected ${weightCheck.name} to weigh ${weightCheck.weight}g, got ${actual == null ? 'none' : `${actual}g`}`);
+      }
+    }
+    for(const name of expect.absentNames || []){
+      if(hasExpectedName(record.parsedResults, name)){
+        record.failures.push(`unexpected food "${name}"`);
       }
     }
     if(expect.quantity && !explicitQuantityCaptured(record.parsedResults, test.input)){

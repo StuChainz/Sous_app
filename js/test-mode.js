@@ -1,12 +1,14 @@
-// Friend-testing bug report tools. Local-only: no uploads, no analytics.
+// Friend-testing bug report tools. Diagnostics are local unless the tester taps Send.
 (function(){
   const TEST_MODE_KEY='sous_test_mode';
   const consoleErrors=[];
   let bugButton;
   let modal;
+  let intentInput;
   let noteInput;
   let statusEl;
   let previousFocus=null;
+  let bugReportSending=false;
 
   function normaliseError(value){
     if(value==null) return null;
@@ -88,7 +90,8 @@
     modal.classList.add('show');
     modal.setAttribute('aria-hidden','false');
     setStatus('');
-    setTimeout(()=>noteInput?.focus(),0);
+    hideFallbackReport();
+    setTimeout(()=>intentInput?.focus(),0);
   }
 
   function closeBugModal(){
@@ -110,6 +113,24 @@
     try{
       return !!(window.navigator.standalone===true||window.matchMedia?.('(display-mode: standalone)').matches);
     }catch(e){return false;}
+  }
+
+  function getCapacitorMode(){
+    try{
+      return !!(window.Capacitor||location.protocol==='capacitor:');
+    }catch(e){return false;}
+  }
+
+  function getCurrentApiBaseUrl(){
+    try{
+      return typeof window.SOUS_API_BASE==='string'?window.SOUS_API_BASE:'';
+    }catch(e){return '';}
+  }
+
+  function bugReportEndpoint(){
+    if(typeof window.sousApiUrl==='function') return window.sousApiUrl('/api/bug-report');
+    const base=getCurrentApiBaseUrl();
+    return `${base}/api/bug-report`;
   }
 
   function getCurrentTab(){
@@ -316,10 +337,22 @@
     try{return localStorage.getItem('sous_voice_input_mode')||null;}catch(e){return null;}
   }
 
+  function getVoiceFeedbackModeSummary(){
+    try{
+      if(typeof window.getVoiceFeedbackMode==='function') return window.getVoiceFeedbackMode();
+    }catch(e){}
+    try{
+      const mode=localStorage.getItem('sous_voice_feedback_mode');
+      if(mode==='silent'||mode==='voice') return mode;
+      return localStorage.getItem('sous_voice_feedback')==='1'?'voice':'silent';
+    }catch(e){return null;}
+  }
+
   function getVoiceStatusSummary(voiceState){
     const state=voiceState&&typeof voiceState==='object'?voiceState:null;
     return {
       inputMode:getVoiceInputModeSummary(),
+      feedbackMode:getVoiceFeedbackModeSummary(),
       state:state?.state||null,
       sessionActive:state?.sessionActive??null,
       recognizerActive:state?.recognizerActive??null,
@@ -345,6 +378,7 @@
       processing:state.processing??null,
       speaking:state.speaking??null,
       voiceInputMode:state.voiceInputMode||getVoiceInputModeSummary(),
+      voiceFeedbackMode:state.voiceFeedbackMode||getVoiceFeedbackModeSummary(),
       voiceHoldActive:state.voiceHoldActive??null,
       restartCount:state.restartCount??null,
       activeScreen:state.activeScreen||null,
@@ -403,6 +437,7 @@
       userFoodOverrides:summariseStorageKey('userFoodOverrides','object'),
       sous_custom_serving_units:summariseStorageKey('sous_custom_serving_units','object'),
       sous_voice_input_mode:summariseStorageKey('sous_voice_input_mode','string'),
+      sous_voice_feedback_mode:summariseStorageKey('sous_voice_feedback_mode','string'),
       sous_voice_feedback:summariseStorageKey('sous_voice_feedback','string'),
       sous_realtime_voice:summariseStorageKey('sous_realtime_voice','string'),
       sous_test_mode:summariseStorageKey('sous_test_mode','string')
@@ -442,25 +477,33 @@
     };
   }
 
-  function buildDiagnosticsReport(note=''){
+  function buildDiagnosticsReport(note='',intent=''){
     const photoEstimateState=getPhotoEstimateState();
     const voiceState=getVoiceState();
+    const pwa=getStandaloneMode();
+    const capacitor=getCapacitorMode();
     return {
       app:'Jot',
       reportType:'beta-diagnostics',
       schemaVersion:1,
+      testerIntent:String(intent||'').trim(),
       testerNote:String(note||'').trim(),
       timestamp:new Date().toISOString(),
       ...getAppVersionInfo(),
       currentURL:location.href,
+      currentApiBaseUrl:getCurrentApiBaseUrl(),
       userAgent:navigator.userAgent,
-      standalonePWA:getStandaloneMode(),
+      standalonePWA:pwa,
+      runningAsPWA:pwa,
+      runningAsCapacitor:capacitor,
+      runtime:{capacitor,pwa},
       online:navigator.onLine,
       currentTab:getCurrentTab(),
       currentScreen:getCurrentScreen(),
       selectedDate:getSelectedDate(),
       currentMealSummary:getCurrentMealSummary(),
       currentVoiceInputMode:getVoiceInputModeSummary(),
+      currentVoiceFeedbackMode:getVoiceFeedbackModeSummary(),
       voiceStatus:getVoiceStatusSummary(voiceState),
       voiceState:getSafeVoiceState(voiceState),
       lastTranscriptText:getLastTranscriptText(),
@@ -481,12 +524,12 @@
     };
   }
 
-  function buildBugReport(note=''){
-    return buildDiagnosticsReport(note);
+  function buildBugReport(note='',intent=''){
+    return buildDiagnosticsReport(note,intent);
   }
 
-  function reportText(note=''){
-    return JSON.stringify(buildDiagnosticsReport(note),null,2);
+  function reportText(note='',intent=''){
+    return JSON.stringify(buildDiagnosticsReport(note,intent),null,2);
   }
 
   function fallbackCopy(text){
@@ -515,8 +558,8 @@
     return fallbackCopy(text);
   }
 
-  async function copyBugReport(note=''){
-    const text=reportText(note);
+  async function copyBugReport(note='',intent=''){
+    const text=reportText(note,intent);
     const copied=await copyText(text);
     if(!copied) {
       throw new Error('Clipboard copy failed. Select and copy the report text below.');
@@ -524,8 +567,8 @@
     return text;
   }
 
-  function downloadBugReport(note=''){
-    const report=buildDiagnosticsReport(note);
+  function downloadBugReport(note='',intent=''){
+    const report=buildDiagnosticsReport(note,intent);
     const stamp=report.timestamp.replace(/[:.]/g,'-').slice(0,19);
     const blob=new Blob([JSON.stringify(report,null,2)],{type:'application/json'});
     const url=URL.createObjectURL(blob);
@@ -555,6 +598,21 @@
     output.style.display='none';
   }
 
+  async function sendBugReport(note='',intent=''){
+    const report=buildDiagnosticsReport(note,intent);
+    const res=await fetch(bugReportEndpoint(),{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify(report)
+    });
+    let body=null;
+    try{body=await res.json();}catch(e){}
+    if(!res.ok||!body?.ok){
+      throw new Error(body?.error||`Send failed (${res.status})`);
+    }
+    return {id:body.id,report};
+  }
+
   function enableTestMode(){
     try{localStorage.setItem(TEST_MODE_KEY,'1');}catch(e){}
     syncButton();
@@ -571,10 +629,12 @@
     persistUrlTestMode();
     bugButton=document.getElementById('bug-report-button');
     modal=document.getElementById('bug-report-modal');
+    intentInput=document.getElementById('bug-report-intent');
     noteInput=document.getElementById('bug-report-note');
     statusEl=document.getElementById('bug-report-status');
     const closeBtn=document.getElementById('bug-report-close');
     const cancelBtn=document.getElementById('bug-report-cancel');
+    const sendBtn=document.getElementById('bug-report-send');
     const copyBtn=document.getElementById('bug-report-copy');
     const downloadBtn=document.getElementById('bug-report-download');
 
@@ -583,14 +643,33 @@
     closeBtn?.addEventListener('click',closeBugModal);
     cancelBtn?.addEventListener('click',closeBugModal);
     modal?.addEventListener('click',event=>{if(event.target===modal) closeBugModal();});
+    sendBtn?.addEventListener('click',async()=>{
+      if(bugReportSending) return;
+      bugReportSending=true;
+      sendBtn.disabled=true;
+      setStatus('Sending...');
+      hideFallbackReport();
+      const note=noteInput?.value||'';
+      const intent=intentInput?.value||'';
+      try{
+        const result=await sendBugReport(note,intent);
+        setStatus(`Sent to Stu. Report ${result.id}`);
+      }catch(error){
+        showFallbackReport(reportText(note,intent));
+        setStatus(`${error.message||'Could not send report.'} Copy Report is still available.`);
+      }finally{
+        bugReportSending=false;
+        sendBtn.disabled=false;
+      }
+    });
     copyBtn?.addEventListener('click',async()=>{
       setStatus('Copying...');
       hideFallbackReport();
-      const text=reportText(noteInput?.value||'');
+      const text=reportText(noteInput?.value||'',intentInput?.value||'');
       try{
         const copied=await copyText(text);
         if(!copied) throw new Error('Clipboard copy failed. Select and copy the report text below.');
-        setStatus('Copied. Send the diagnostics JSON to Stu on WhatsApp.');
+        setStatus('Copied. Send the diagnostics JSON to Stu.');
       }catch(error){
         showFallbackReport(text);
         setStatus(error.message||'Could not copy bug report.');
@@ -599,10 +678,10 @@
     downloadBtn?.addEventListener('click',()=>{
       try{
         hideFallbackReport();
-        downloadBugReport(noteInput?.value||'');
+        downloadBugReport(noteInput?.value||'',intentInput?.value||'');
         setStatus('Downloaded diagnostics JSON.');
       }catch(error){
-        showFallbackReport(reportText(noteInput?.value||''));
+        showFallbackReport(reportText(noteInput?.value||'',intentInput?.value||''));
         setStatus('Download failed. Select and copy the report text below.');
       }
     });
@@ -616,6 +695,7 @@
   window.__sousDisableTestMode=disableTestMode;
   window.__sousCopyBugReport=copyBugReport;
   window.__sousDownloadBugReport=downloadBugReport;
+  window.__sousSendBugReport=sendBugReport;
   window.__sousBuildDiagnosticsReport=buildDiagnosticsReport;
   window.__sousBuildBugReport=buildBugReport;
   window.__sousRecentConsoleErrors=()=>consoleErrors.slice();

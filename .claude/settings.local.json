@@ -20,7 +20,8 @@
       "Read(//Users/stu/Downloads/**)",
       "Bash(unzip -o \"Sous redesign.zip\" -d \"Sous redesign\")",
       "Bash(kill 1073)",
-      "Bash(rtk wc *)"
+      "Bash(rtk wc *)",
+      "Bash(rtk git *)"
     ]
   }
 }

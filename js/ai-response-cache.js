@@ -15,6 +15,7 @@ const AI_RESPONSE_MAP={
   cancelled:'Cancelled.',
   logged:'Logged.',
   added:'Added.',
+  added_that:'Added that.',
   saved_to_breakfast:'Saved to breakfast.',
   saved_to_lunch:'Saved to lunch.',
   saved_to_dinner:'Saved to dinner.',

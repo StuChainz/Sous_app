@@ -7,6 +7,7 @@ const cors = require('cors');
 const rateLimit = require('express-rate-limit');
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 const {
   getConsumablePresets,
   findConsumablePresetByText,
@@ -19,6 +20,8 @@ const app = express();
 const PORT = process.env.PORT || 3001;
 const ROOT_DIR = __dirname;
 const IS_PRODUCTION = process.env.NODE_ENV === 'production';
+const BUG_REPORT_MAX_BYTES = Number(process.env.SOUS_BUG_REPORT_MAX_BYTES) || 512 * 1024;
+const BUG_REPORT_DIR = process.env.SOUS_BUG_REPORT_DIR || path.join(ROOT_DIR, 'data', 'bug-reports');
 
 function loadLocalEnv() {
   const envPath = path.join(ROOT_DIR, '.env');
@@ -58,6 +61,8 @@ app.use(cors({
   }
 }));
 
+app.use('/data/bug-reports', (req, res) => res.status(404).end());
+
 // Serve the frontend from the project root without exposing local secrets.
 app.use(express.static(ROOT_DIR, { dotfiles: 'ignore' }));
 
@@ -92,6 +97,80 @@ app.use([
   '/api/repair-transcript',
   '/api/interpret-action'
 ], expensiveApiLimiter);
+
+const SECRET_FIELD_RE = /(api[_-]?key|authorization|bearer|token|secret|password|credential|cookie)/i;
+const SECRET_VALUE_RE = /\b(sk-[A-Za-z0-9_-]{12,}|Bearer\s+[A-Za-z0-9._-]{12,})\b/g;
+
+function redactSecretString(value) {
+  return String(value).replace(SECRET_VALUE_RE, '[REDACTED]');
+}
+
+function redactSecrets(value, depth = 0) {
+  if (value == null) return value;
+  if (depth > 8) return '[Max depth reached]';
+  if (typeof value === 'string') return redactSecretString(value);
+  if (typeof value === 'number' || typeof value === 'boolean') return value;
+  if (Array.isArray(value)) return value.slice(0, 250).map(item => redactSecrets(item, depth + 1));
+  if (typeof value !== 'object') return String(value);
+
+  const output = {};
+  Object.entries(value).slice(0, 300).forEach(([key, item]) => {
+    output[key] = SECRET_FIELD_RE.test(key) ? '[REDACTED]' : redactSecrets(item, depth + 1);
+  });
+  return output;
+}
+
+function safeRequestMetadata(req, payloadBytes) {
+  return {
+    ip: req.ip || null,
+    ips: Array.isArray(req.ips) ? req.ips.slice(0, 3) : [],
+    method: req.method,
+    path: req.path,
+    origin: req.get('origin') || null,
+    referer: req.get('referer') || null,
+    userAgent: req.get('user-agent') || null,
+    contentLength: req.get('content-length') || null,
+    payloadBytes
+  };
+}
+
+app.post('/api/bug-report', async (req, res) => {
+  if (!req.is('application/json')) {
+    return res.status(415).json({ error: 'Expected JSON request body.' });
+  }
+  if (!req.body || typeof req.body !== 'object' || Array.isArray(req.body)) {
+    return res.status(400).json({ error: 'Bug report body must be a JSON object.' });
+  }
+
+  const report = redactSecrets(req.body);
+  const payloadText = JSON.stringify(report);
+  const payloadBytes = Buffer.byteLength(payloadText, 'utf8');
+  if (payloadBytes > BUG_REPORT_MAX_BYTES) {
+    return res.status(413).json({ error: 'Bug report is too large.' });
+  }
+
+  const id = `${Date.now().toString(36)}-${crypto.randomBytes(6).toString('hex')}`;
+  const receivedAt = new Date().toISOString();
+  const record = {
+    id,
+    receivedAt,
+    request: safeRequestMetadata(req, payloadBytes),
+    report
+  };
+  const fileName = `${receivedAt.slice(0, 10)}.jsonl`;
+
+  try {
+    await fs.promises.mkdir(BUG_REPORT_DIR, { recursive: true });
+    await fs.promises.appendFile(
+      path.join(BUG_REPORT_DIR, fileName),
+      JSON.stringify(record) + '\n',
+      'utf8'
+    );
+    return res.status(201).json({ ok: true, id });
+  } catch (err) {
+    return res.status(500).json(errorBody('Could not store bug report.', 'detail', err.message));
+  }
+});
 
 const REALTIME_MODEL = 'gpt-realtime-mini';
 const REALTIME_VOICE = 'marin';
@@ -2107,6 +2186,13 @@ app.post('/api/interpret-action', async (req, res) => {
   } catch (err) {
     res.status(500).json(errorBody('Action interpretation request failed.', 'detail', err.message));
   }
+});
+
+app.use((err, req, res, next) => {
+  if (err && err.type === 'entity.too.large') {
+    return res.status(413).json({ error: 'Request body is too large.' });
+  }
+  return next(err);
 });
 
 const HOST = process.env.HOST || '0.0.0.0';

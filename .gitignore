@@ -8,5 +8,6 @@ www/
 .claude/worktrees/
 test-results/
 build/
+data/bug-reports/
 *.xcarchive
 *.ipa

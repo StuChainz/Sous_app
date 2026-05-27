@@ -204,6 +204,34 @@ test('manual unresolved food selection preserves typed grams', async ({ page }) 
   await expect.poll(() => mealRows(page)).toEqual([{ name: 'Chocolate chip cookie', weight: 70 }]);
 });
 
+test('parser preserves beef and serving quantities in dense multi-item transcripts', async ({ page }) => {
+  await bootVoiceHarness(page);
+
+  const summary = await page.evaluate(() => {
+    const summarize = input => (window.parseText(input) || []).map(item => item.ambiguous
+      ? { type: 'ambiguous', label: item.label, amount: item.amount, matches: item.matches.map(food => food.name) }
+      : { type: 'food', name: item.name, weight: item.weight, weightSpecified: !!item.weightSpecified });
+    return {
+      beef: summarize('50g beef'),
+      dense: summarize('2 slices of bread 50g beef 10g mayonnaise'),
+      malformed: summarize('De slice of bread 50 g of beef 10 g of mayonnaise 10 g of a wood'),
+      diagnostics: window.parserDiagnostics('De slice of bread 50 g of beef 10 g of mayonnaise 10 g of a wood')
+    };
+  });
+
+  expect(summary.beef).toEqual([
+    { type: 'ambiguous', label: 'beef', amount: 50, matches: ['Beef steak', 'Beef mince'] }
+  ]);
+  expect(summary.dense).toEqual([
+    { type: 'ambiguous', label: 'bread', amount: 80, matches: ['Bread', 'White bread', 'Rye bread'] },
+    { type: 'ambiguous', label: 'beef', amount: 50, matches: ['Beef steak', 'Beef mince'] },
+    { type: 'food', name: 'Mayonnaise', weight: 10, weightSpecified: true }
+  ]);
+  expect(summary.malformed.some(item => item.label === 'beef' && item.amount === 50)).toBe(true);
+  expect(JSON.stringify(summary.malformed).toLowerCase()).not.toContain('wood');
+  expect(summary.diagnostics.segments.some(seg => seg.segment === '10 g of a wood' && seg.status === 'unmatched')).toBe(true);
+});
+
 test('editing current meal weight recalculates macros and totals', async ({ page }) => {
   await bootVoiceHarness(page);
 
