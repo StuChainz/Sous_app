@@ -2720,7 +2720,7 @@ function saveReviewedPhotoEstimate(){
     protein:roundMacro(mt.protein),
     carbs:roundMacro(mt.carbs),
     fat:roundMacro(mt.fat),
-    fibre:0
+    fibre:roundMacro(mt.fibre)
   };
   const log=getLog();
   const date=selectedLogDate||localDateStr();

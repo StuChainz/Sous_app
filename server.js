@@ -174,6 +174,12 @@ app.post('/api/bug-report', async (req, res) => {
 
 const REALTIME_MODEL = 'gpt-realtime-mini';
 const REALTIME_VOICE = 'marin';
+const UPSTREAM_TIMEOUT_MS = {
+  REALTIME: 10_000,
+  INTERPRET: 10_000,
+  PHOTO: 30_000,
+  BARCODE: 10_000
+};
 
 function errorBody(error, detailKey, detailValue) {
   const body = { error };
@@ -181,6 +187,71 @@ function errorBody(error, detailKey, detailValue) {
     body[detailKey || 'detail'] = detailValue;
   }
   return body;
+}
+
+function isAbortError(err) {
+  return err && (err.name === 'AbortError' || err.code === 'ABORT_ERR');
+}
+
+function isUpstreamTimeoutError(err) {
+  return err && err.code === 'UPSTREAM_TIMEOUT';
+}
+
+function upstreamTimeoutError(timeoutMs) {
+  const err = new Error(`Upstream request timed out after ${timeoutMs}ms.`);
+  err.name = 'UpstreamTimeoutError';
+  err.code = 'UPSTREAM_TIMEOUT';
+  err.timeoutMs = timeoutMs;
+  return err;
+}
+
+async function fetchUpstream(url, options = {}, timeoutMs = UPSTREAM_TIMEOUT_MS.INTERPRET, fetchImpl = fetch) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetchImpl(url, { ...options, signal: controller.signal });
+    const text = await response.text();
+    let json = null;
+    let jsonError = null;
+    if (text) {
+      try {
+        json = JSON.parse(text);
+      } catch (err) {
+        jsonError = err;
+      }
+    }
+    return {
+      response,
+      status: response.status,
+      ok: response.ok,
+      text,
+      json,
+      jsonError
+    };
+  } catch (err) {
+    if (controller.signal.aborted || isAbortError(err)) throw upstreamTimeoutError(timeoutMs);
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function openAiDetailFromUpstream(upstream) {
+  return upstream.json && upstream.json.error
+    ? upstream.json.error.message || upstream.json.error
+    : upstream.text;
+}
+
+function responsesOutputText(data) {
+  if (typeof data?.output_text === 'string') return data.output_text;
+  if (Array.isArray(data?.output)) {
+    return data.output
+      .flatMap(item => Array.isArray(item.content) ? item.content : [])
+      .map(part => part.text || part.output_text || '')
+      .filter(Boolean)
+      .join('\n');
+  }
+  return '';
 }
 
 function clampConfidence(value) {
@@ -1261,7 +1332,7 @@ app.post('/api/realtime/session', async (req, res) => {
   ].filter(Boolean).join('\n');
 
   try {
-    const upstream = await fetch('https://api.openai.com/v1/realtime/client_secrets', {
+    const upstream = await fetchUpstream('https://api.openai.com/v1/realtime/client_secrets', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -1279,17 +1350,14 @@ app.post('/api/realtime/session', async (req, res) => {
           }
         }
       })
-    });
-
-    const text = await upstream.text();
-    let data = null;
-    try { data = text ? JSON.parse(text) : null; } catch {}
+    }, UPSTREAM_TIMEOUT_MS.REALTIME);
+    const data = upstream.json;
 
     if (!upstream.ok) {
       return res.status(upstream.status).json(errorBody(
         `OpenAI Realtime error: ${upstream.status}`,
         'detail',
-        data && data.error ? data.error.message || data.error : text
+        openAiDetailFromUpstream(upstream)
       ));
     }
 
@@ -1312,6 +1380,9 @@ app.post('/api/realtime/session', async (req, res) => {
     });
   } catch (err) {
     console.error('[Sous Realtime] error', err.message);
+    if (isUpstreamTimeoutError(err)) {
+      return res.status(504).json(errorBody('Realtime session request timed out.', 'detail', err.message));
+    }
     res.status(500).json(errorBody('Realtime session request failed.', 'detail', err.message));
   }
 });
@@ -1339,7 +1410,7 @@ app.post('/api/photo-estimate', async (req, res) => {
 
   try {
     const aiStartedAt = Date.now();
-    const upstream = await fetch('https://api.openai.com/v1/responses', {
+    const upstream = await fetchUpstream('https://api.openai.com/v1/responses', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -1401,31 +1472,19 @@ app.post('/api/photo-estimate', async (req, res) => {
           }
         }
       })
-    });
+    }, UPSTREAM_TIMEOUT_MS.PHOTO);
     const aiFinishedAt = Date.now();
-
-    const text = await upstream.text();
-    let data = null;
-    try { data = text ? JSON.parse(text) : null; } catch {}
+    const data = upstream.json;
 
     if (!upstream.ok) {
       return res.status(upstream.status).json(errorBody(
         `OpenAI error: ${upstream.status}`,
         'detail',
-        data && data.error ? data.error.message || data.error : text
+        openAiDetailFromUpstream(upstream)
       ));
     }
 
-    let rawText = '';
-    if (typeof data.output_text === 'string') {
-      rawText = data.output_text;
-    } else if (Array.isArray(data.output)) {
-      rawText = data.output
-        .flatMap(item => Array.isArray(item.content) ? item.content : [])
-        .map(part => part.text || part.output_text || '')
-        .filter(Boolean)
-        .join('\n');
-    }
+    const rawText = responsesOutputText(data);
 
     let parsed;
     try {
@@ -1447,6 +1506,9 @@ app.post('/api/photo-estimate', async (req, res) => {
     });
   } catch (err) {
     console.error('[Sous Photo Estimate] error', err.message);
+    if (isUpstreamTimeoutError(err)) {
+      return res.status(504).json(errorBody('Photo estimate request timed out.', 'detail', err.message));
+    }
     res.status(500).json(errorBody('Photo estimate request failed.', 'detail', err.message));
   }
 });
@@ -1486,7 +1548,7 @@ app.post('/api/menu-scan/photo-update', async (req, res) => {
 
   try {
     const aiStartedAt = Date.now();
-    const upstream = await fetch('https://api.openai.com/v1/responses', {
+    const upstream = await fetchUpstream('https://api.openai.com/v1/responses', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -1510,31 +1572,19 @@ app.post('/api/menu-scan/photo-update', async (req, res) => {
           }
         }
       })
-    });
+    }, UPSTREAM_TIMEOUT_MS.PHOTO);
     const aiFinishedAt = Date.now();
-
-    const text = await upstream.text();
-    let data = null;
-    try { data = text ? JSON.parse(text) : null; } catch {}
+    const data = upstream.json;
 
     if (!upstream.ok) {
       return res.status(upstream.status).json(errorBody(
         `OpenAI error: ${upstream.status}`,
         'detail',
-        data && data.error ? data.error.message || data.error : text
+        openAiDetailFromUpstream(upstream)
       ));
     }
 
-    let rawText = '';
-    if (typeof data.output_text === 'string') {
-      rawText = data.output_text;
-    } else if (Array.isArray(data.output)) {
-      rawText = data.output
-        .flatMap(item => Array.isArray(item.content) ? item.content : [])
-        .map(part => part.text || part.output_text || '')
-        .filter(Boolean)
-        .join('\n');
-    }
+    const rawText = responsesOutputText(data);
 
     let parsed;
     try {
@@ -1565,6 +1615,9 @@ app.post('/api/menu-scan/photo-update', async (req, res) => {
     });
   } catch (err) {
     console.error('[Sous Menu Scan Photo Update] error', err.message);
+    if (isUpstreamTimeoutError(err)) {
+      return res.status(504).json(errorBody('Menu scan photo update timed out.', 'detail', err.message));
+    }
     res.status(500).json(errorBody('Menu scan photo update failed.', 'detail', err.message));
   }
 });
@@ -1642,7 +1695,7 @@ app.post('/api/menu-scan', async (req, res) => {
   ].join('\n');
 
   try {
-    const upstream = await fetch('https://api.openai.com/v1/responses', {
+    const upstream = await fetchUpstream('https://api.openai.com/v1/responses', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -1666,30 +1719,18 @@ app.post('/api/menu-scan', async (req, res) => {
           }
         }
       })
-    });
-
-    const text = await upstream.text();
-    let data = null;
-    try { data = text ? JSON.parse(text) : null; } catch {}
+    }, UPSTREAM_TIMEOUT_MS.PHOTO);
+    const data = upstream.json;
 
     if (!upstream.ok) {
       return res.status(upstream.status).json(errorBody(
         `OpenAI error: ${upstream.status}`,
         'detail',
-        data && data.error ? data.error.message || data.error : text
+        openAiDetailFromUpstream(upstream)
       ));
     }
 
-    let rawText = '';
-    if (typeof data.output_text === 'string') {
-      rawText = data.output_text;
-    } else if (Array.isArray(data.output)) {
-      rawText = data.output
-        .flatMap(item => Array.isArray(item.content) ? item.content : [])
-        .map(part => part.text || part.output_text || '')
-        .filter(Boolean)
-        .join('\n');
-    }
+    const rawText = responsesOutputText(data);
 
     let parsed;
     try {
@@ -1714,6 +1755,9 @@ app.post('/api/menu-scan', async (req, res) => {
     res.json(result);
   } catch (err) {
     console.error('[Sous Menu Scan] error', err.message);
+    if (isUpstreamTimeoutError(err)) {
+      return res.status(504).json(errorBody('Menu scan request timed out.', 'detail', err.message));
+    }
     res.status(500).json(errorBody('Menu scan request failed.', 'detail', err.message));
   }
 });
@@ -1763,7 +1807,7 @@ app.post('/api/photo-estimate-adjust', async (req, res) => {
 
   try {
     const aiStartedAt = Date.now();
-    const upstream = await fetch('https://api.openai.com/v1/responses', {
+    const upstream = await fetchUpstream('https://api.openai.com/v1/responses', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -1816,31 +1860,19 @@ app.post('/api/photo-estimate-adjust', async (req, res) => {
           }
         }
       })
-    });
+    }, UPSTREAM_TIMEOUT_MS.PHOTO);
     const aiFinishedAt = Date.now();
-
-    const text = await upstream.text();
-    let data = null;
-    try { data = text ? JSON.parse(text) : null; } catch {}
+    const data = upstream.json;
 
     if (!upstream.ok) {
       return res.status(upstream.status).json(errorBody(
         `OpenAI error: ${upstream.status}`,
         'detail',
-        data && data.error ? data.error.message || data.error : text
+        openAiDetailFromUpstream(upstream)
       ));
     }
 
-    let rawText = '';
-    if (typeof data.output_text === 'string') {
-      rawText = data.output_text;
-    } else if (Array.isArray(data.output)) {
-      rawText = data.output
-        .flatMap(item => Array.isArray(item.content) ? item.content : [])
-        .map(part => part.text || part.output_text || '')
-        .filter(Boolean)
-        .join('\n');
-    }
+    const rawText = responsesOutputText(data);
 
     let parsed;
     try {
@@ -1861,6 +1893,9 @@ app.post('/api/photo-estimate-adjust', async (req, res) => {
     });
   } catch (err) {
     console.error('[Sous Photo Adjust] error', err.message);
+    if (isUpstreamTimeoutError(err)) {
+      return res.status(504).json(errorBody('Photo estimate adjustment timed out.', 'detail', err.message));
+    }
     res.status(500).json(errorBody('Photo estimate adjustment failed.', 'detail', err.message));
   }
 });
@@ -1892,13 +1927,13 @@ app.get('/api/barcode/:code', async (req, res) => {
   url.searchParams.set('fields', fields);
 
   try {
-    const upstream = await fetch(url, {
+    const upstream = await fetchUpstream(url, {
       headers: {
         'Accept': 'application/json',
         'User-Agent': 'Sous/1.0 (https://stuchainz.github.io)'
       }
-    });
-    const data = await upstream.json().catch(() => null);
+    }, UPSTREAM_TIMEOUT_MS.BARCODE);
+    const data = upstream.json;
 
     if (upstream.status === 404 || data?.result?.id === 'product_not_found') {
       return res.status(404).json({ error: 'Product not found.', barcode: code });
@@ -1917,6 +1952,9 @@ app.get('/api/barcode/:code', async (req, res) => {
     res.json(normaliseBarcodeProduct(code, data.product));
   } catch (err) {
     console.error('[Sous Barcode] error', err.message);
+    if (isUpstreamTimeoutError(err)) {
+      return res.status(504).json(errorBody('Barcode lookup timed out.', 'detail', err.message));
+    }
     res.status(500).json(errorBody('Barcode lookup failed.', 'detail', err.message));
   }
 });
@@ -1942,7 +1980,7 @@ app.post('/api/interpret', async (req, res) => {
   ].filter(Boolean).join('\n');
 
   try {
-    const upstream = await fetch('https://api.openai.com/v1/responses', {
+    const upstream = await fetchUpstream('https://api.openai.com/v1/responses', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -1980,26 +2018,16 @@ app.post('/api/interpret', async (req, res) => {
           }
         }
       })
-    });
+    }, UPSTREAM_TIMEOUT_MS.INTERPRET);
 
     if (!upstream.ok) {
-      const text = await upstream.text();
-      return res.status(upstream.status).json(errorBody(`OpenAI error: ${upstream.status}`, 'detail', text));
+      return res.status(upstream.status).json(errorBody(`OpenAI error: ${upstream.status}`, 'detail', upstream.text));
     }
 
-    const data = await upstream.json();
+    const data = upstream.json;
 
     // Extract text from Responses API shape.
-    let rawText = '';
-    if (typeof data.output_text === 'string') {
-      rawText = data.output_text;
-    } else if (Array.isArray(data.output)) {
-      rawText = data.output
-        .flatMap(item => Array.isArray(item.content) ? item.content : [])
-        .map(part => part.text || part.output_text || '')
-        .filter(Boolean)
-        .join('\n');
-    }
+    const rawText = responsesOutputText(data);
 
     let parsed;
     try {
@@ -2018,6 +2046,9 @@ app.post('/api/interpret', async (req, res) => {
     });
 
   } catch (err) {
+    if (isUpstreamTimeoutError(err)) {
+      return res.status(504).json(errorBody('Proxy request timed out.', 'detail', err.message));
+    }
     res.status(500).json(errorBody('Proxy request failed.', 'detail', err.message));
   }
 });
@@ -2090,7 +2121,7 @@ app.post('/api/repair-transcript', async (req, res) => {
   };
 
   try {
-    const upstream = await fetch('https://api.openai.com/v1/responses', {
+    const upstream = await fetchUpstream('https://api.openai.com/v1/responses', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -2108,23 +2139,14 @@ app.post('/api/repair-transcript', async (req, res) => {
           }
         }
       })
-    });
+    }, UPSTREAM_TIMEOUT_MS.INTERPRET);
 
     if (!upstream.ok) {
-      const text = await upstream.text();
-      return res.status(upstream.status).json(errorBody(`OpenAI error: ${upstream.status}`, 'detail', text));
+      return res.status(upstream.status).json(errorBody(`OpenAI error: ${upstream.status}`, 'detail', upstream.text));
     }
 
-    const data = await upstream.json();
-    let rawText = '';
-    if (typeof data.output_text === 'string') rawText = data.output_text;
-    else if (Array.isArray(data.output)) {
-      rawText = data.output
-        .flatMap(item => Array.isArray(item.content) ? item.content : [])
-        .map(part => part.text || part.output_text || '')
-        .filter(Boolean)
-        .join('\n');
-    }
+    const data = upstream.json;
+    const rawText = responsesOutputText(data);
 
     let parsed;
     try { parsed = JSON.parse(rawText); }
@@ -2155,6 +2177,9 @@ app.post('/api/repair-transcript', async (req, res) => {
 
     res.json({ candidates });
   } catch (err) {
+    if (isUpstreamTimeoutError(err)) {
+      return res.status(504).json(errorBody('Transcript repair request timed out.', 'detail', err.message));
+    }
     res.status(500).json(errorBody('Transcript repair request failed.', 'detail', err.message));
   }
 });
@@ -2255,7 +2280,7 @@ app.post('/api/interpret-action', async (req, res) => {
   };
 
   try {
-    const upstream = await fetch('https://api.openai.com/v1/responses', {
+    const upstream = await fetchUpstream('https://api.openai.com/v1/responses', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -2273,23 +2298,14 @@ app.post('/api/interpret-action', async (req, res) => {
           }
         }
       })
-    });
+    }, UPSTREAM_TIMEOUT_MS.INTERPRET);
 
     if (!upstream.ok) {
-      const text = await upstream.text();
-      return res.status(upstream.status).json(errorBody(`OpenAI error: ${upstream.status}`, 'detail', text));
+      return res.status(upstream.status).json(errorBody(`OpenAI error: ${upstream.status}`, 'detail', upstream.text));
     }
 
-    const data = await upstream.json();
-    let rawText = '';
-    if (typeof data.output_text === 'string') rawText = data.output_text;
-    else if (Array.isArray(data.output)) {
-      rawText = data.output
-        .flatMap(item => Array.isArray(item.content) ? item.content : [])
-        .map(part => part.text || part.output_text || '')
-        .filter(Boolean)
-        .join('\n');
-    }
+    const data = upstream.json;
+    const rawText = responsesOutputText(data);
 
     let parsed;
     try { parsed = JSON.parse(rawText); }
@@ -2299,6 +2315,9 @@ app.post('/api/interpret-action', async (req, res) => {
 
     res.json(parsed);
   } catch (err) {
+    if (isUpstreamTimeoutError(err)) {
+      return res.status(504).json(errorBody('Action interpretation request timed out.', 'detail', err.message));
+    }
     res.status(500).json(errorBody('Action interpretation request failed.', 'detail', err.message));
   }
 });
@@ -2325,6 +2344,9 @@ module.exports = {
     remainingAfterMenuRows,
     validateMenuOcrName,
     normaliseMenuScanResult,
-    normaliseBarcodeProduct
+    normaliseBarcodeProduct,
+    fetchUpstream,
+    isUpstreamTimeoutError,
+    UPSTREAM_TIMEOUT_MS
   }
 };

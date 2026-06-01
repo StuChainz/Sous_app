@@ -325,6 +325,57 @@ test('photo estimate offers camera and camera roll inputs', async ({ page }) => 
   });
 });
 
+test('saved photo estimate totals preserve fibre from reviewed rows', async ({ page }) => {
+  await boot(page);
+
+  await page.evaluate(() => {
+    window.renderPhotoEstimateReview({
+      mealName: 'Bean salad',
+      confidence: 'medium',
+      items: [
+        {
+          name: 'Black beans',
+          estimatedGrams: 120,
+          calories: 160,
+          protein: 10,
+          carbs: 28,
+          fat: 1,
+          fibre: 7.4,
+          confidence: 'medium',
+          notes: ''
+        },
+        {
+          name: 'Sweetcorn',
+          estimatedGrams: 60,
+          calories: 55,
+          protein: 2,
+          carbs: 12,
+          fat: 0.8,
+          fibre: 1.8,
+          confidence: 'medium',
+          notes: ''
+        }
+      ],
+      totals: { calories: 215, protein: 12, carbs: 40, fat: 1.8 }
+    });
+  });
+
+  await page.locator('#photo-estimate-save-btn').click();
+
+  const saved = await page.evaluate(() => {
+    const day = Object.values(JSON.parse(localStorage.getItem('sous_log') || '{}'))[0];
+    const meal = day?.meals?.[0];
+    return {
+      mealTotals: meal?.totals,
+      dayTotals: day?.totals,
+      rowFibre: meal?.ingredients?.map(item => item.fibre)
+    };
+  });
+  expect(saved.rowFibre).toEqual([7.4, 1.8]);
+  expect(saved.mealTotals.fibre).toBe(9.2);
+  expect(saved.dayTotals.fibre).toBe(9.2);
+});
+
 test('single-item photo correction updates meal title before saving', async ({ page }) => {
   let adjustPayload = null;
   await page.route('**/api/photo-estimate-adjust', route => {
