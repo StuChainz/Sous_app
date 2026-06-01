@@ -2720,7 +2720,7 @@ function saveReviewedPhotoEstimate(){
     protein:roundMacro(mt.protein),
     carbs:roundMacro(mt.carbs),
     fat:roundMacro(mt.fat),
-    fibre:0
+    fibre:roundMacro(mt.fibre)
   };
   const log=getLog();
   const date=selectedLogDate||localDateStr();
@@ -3115,7 +3115,7 @@ function updateHome(){ if(currentTab==='home') renderHome(); }
 // ═══════════════════════════════════════════
 // PWA — MANIFEST + SERVICE WORKER
 // ═══════════════════════════════════════════
-const SOUS_CACHE_VERSION='sous-v24';
+const SOUS_CACHE_VERSION='sous-v25';
 
 window.__sousClearCachesAndReload=async function(){
   if('serviceWorker' in navigator){

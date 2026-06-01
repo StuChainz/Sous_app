@@ -174,6 +174,8 @@ app.post('/api/bug-report', async (req, res) => {
 
 const REALTIME_MODEL = 'gpt-realtime-mini';
 const REALTIME_VOICE = 'marin';
+const OPENAI_IMAGE_TIMEOUT_MS = 30000;
+const OPENAI_TEXT_TIMEOUT_MS = 10000;
 
 function errorBody(error, detailKey, detailValue) {
   const body = { error };
@@ -181,6 +183,40 @@ function errorBody(error, detailKey, detailValue) {
     body[detailKey || 'detail'] = detailValue;
   }
   return body;
+}
+
+async function fetchWithTimeout(url, options = {}, timeoutMs = OPENAI_TEXT_TIMEOUT_MS, fetchImpl = fetch) {
+  const ms = Number.isFinite(Number(timeoutMs)) && Number(timeoutMs) > 0
+    ? Number(timeoutMs)
+    : OPENAI_TEXT_TIMEOUT_MS;
+  const controller = new AbortController();
+  let timedOut = false;
+  const timeout = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, ms);
+
+  try {
+    const response = await fetchImpl(url, { ...options, signal: controller.signal });
+    const text = await response.text();
+    let json = null;
+    try { json = text ? JSON.parse(text) : null; } catch {}
+    return {
+      status: response.status,
+      ok: response.ok,
+      text,
+      json
+    };
+  } catch (err) {
+    if (timedOut || err?.name === 'AbortError') {
+      const timeoutErr = new Error(`Request timed out after ${ms}ms.`);
+      timeoutErr.code = 'FETCH_TIMEOUT';
+      throw timeoutErr;
+    }
+    throw err;
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 function clampConfidence(value) {
@@ -1261,7 +1297,7 @@ app.post('/api/realtime/session', async (req, res) => {
   ].filter(Boolean).join('\n');
 
   try {
-    const upstream = await fetch('https://api.openai.com/v1/realtime/client_secrets', {
+    const upstream = await fetchWithTimeout('https://api.openai.com/v1/realtime/client_secrets', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -1279,17 +1315,15 @@ app.post('/api/realtime/session', async (req, res) => {
           }
         }
       })
-    });
+    }, OPENAI_TEXT_TIMEOUT_MS);
 
-    const text = await upstream.text();
-    let data = null;
-    try { data = text ? JSON.parse(text) : null; } catch {}
+    const data = upstream.json;
 
     if (!upstream.ok) {
       return res.status(upstream.status).json(errorBody(
         `OpenAI Realtime error: ${upstream.status}`,
         'detail',
-        data && data.error ? data.error.message || data.error : text
+        data && data.error ? data.error.message || data.error : upstream.text
       ));
     }
 
@@ -1339,7 +1373,7 @@ app.post('/api/photo-estimate', async (req, res) => {
 
   try {
     const aiStartedAt = Date.now();
-    const upstream = await fetch('https://api.openai.com/v1/responses', {
+    const upstream = await fetchWithTimeout('https://api.openai.com/v1/responses', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -1401,18 +1435,16 @@ app.post('/api/photo-estimate', async (req, res) => {
           }
         }
       })
-    });
+    }, OPENAI_IMAGE_TIMEOUT_MS);
     const aiFinishedAt = Date.now();
 
-    const text = await upstream.text();
-    let data = null;
-    try { data = text ? JSON.parse(text) : null; } catch {}
+    const data = upstream.json;
 
     if (!upstream.ok) {
       return res.status(upstream.status).json(errorBody(
         `OpenAI error: ${upstream.status}`,
         'detail',
-        data && data.error ? data.error.message || data.error : text
+        data && data.error ? data.error.message || data.error : upstream.text
       ));
     }
 
@@ -1486,7 +1518,7 @@ app.post('/api/menu-scan/photo-update', async (req, res) => {
 
   try {
     const aiStartedAt = Date.now();
-    const upstream = await fetch('https://api.openai.com/v1/responses', {
+    const upstream = await fetchWithTimeout('https://api.openai.com/v1/responses', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -1510,18 +1542,16 @@ app.post('/api/menu-scan/photo-update', async (req, res) => {
           }
         }
       })
-    });
+    }, OPENAI_IMAGE_TIMEOUT_MS);
     const aiFinishedAt = Date.now();
 
-    const text = await upstream.text();
-    let data = null;
-    try { data = text ? JSON.parse(text) : null; } catch {}
+    const data = upstream.json;
 
     if (!upstream.ok) {
       return res.status(upstream.status).json(errorBody(
         `OpenAI error: ${upstream.status}`,
         'detail',
-        data && data.error ? data.error.message || data.error : text
+        data && data.error ? data.error.message || data.error : upstream.text
       ));
     }
 
@@ -1642,7 +1672,7 @@ app.post('/api/menu-scan', async (req, res) => {
   ].join('\n');
 
   try {
-    const upstream = await fetch('https://api.openai.com/v1/responses', {
+    const upstream = await fetchWithTimeout('https://api.openai.com/v1/responses', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -1666,17 +1696,15 @@ app.post('/api/menu-scan', async (req, res) => {
           }
         }
       })
-    });
+    }, OPENAI_IMAGE_TIMEOUT_MS);
 
-    const text = await upstream.text();
-    let data = null;
-    try { data = text ? JSON.parse(text) : null; } catch {}
+    const data = upstream.json;
 
     if (!upstream.ok) {
       return res.status(upstream.status).json(errorBody(
         `OpenAI error: ${upstream.status}`,
         'detail',
-        data && data.error ? data.error.message || data.error : text
+        data && data.error ? data.error.message || data.error : upstream.text
       ));
     }
 
@@ -1763,7 +1791,7 @@ app.post('/api/photo-estimate-adjust', async (req, res) => {
 
   try {
     const aiStartedAt = Date.now();
-    const upstream = await fetch('https://api.openai.com/v1/responses', {
+    const upstream = await fetchWithTimeout('https://api.openai.com/v1/responses', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -1816,18 +1844,16 @@ app.post('/api/photo-estimate-adjust', async (req, res) => {
           }
         }
       })
-    });
+    }, OPENAI_IMAGE_TIMEOUT_MS);
     const aiFinishedAt = Date.now();
 
-    const text = await upstream.text();
-    let data = null;
-    try { data = text ? JSON.parse(text) : null; } catch {}
+    const data = upstream.json;
 
     if (!upstream.ok) {
       return res.status(upstream.status).json(errorBody(
         `OpenAI error: ${upstream.status}`,
         'detail',
-        data && data.error ? data.error.message || data.error : text
+        data && data.error ? data.error.message || data.error : upstream.text
       ));
     }
 
@@ -1942,7 +1968,7 @@ app.post('/api/interpret', async (req, res) => {
   ].filter(Boolean).join('\n');
 
   try {
-    const upstream = await fetch('https://api.openai.com/v1/responses', {
+    const upstream = await fetchWithTimeout('https://api.openai.com/v1/responses', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -1980,14 +2006,13 @@ app.post('/api/interpret', async (req, res) => {
           }
         }
       })
-    });
+    }, OPENAI_TEXT_TIMEOUT_MS);
 
     if (!upstream.ok) {
-      const text = await upstream.text();
-      return res.status(upstream.status).json(errorBody(`OpenAI error: ${upstream.status}`, 'detail', text));
+      return res.status(upstream.status).json(errorBody(`OpenAI error: ${upstream.status}`, 'detail', upstream.text));
     }
 
-    const data = await upstream.json();
+    const data = upstream.json || {};
 
     // Extract text from Responses API shape.
     let rawText = '';
@@ -2090,7 +2115,7 @@ app.post('/api/repair-transcript', async (req, res) => {
   };
 
   try {
-    const upstream = await fetch('https://api.openai.com/v1/responses', {
+    const upstream = await fetchWithTimeout('https://api.openai.com/v1/responses', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -2108,14 +2133,13 @@ app.post('/api/repair-transcript', async (req, res) => {
           }
         }
       })
-    });
+    }, OPENAI_TEXT_TIMEOUT_MS);
 
     if (!upstream.ok) {
-      const text = await upstream.text();
-      return res.status(upstream.status).json(errorBody(`OpenAI error: ${upstream.status}`, 'detail', text));
+      return res.status(upstream.status).json(errorBody(`OpenAI error: ${upstream.status}`, 'detail', upstream.text));
     }
 
-    const data = await upstream.json();
+    const data = upstream.json || {};
     let rawText = '';
     if (typeof data.output_text === 'string') rawText = data.output_text;
     else if (Array.isArray(data.output)) {
@@ -2255,7 +2279,7 @@ app.post('/api/interpret-action', async (req, res) => {
   };
 
   try {
-    const upstream = await fetch('https://api.openai.com/v1/responses', {
+    const upstream = await fetchWithTimeout('https://api.openai.com/v1/responses', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -2273,14 +2297,13 @@ app.post('/api/interpret-action', async (req, res) => {
           }
         }
       })
-    });
+    }, OPENAI_TEXT_TIMEOUT_MS);
 
     if (!upstream.ok) {
-      const text = await upstream.text();
-      return res.status(upstream.status).json(errorBody(`OpenAI error: ${upstream.status}`, 'detail', text));
+      return res.status(upstream.status).json(errorBody(`OpenAI error: ${upstream.status}`, 'detail', upstream.text));
     }
 
-    const data = await upstream.json();
+    const data = upstream.json || {};
     let rawText = '';
     if (typeof data.output_text === 'string') rawText = data.output_text;
     else if (Array.isArray(data.output)) {
@@ -2325,6 +2348,7 @@ module.exports = {
     remainingAfterMenuRows,
     validateMenuOcrName,
     normaliseMenuScanResult,
-    normaliseBarcodeProduct
+    normaliseBarcodeProduct,
+    fetchWithTimeout
   }
 };

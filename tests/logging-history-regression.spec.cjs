@@ -66,6 +66,39 @@ test.describe('logging and history regression coverage', () => {
     expect(result.recent).toEqual([{ name: 'Banana', weight: 120 }, { name: 'Oats', weight: 80 }]);
   });
 
+  test('saving a reviewed photo estimate preserves fibre totals', async ({ page }) => {
+    const result = await page.evaluate(() => {
+      selectedLogDate = localDateStr();
+      _photoEstimatePortion = 1;
+      _photoEstimateDraft = {
+        mealName: 'Photo bean bowl',
+        confidence: 'medium',
+        source: 'photo_estimate',
+        notes: '',
+        items: [
+          { name: 'Beans', estimatedGrams: 150, calories: 210, protein: 12.4, carbs: 34.2, fat: 1.5, fibre: 10.26, confidence: 'medium', notes: '' },
+          { name: 'Rice', estimatedGrams: 120, calories: 155, protein: 3.1, carbs: 34.9, fat: 0.4, fibre: 1.14, confidence: 'medium', notes: '' }
+        ]
+      };
+      document.getElementById('photo-meal-section').value = 'lunch';
+      document.getElementById('photo-meal-name').value = 'Photo bean bowl';
+
+      saveReviewedPhotoEstimate();
+
+      const log = getLog();
+      const meal = log[selectedLogDate].meals[0];
+      return {
+        mealTotals: meal.totals,
+        dayTotals: log[selectedLogDate].totals,
+        ingredientFibre: meal.ingredients.map(item => item.fibre)
+      };
+    });
+
+    expect(result.ingredientFibre).toEqual([10.3, 1.1]);
+    expect(result.mealTotals).toEqual({ kcal: 365, protein: 15.5, carbs: 69.1, fat: 1.9, fibre: 11.4 });
+    expect(result.dayTotals).toEqual({ kcal: 365, protein: 15.5, carbs: 69.1, fat: 1.9, fibre: 11.4 });
+  });
+
   test('saving without a typed name generates stable ingredient-based meal names', async ({ page }) => {
     const names = await page.evaluate(() => {
       const saveWith = ingredients => {
