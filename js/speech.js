@@ -57,26 +57,190 @@ const VOICE_DEBUG_LIMIT=200;
 let voiceDebugEvents=[];
 let voiceDebugSeq=0;
 
+const VoiceRuntime={
+  ownerSnapshot(extra={}){
+    return {
+      sessionId:voiceSessionId,
+      recognizerRunId:voiceRecognizerRunId,
+      inputMode:getVoiceInputMode(),
+      modeEpoch:voiceInputModeEpoch,
+      turnId:activeVoiceTranscriptTurn||null,
+      promptOwner:voicePromptOwner?{...voicePromptOwner}:null,
+      sessionActive:!!voiceSessionActive,
+      voiceState:voiceSessionState,
+      ...extra
+    };
+  },
+  isCurrentOwner(owner={}){
+    if(owner.sessionId!=null&&owner.sessionId!==voiceSessionId) return false;
+    if(owner.recognizerRunId!=null&&owner.recognizerRunId!==voiceRecognizerRunId) return false;
+    if(owner.modeEpoch!=null&&owner.modeEpoch!==voiceInputModeEpoch) return false;
+    if(owner.inputMode&&owner.inputMode!==getVoiceInputMode()) return false;
+    if(owner.turnId!=null&&owner.turnId!==activeVoiceTranscriptTurn) return false;
+    return true;
+  },
+  nextSessionId(reason){
+    voiceSessionId++;
+    voiceDebugTrace('voice_owner_changed',{ownerType:'session',sessionId:voiceSessionId,reason});
+    return voiceSessionId;
+  },
+  nextRecognizerRunId(source,reason){
+    voiceRecognizerRunId++;
+    voiceDebugTrace('voice_owner_changed',{ownerType:'recognizer_run',source,recognizerRunId:voiceRecognizerRunId,reason});
+    return voiceRecognizerRunId;
+  },
+  nextInputModeEpoch(previous,next,reason){
+    voiceInputModeEpoch++;
+    voiceDebugTrace('voice_owner_changed',{ownerType:'input_mode',previous,next,inputMode:getVoiceInputMode(),modeEpoch:voiceInputModeEpoch,reason});
+    return voiceInputModeEpoch;
+  },
+  setState(nextState,reason,data={}){
+    if(!VOICE_SESSION_STATES.has(nextState)) return voiceSessionState;
+    const previousState=voiceSessionState;
+    if(previousState===nextState) return voiceSessionState;
+    voiceSessionState=nextState;
+    voiceDebugTrace('state_transition',{
+      previousState,
+      nextState,
+      reason,
+      timestamp:new Date().toISOString(),
+      ...data
+    });
+    voiceDebugTrace('state_change',{
+      from:previousState,
+      to:nextState,
+      reason,
+      ...data
+    });
+    return voiceSessionState;
+  },
+  setPromptOwner(type,data={}){
+    voicePromptOwner={
+      type,
+      turnId:data.turnId??(activeVoiceTranscriptTurn||null),
+      prompt:data.prompt||null,
+      item:data.item||null,
+      screen:typeof document!=='undefined'?(document.querySelector('.log-screen.active')?.id||null):null,
+      startedAt:Date.now()
+    };
+    voiceDebugTrace('prompt_owner_set',{owner:voicePromptOwner});
+    return voicePromptOwner;
+  },
+  clearPromptOwner(reason='resolved'){
+    if(!voicePromptOwner) return;
+    const owner=voicePromptOwner;
+    voicePromptOwner=null;
+    voiceDebugTrace('prompt_owner_cleared',{owner,reason});
+  },
+  isTurnValid(context,source='voice_turn'){
+    if(!isVoiceContext(context)) return true;
+    const turn=voiceValidTurns.get(context.turnId);
+    const modeMatches=(context.modeEpoch==null||context.modeEpoch===voiceInputModeEpoch)&&(!context.inputMode||context.inputMode===getVoiceInputMode());
+    const valid=!!turn&&!turn.invalidated&&turn.sessionId===context.sessionId&&turn.recognizerRunId===context.recognizerRunId&&modeMatches;
+    if(!valid){
+      traceStaleVoiceCallback(source,context,{
+        reason:'voice_turn_invalid',
+        turnId:context.turnId,
+        sessionId:context.sessionId,
+        recognizerRunId:context.recognizerRunId,
+        inputMode:context.inputMode||null,
+        modeEpoch:context.modeEpoch??null
+      });
+    }
+    return valid;
+  },
+  invalidateTurns(reason='voice turns invalidated'){
+    if(voiceValidTurns.size){
+      voiceDebugTrace('voice_turns_invalidated',{reason,turnIds:Array.from(voiceValidTurns.keys())});
+    }
+    voiceValidTurns=new Map();
+    voiceTranscriptClaims=new Set();
+    voiceIngredientClaims=new Set();
+  },
+  claimTranscript(owner,transcript){
+    if(!owner) return true;
+    const normalized=normalizeVoiceClaimText(transcript);
+    if(!normalized) return false;
+    const key=[owner.sessionId,owner.recognizerRunId,normalized].join(':');
+    if(voiceTranscriptClaims.has(key)){
+      voiceDebugTrace('duplicate_transcript_ignored',{
+        source:'tap',
+        transcript:normalized,
+        sessionId:owner.sessionId,
+        recognizerRunId:owner.recognizerRunId
+      });
+      return false;
+    }
+    voiceTranscriptClaims.add(key);
+    return true;
+  },
+  claimIngredient(item,context){
+    const key=voiceIngredientClaimKey(item,context);
+    if(!key) return true;
+    if(voiceIngredientClaims.has(key)){
+      voiceDebugTrace('duplicate_ingredient_ignored',{
+        turnId:context.turnId,
+        sessionId:context.sessionId,
+        recognizerRunId:context.recognizerRunId,
+        item:voiceDebugResultSummary([item])[0]
+      });
+      return false;
+    }
+    voiceIngredientClaims.add(key);
+    return true;
+  },
+  beginTurn(transcript,context=null){
+    const turnId=++voiceTranscriptTurn;
+    activeVoiceTranscriptTurn=turnId;
+    lastAcceptedTranscript=String(transcript||'').trim();
+    lastAcceptedTranscriptAt=Date.now();
+    if(context&&context.source==='voice'){
+      voiceValidTurns.set(turnId,{
+        sessionId:context.sessionId,
+        recognizerRunId:context.recognizerRunId,
+        inputMode:context.inputMode||getVoiceInputMode(),
+        modeEpoch:context.modeEpoch??voiceInputModeEpoch,
+        startedAt:Date.now()
+      });
+    }
+    voiceDebugTrace('transcript_turn_started',{turnId,transcript:lastAcceptedTranscript,voiceContext:context||null});
+    return turnId;
+  },
+  isActiveTurn(turnId){
+    return !!turnId&&turnId===activeVoiceTranscriptTurn;
+  },
+  safePromptOwner(owner=voicePromptOwner){
+    if(!owner) return null;
+    return {
+      type:owner.type||null,
+      turnId:owner.turnId??null,
+      screen:owner.screen||null,
+      startedAt:owner.startedAt||null,
+      hasPrompt:!!owner.prompt,
+      hasItem:!!owner.item
+    };
+  },
+  debugSnapshot(){
+    return {
+      sessionId:voiceSessionId,
+      recognizerRunId:voiceRecognizerRunId,
+      inputMode:getVoiceInputMode(),
+      modeEpoch:voiceInputModeEpoch,
+      state:voiceSessionState,
+      activeTurnId:activeVoiceTranscriptTurn||null,
+      promptOwner:this.safePromptOwner(),
+      validTurnCount:voiceValidTurns.size,
+      transcriptClaimCount:voiceTranscriptClaims.size,
+      ingredientClaimCount:voiceIngredientClaims.size
+    };
+  }
+};
+
 function voiceOwnerSnapshot(extra={}){
-  return {
-    sessionId:voiceSessionId,
-    recognizerRunId:voiceRecognizerRunId,
-    inputMode:getVoiceInputMode(),
-    modeEpoch:voiceInputModeEpoch,
-    turnId:activeVoiceTranscriptTurn||null,
-    promptOwner:voicePromptOwner?{...voicePromptOwner}:null,
-    sessionActive:!!voiceSessionActive,
-    voiceState:voiceSessionState,
-    ...extra
-  };
+  return VoiceRuntime.ownerSnapshot(extra);
 }
 function isCurrentVoiceOwner(owner={}){
-  if(owner.sessionId!=null&&owner.sessionId!==voiceSessionId) return false;
-  if(owner.recognizerRunId!=null&&owner.recognizerRunId!==voiceRecognizerRunId) return false;
-  if(owner.modeEpoch!=null&&owner.modeEpoch!==voiceInputModeEpoch) return false;
-  if(owner.inputMode&&owner.inputMode!==getVoiceInputMode()) return false;
-  if(owner.turnId!=null&&owner.turnId!==activeVoiceTranscriptTurn) return false;
-  return true;
+  return VoiceRuntime.isCurrentOwner(owner);
 }
 function traceStaleVoiceCallback(source,owner={},data={}){
   return voiceDebugTrace('stale_callback_ignored',{
@@ -87,19 +251,13 @@ function traceStaleVoiceCallback(source,owner={},data={}){
   });
 }
 function nextVoiceSessionId(reason){
-  voiceSessionId++;
-  voiceDebugTrace('voice_owner_changed',{ownerType:'session',sessionId:voiceSessionId,reason});
-  return voiceSessionId;
+  return VoiceRuntime.nextSessionId(reason);
 }
 function nextVoiceRecognizerRunId(source,reason){
-  voiceRecognizerRunId++;
-  voiceDebugTrace('voice_owner_changed',{ownerType:'recognizer_run',source,recognizerRunId:voiceRecognizerRunId,reason});
-  return voiceRecognizerRunId;
+  return VoiceRuntime.nextRecognizerRunId(source,reason);
 }
 function nextVoiceInputModeEpoch(previous,next,reason){
-  voiceInputModeEpoch++;
-  voiceDebugTrace('voice_owner_changed',{ownerType:'input_mode',previous,next,inputMode:getVoiceInputMode(),modeEpoch:voiceInputModeEpoch,reason});
-  return voiceInputModeEpoch;
+  return VoiceRuntime.nextInputModeEpoch(previous,next,reason);
 }
 
 function voiceDebugClarificationSnapshot(){
@@ -253,22 +411,10 @@ function traceVoiceDecision(step,data={}){
   return voiceDebugTrace('voice_decision',{step,...data});
 }
 function setVoicePromptOwner(type,data={}){
-  voicePromptOwner={
-    type,
-    turnId:data.turnId??(activeVoiceTranscriptTurn||null),
-    prompt:data.prompt||null,
-    item:data.item||null,
-    screen:typeof document!=='undefined'?(document.querySelector('.log-screen.active')?.id||null):null,
-    startedAt:Date.now()
-  };
-  voiceDebugTrace('prompt_owner_set',{owner:voicePromptOwner});
-  return voicePromptOwner;
+  return VoiceRuntime.setPromptOwner(type,data);
 }
 function clearVoicePromptOwner(reason='resolved'){
-  if(!voicePromptOwner) return;
-  const owner=voicePromptOwner;
-  voicePromptOwner=null;
-  voiceDebugTrace('prompt_owner_cleared',{owner,reason});
+  return VoiceRuntime.clearPromptOwner(reason);
 }
 function voiceDebugConsoleEnabled(){
   try{return voiceDebugOverlayEnabled()||localStorage.getItem('sous_voice_debug_console')==='true'||new URLSearchParams(location.search).get('voiceDebug')==='1';}
@@ -342,6 +488,7 @@ window.sousVoiceDebug=()=>voiceDebugEvents.slice();
 window.clearSousVoiceDebug=()=>{voiceDebugEvents=[];voiceDebugSeq=0;try{localStorage.removeItem(VOICE_DEBUG_KEY);}catch(e){};return true;};
 window.__sousVoiceTrace=()=>voiceDebugEvents.slice();
 window.__sousVoiceDecisionTrace=()=>voiceDecisionTraceSummary(voiceDebugEvents,8);
+window.__sousVoiceRuntimeSnapshot=()=>VoiceRuntime.debugSnapshot();
 window.__sousPrintVoiceTrace=()=>{
   const trace=voiceDebugEvents.slice();
   console.table(trace.map(e=>({seq:e.seq,t:e.t,event:e.event,turnId:e.turnId,state:e.voiceState,source:e.source||'',route:e.route||'',text:e.transcript||e.prompt||e.key||e.reason||e.error||''})));
@@ -782,24 +929,7 @@ function logVoiceState(event,extra={}){
   });
 }
 function setVoiceSessionState(nextState,reason,data={}){
-  if(!VOICE_SESSION_STATES.has(nextState)) return voiceSessionState;
-  const previousState=voiceSessionState;
-  if(previousState===nextState) return voiceSessionState;
-  voiceSessionState=nextState;
-  voiceDebugTrace('state_transition',{
-    previousState,
-    nextState,
-    reason,
-    timestamp:new Date().toISOString(),
-    ...data
-  });
-  voiceDebugTrace('state_change',{
-    from:previousState,
-    to:nextState,
-    reason,
-    ...data
-  });
-  return voiceSessionState;
+  return VoiceRuntime.setState(nextState,reason,data);
 }
 function clearVoiceRestartTimer(){
   if(voiceRestartTimer){
@@ -909,46 +1039,13 @@ function isVoiceContext(context){
   return !!(context&&context.source==='voice'&&context.turnId);
 }
 function isVoiceTurnValid(context,source='voice_turn'){
-  if(!isVoiceContext(context)) return true;
-  const turn=voiceValidTurns.get(context.turnId);
-  const modeMatches=(context.modeEpoch==null||context.modeEpoch===voiceInputModeEpoch)&&(!context.inputMode||context.inputMode===getVoiceInputMode());
-  const valid=!!turn&&!turn.invalidated&&turn.sessionId===context.sessionId&&turn.recognizerRunId===context.recognizerRunId&&modeMatches;
-  if(!valid){
-    traceStaleVoiceCallback(source,context,{
-      reason:'voice_turn_invalid',
-      turnId:context.turnId,
-      sessionId:context.sessionId,
-      recognizerRunId:context.recognizerRunId,
-      inputMode:context.inputMode||null,
-      modeEpoch:context.modeEpoch??null
-    });
-  }
-  return valid;
+  return VoiceRuntime.isTurnValid(context,source);
 }
 function invalidateVoiceTurns(reason='voice turns invalidated'){
-  if(voiceValidTurns.size){
-    voiceDebugTrace('voice_turns_invalidated',{reason,turnIds:Array.from(voiceValidTurns.keys())});
-  }
-  voiceValidTurns=new Map();
-  voiceTranscriptClaims=new Set();
-  voiceIngredientClaims=new Set();
+  return VoiceRuntime.invalidateTurns(reason);
 }
 function claimVoiceFinalTranscript(owner,transcript){
-  if(!owner) return true;
-  const normalized=normalizeVoiceClaimText(transcript);
-  if(!normalized) return false;
-  const key=[owner.sessionId,owner.recognizerRunId,normalized].join(':');
-  if(voiceTranscriptClaims.has(key)){
-    voiceDebugTrace('duplicate_transcript_ignored',{
-      source:'tap',
-      transcript:normalized,
-      sessionId:owner.sessionId,
-      recognizerRunId:owner.recognizerRunId
-    });
-    return false;
-  }
-  voiceTranscriptClaims.add(key);
-  return true;
+  return VoiceRuntime.claimTranscript(owner,transcript);
 }
 function attachVoiceContext(item,context){
   if(!item||typeof item!=='object'||!isVoiceContext(context)) return item;
@@ -975,39 +1072,13 @@ function voiceIngredientClaimKey(item,context){
   return [context.turnId,name,weight,rawKey].join(':');
 }
 function claimVoiceIngredient(item,context){
-  const key=voiceIngredientClaimKey(item,context);
-  if(!key) return true;
-  if(voiceIngredientClaims.has(key)){
-    voiceDebugTrace('duplicate_ingredient_ignored',{
-      turnId:context.turnId,
-      sessionId:context.sessionId,
-      recognizerRunId:context.recognizerRunId,
-      item:voiceDebugResultSummary([item])[0]
-    });
-    return false;
-  }
-  voiceIngredientClaims.add(key);
-  return true;
+  return VoiceRuntime.claimIngredient(item,context);
 }
 function beginVoiceTranscriptTurn(transcript,context=null){
-  const turnId=++voiceTranscriptTurn;
-  activeVoiceTranscriptTurn=turnId;
-  lastAcceptedTranscript=String(transcript||'').trim();
-  lastAcceptedTranscriptAt=Date.now();
-  if(context&&context.source==='voice'){
-    voiceValidTurns.set(turnId,{
-      sessionId:context.sessionId,
-      recognizerRunId:context.recognizerRunId,
-      inputMode:context.inputMode||getVoiceInputMode(),
-      modeEpoch:context.modeEpoch??voiceInputModeEpoch,
-      startedAt:Date.now()
-    });
-  }
-  voiceDebugTrace('transcript_turn_started',{turnId,transcript:lastAcceptedTranscript,voiceContext:context||null});
-  return turnId;
+  return VoiceRuntime.beginTurn(transcript,context);
 }
 function isCurrentVoiceTranscriptTurn(turnId){
-  return !!turnId&&turnId===activeVoiceTranscriptTurn;
+  return VoiceRuntime.isActiveTurn(turnId);
 }
 function markVoiceOutcome(turnId,outcome,data={}){
   if(!turnId||voiceOutcomeTurns.has(turnId)) return false;

@@ -1493,8 +1493,10 @@ test('duplicate final result in one recognizer run logs one ingredient', async (
   ).toBe(1);
 
   const trace = await page.evaluate(offset => window.sousVoiceDebug().slice(offset), offset);
+  const runtime = await page.evaluate(() => window.__sousVoiceRuntimeSnapshot());
   expect(trace.filter(event => event.event === 'transcript_accepted' && event.transcript === 'oats 100 grams').length).toBe(1);
   expect(trace.some(event => event.event === 'duplicate_transcript_ignored')).toBe(true);
+  expect(runtime.transcriptClaimCount).toBe(1);
 });
 
 test('same phrase in separate recognizer runs logs two deliberate ingredients', async ({ page }) => {
@@ -1540,7 +1542,72 @@ test('late final from replaced recognizer is ignored as stale', async ({ page })
     () => page.evaluate(offset => window.sousVoiceDebug().slice(offset).some(event => event.event === 'stale_callback_ignored' && event.source === 'tap' && event.owner?.recognizerRunId === -1), offset),
     { timeout: 3000, intervals: [50, 100, 200] }
   ).toBe(true);
+  const runtime = await page.evaluate(() => window.__sousVoiceRuntimeSnapshot());
+  expect(runtime.recognizerRunId).toBeGreaterThan(0);
   expect(await page.evaluate(() => window.__sousVoiceState().meal.filter(item => /banana/i.test(item.name || '')).length)).toBe(0);
+});
+
+test('runtime invalidation clears active voice turns and claims', async ({ page }) => {
+  await setupMockVoiceLifecyclePage(page, { silentMode: true });
+
+  const result = await page.evaluate(() => {
+    const owner = voiceOwnerSnapshot({ source: 'voice' });
+    const voiceContext = voiceContextFromOwner(owner);
+    const turnId = beginVoiceTranscriptTurn('oats 100 grams', voiceContext);
+    voiceContext.turnId = turnId;
+    const food = findFoodByText('oats');
+    const item = { ...foodScale(food, 100), rawFood: food, weightSpecified: true };
+    const transcriptClaimed = claimVoiceFinalTranscript(owner, 'oats 100 grams');
+    const ingredientClaimed = claimVoiceIngredient(item, voiceContext);
+    const before = window.__sousVoiceRuntimeSnapshot();
+    invalidateVoiceTurns('runtime regression test');
+    const after = window.__sousVoiceRuntimeSnapshot();
+    const validAfter = isVoiceTurnValid(voiceContext, 'runtime_regression_after_invalidate');
+    return { before, after, transcriptClaimed, ingredientClaimed, validAfter };
+  });
+
+  expect(result.transcriptClaimed).toBe(true);
+  expect(result.ingredientClaimed).toBe(true);
+  expect(result.before.validTurnCount).toBe(1);
+  expect(result.before.transcriptClaimCount).toBe(1);
+  expect(result.before.ingredientClaimCount).toBe(1);
+  expect(result.after.validTurnCount).toBe(0);
+  expect(result.after.transcriptClaimCount).toBe(0);
+  expect(result.after.ingredientClaimCount).toBe(0);
+  expect(result.validAfter).toBe(false);
+});
+
+test('runtime snapshot exposes safe lifecycle state only', async ({ page }) => {
+  await setupMockVoiceLifecyclePage(page, { silentMode: true });
+
+  const snapshot = await page.evaluate(() => {
+    setVoicePromptOwner('quantity', {
+      prompt: 'secret oats 100 grams',
+      item: { name: 'Secret oats', weight: 100, kcal: 999 }
+    });
+    return window.__sousVoiceRuntimeSnapshot();
+  });
+  const serialized = JSON.stringify(snapshot).toLowerCase();
+
+  expect(snapshot).toEqual(expect.objectContaining({
+    sessionId: expect.any(Number),
+    recognizerRunId: expect.any(Number),
+    inputMode: expect.any(String),
+    modeEpoch: expect.any(Number),
+    state: expect.any(String),
+    promptOwner: expect.objectContaining({
+      type: 'quantity',
+      hasPrompt: true,
+      hasItem: true
+    }),
+    validTurnCount: expect.any(Number),
+    transcriptClaimCount: expect.any(Number),
+    ingredientClaimCount: expect.any(Number)
+  }));
+  expect(Object.prototype.hasOwnProperty.call(snapshot, 'activeTurnId')).toBe(true);
+  expect(serialized).not.toContain('secret');
+  expect(serialized).not.toContain('oats');
+  expect(serialized).not.toContain('999');
 });
 
 test('accepted final transcript survives recognizer restart while AI repair is pending', async ({ page }) => {
