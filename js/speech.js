@@ -46,6 +46,9 @@ const VOICE_FLOW_CUE_MIN_SUCCESSES=3;
 const VOICE_FLOW_CUE_COOLDOWN_MS=18000;
 const VOICE_FLOW_CUE_CHANCE=0.55;
 const VOICE_SESSION_STATES=new Set(['idle','listening','processing','speaking','restarting','error']);
+const VOICE_RUNTIME_MAX_VALID_TURNS=250;
+const VOICE_RUNTIME_MAX_TRANSCRIPT_CLAIMS=250;
+const VOICE_RUNTIME_MAX_INGREDIENT_CLAIMS=500;
 const VOICE_INPUT_MODE_KEY='sous_voice_input_mode';
 const VOICE_FEEDBACK_MODE_KEY='sous_voice_feedback_mode';
 const VOICE_FEEDBACK_LEGACY_KEY='sous_voice_feedback';
@@ -56,8 +59,94 @@ const VOICE_DEBUG_OVERLAY_KEY='sous_voice_debug_overlay';
 const VOICE_DEBUG_LIMIT=200;
 let voiceDebugEvents=[];
 let voiceDebugSeq=0;
+let voiceLastInvariantFailure=null;
 
 const VoiceRuntime={
+  runtimeStrictMode(){
+    try{
+      return (typeof sousVoiceTestHarnessAllowed==='function'&&sousVoiceTestHarnessAllowed())||
+        voiceDebugOverlayEnabled()||
+        localStorage.getItem('sous_voice_debug_console')==='true'||
+        localStorage.getItem('sous_voice_debug_dev')==='true'||
+        new URLSearchParams(location.search).get('voiceDebug')==='1';
+    }catch(e){return false;}
+  },
+  recognizerOwnerCount(){
+    let count=0;
+    const realtimeActive=!!(sousRealtimeStarting||(sousRealtime&&sousRealtime.active));
+    const clarificationActive=!!clarificationRec;
+    const tapActive=!!(tapRec||tapRecStarting||tapRecStopping||voiceCurrentlyListening||isRecording);
+    if(realtimeActive) count++;
+    if(clarificationActive) count++;
+    if(!realtimeActive&&!clarificationActive&&tapActive) count++;
+    if(alwaysOnActive&&cookingModeEnabled()) count++;
+    return count;
+  },
+  invariantSnapshot(){
+    return {
+      sessionId:voiceSessionId,
+      recognizerRunId:voiceRecognizerRunId,
+      inputMode:getVoiceInputMode(),
+      modeEpoch:voiceInputModeEpoch,
+      state:voiceSessionState,
+      sessionActive:!!voiceSessionActive,
+      testSessionActive:!!voiceTestSessionActive,
+      voiceCurrentlyListening:!!voiceCurrentlyListening,
+      isRecording:!!isRecording,
+      processing:!!processingTranscript,
+      processingTimerActive:!!voiceProcessingTimer,
+      speaking:!!isSpeaking,
+      speakingTimerActive:!!voiceSpeakingTimer,
+      restartTimerActive:!!voiceRestartTimer,
+      recognizerStartTimerActive:!!voiceRecognizerStartTimer,
+      listeningWatchdogActive:!!voiceListeningWatchdogTimer,
+      tapRecognizerActive:!!(tapRec||tapRecStarting||tapRecStopping),
+      tapRecStarting:!!tapRecStarting,
+      tapRecStopping:!!tapRecStopping,
+      realtimeActive:!!(sousRealtime&&sousRealtime.active),
+      realtimeStarting:!!sousRealtimeStarting,
+      clarificationRecognizerActive:!!clarificationRec,
+      alwaysOnActive:!!alwaysOnActive,
+      recognizerOwnerCount:this.recognizerOwnerCount(),
+      activeTurnId:activeVoiceTranscriptTurn||null,
+      promptOwner:this.safePromptOwner(),
+      validTurnCount:voiceValidTurns.size,
+      transcriptClaimCount:voiceTranscriptClaims.size,
+      ingredientClaimCount:voiceIngredientClaims.size,
+      outcomeTurnCount:voiceOutcomeTurns.size,
+      lastInvariantFailure:voiceLastInvariantFailure?{
+        reason:voiceLastInvariantFailure.reason,
+        message:voiceLastInvariantFailure.message,
+        at:voiceLastInvariantFailure.at
+      }:null
+    };
+  },
+  assertInvariants(reason='voice runtime check',opts={}){
+    const failures=[];
+    const fail=message=>failures.push('voice invariant failed: '+message);
+    const ownerCount=this.recognizerOwnerCount();
+    if(!VOICE_SESSION_STATES.has(voiceSessionState)) fail('invalid voice state: '+voiceSessionState);
+    if(voiceSessionState==='idle'&&voiceCurrentlyListening&&isRecording) fail('idle state has active listening flags');
+    if(voiceSessionState==='processing'&&!processingTranscript&&!voiceProcessingTimer) fail('processing state without active processing');
+    if(voiceSessionState==='speaking'&&!isSpeaking&&!voiceSpeakingTimer) fail('speaking state without active speech');
+    if(voiceSessionState==='listening'&&ownerCount>1) fail('multiple recognizer owners while listening');
+    if(!voiceSessionActive&&voiceRestartTimer) fail('restart timer active after session stopped');
+    if(processingTranscript&&(voiceCurrentlyListening||isRecording)) fail('listening while processing');
+    if(isSpeaking&&(voiceCurrentlyListening||isRecording)) fail('listening while speaking');
+    if(voiceValidTurns.size>VOICE_RUNTIME_MAX_VALID_TURNS) fail('valid turn count exceeded '+VOICE_RUNTIME_MAX_VALID_TURNS);
+    if(voiceTranscriptClaims.size>VOICE_RUNTIME_MAX_TRANSCRIPT_CLAIMS) fail('transcript claim count exceeded '+VOICE_RUNTIME_MAX_TRANSCRIPT_CLAIMS);
+    if(voiceIngredientClaims.size>VOICE_RUNTIME_MAX_INGREDIENT_CLAIMS) fail('ingredient claim count exceeded '+VOICE_RUNTIME_MAX_INGREDIENT_CLAIMS);
+    const snapshot=this.invariantSnapshot();
+    if(!failures.length){
+      voiceLastInvariantFailure=null;
+      return {ok:true,reason,failures:[],snapshot};
+    }
+    const message=failures[0];
+    voiceLastInvariantFailure={reason,message,failures:failures.slice(),snapshot,at:new Date().toISOString()};
+    voiceDebugTrace('voice_invariant_failed',{reason,message,failures:failures.slice(),snapshot});
+    if(opts.throwOnFailure||this.runtimeStrictMode()) throw new Error(message);
+    return {ok:false,reason,failures,snapshot};
+  },
   ownerSnapshot(extra={}){
     return {
       sessionId:voiceSessionId,
@@ -82,11 +171,13 @@ const VoiceRuntime={
   nextSessionId(reason){
     voiceSessionId++;
     voiceDebugTrace('voice_owner_changed',{ownerType:'session',sessionId:voiceSessionId,reason});
+    this.assertInvariants('nextVoiceSessionId: '+(reason||'unknown'));
     return voiceSessionId;
   },
   nextRecognizerRunId(source,reason){
     voiceRecognizerRunId++;
     voiceDebugTrace('voice_owner_changed',{ownerType:'recognizer_run',source,recognizerRunId:voiceRecognizerRunId,reason});
+    this.assertInvariants('nextVoiceRecognizerRunId: '+(reason||source||'unknown'));
     return voiceRecognizerRunId;
   },
   nextInputModeEpoch(previous,next,reason){
@@ -95,9 +186,15 @@ const VoiceRuntime={
     return voiceInputModeEpoch;
   },
   setState(nextState,reason,data={}){
-    if(!VOICE_SESSION_STATES.has(nextState)) return voiceSessionState;
+    if(!VOICE_SESSION_STATES.has(nextState)){
+      this.assertInvariants('setVoiceSessionState rejected: '+(reason||nextState||'unknown'));
+      return voiceSessionState;
+    }
     const previousState=voiceSessionState;
-    if(previousState===nextState) return voiceSessionState;
+    if(previousState===nextState){
+      this.assertInvariants('setVoiceSessionState unchanged: '+(reason||nextState||'unknown'));
+      return voiceSessionState;
+    }
     voiceSessionState=nextState;
     voiceDebugTrace('state_transition',{
       previousState,
@@ -112,6 +209,7 @@ const VoiceRuntime={
       reason,
       ...data
     });
+    this.assertInvariants('setVoiceSessionState: '+(reason||nextState||'unknown'));
     return voiceSessionState;
   },
   setPromptOwner(type,data={}){
@@ -124,13 +222,18 @@ const VoiceRuntime={
       startedAt:Date.now()
     };
     voiceDebugTrace('prompt_owner_set',{owner:voicePromptOwner});
+    this.assertInvariants('setVoicePromptOwner: '+(type||'unknown'));
     return voicePromptOwner;
   },
   clearPromptOwner(reason='resolved'){
-    if(!voicePromptOwner) return;
+    if(!voicePromptOwner){
+      this.assertInvariants('clearVoicePromptOwner: '+reason);
+      return;
+    }
     const owner=voicePromptOwner;
     voicePromptOwner=null;
     voiceDebugTrace('prompt_owner_cleared',{owner,reason});
+    this.assertInvariants('clearVoicePromptOwner: '+reason);
   },
   isTurnValid(context,source='voice_turn'){
     if(!isVoiceContext(context)) return true;
@@ -156,6 +259,8 @@ const VoiceRuntime={
     voiceValidTurns=new Map();
     voiceTranscriptClaims=new Set();
     voiceIngredientClaims=new Set();
+    if(voicePromptOwner) this.clearPromptOwner('turns_invalidated: '+reason);
+    this.assertInvariants('invalidateVoiceTurns: '+reason);
   },
   claimTranscript(owner,transcript){
     if(!owner) return true;
@@ -221,18 +326,7 @@ const VoiceRuntime={
     };
   },
   debugSnapshot(){
-    return {
-      sessionId:voiceSessionId,
-      recognizerRunId:voiceRecognizerRunId,
-      inputMode:getVoiceInputMode(),
-      modeEpoch:voiceInputModeEpoch,
-      state:voiceSessionState,
-      activeTurnId:activeVoiceTranscriptTurn||null,
-      promptOwner:this.safePromptOwner(),
-      validTurnCount:voiceValidTurns.size,
-      transcriptClaimCount:voiceTranscriptClaims.size,
-      ingredientClaimCount:voiceIngredientClaims.size
-    };
+    return this.invariantSnapshot();
   }
 };
 
@@ -489,6 +583,7 @@ window.clearSousVoiceDebug=()=>{voiceDebugEvents=[];voiceDebugSeq=0;try{localSto
 window.__sousVoiceTrace=()=>voiceDebugEvents.slice();
 window.__sousVoiceDecisionTrace=()=>voiceDecisionTraceSummary(voiceDebugEvents,8);
 window.__sousVoiceRuntimeSnapshot=()=>VoiceRuntime.debugSnapshot();
+window.__sousVoiceRuntimeAssert=(reason='manual runtime assert')=>VoiceRuntime.assertInvariants(reason,{throwOnFailure:VoiceRuntime.runtimeStrictMode()});
 window.__sousPrintVoiceTrace=()=>{
   const trace=voiceDebugEvents.slice();
   console.table(trace.map(e=>({seq:e.seq,t:e.t,event:e.event,turnId:e.turnId,state:e.voiceState,source:e.source||'',route:e.route||'',text:e.transcript||e.prompt||e.key||e.reason||e.error||''})));
@@ -987,6 +1082,15 @@ function traceSilentVoiceFeedback(key=null,extra={}){
   voiceDebugTrace('silent_mode_skipped_feedback',payload);
   voiceFeedbackHaptic(key);
 }
+function traceTerminalVoiceFeedbackPath(key=null,extra={}){
+  if(isVoiceSilentMode()){
+    traceSilentVoiceFeedback(key,extra);
+    return;
+  }
+  const payload={key,route:'terminal_transition',feedbackMode:getVoiceFeedbackMode(),reason:'feedback_not_spoken_before_review',...extra};
+  voiceDebugTrace('feedback_audio',payload);
+  voiceDebugTrace('voice_feedback_blocked',payload);
+}
 function finishSkippedVoiceFeedback(onEnd){
   if(onEnd){setTimeout(onEnd,0);return;}
   if(voiceSessionActive&&document.querySelector('.log-screen.active')?.id==='ls-listening'){
@@ -1183,6 +1287,7 @@ function handleVoiceMealFlowCommand(transcript,turnId){
   }
   voiceDebugTrace('final_action',{action:'summary',command:'save_meal',handled:true,turnId});
   markVoiceOutcome(turnId,'summary',{transcript});
+  traceTerminalVoiceFeedbackPath('done',{turnId,reason:'summary_review_waits_for_save'});
   stopAllRec();
   showSummary();
   return true;
@@ -1347,6 +1452,7 @@ function setVoiceSpeaking(active,reason='speaking',onTimeout,opts={}){
 function scheduleVoiceSessionRestart(delay=VOICE_RESTART_DEFAULT_MS){
   if(isHoldVoiceInputMode()){
     voiceDebugTrace('session_restart_blocked',{reason:'hold_to_talk_mode',turnId:activeVoiceTranscriptTurn||null});
+    VoiceRuntime.assertInvariants('scheduleVoiceSessionRestart blocked: hold_to_talk_mode');
     return;
   }
   clearVoiceRestartTimer();
@@ -1359,6 +1465,7 @@ function scheduleVoiceSessionRestart(delay=VOICE_RESTART_DEFAULT_MS){
   if(!isSpeaking&&!processingTranscript) setVoiceSessionState('restarting','restart scheduled',{delay:safeDelay});
   voiceRestartTimer=setTimeout(()=>{
     voiceRestartTimer=null;
+    VoiceRuntime.assertInvariants('scheduleVoiceSessionRestart timer fired');
     if(!isCurrentVoiceOwner(restartOwner)){
       traceStaleVoiceCallback('session_restart_timer',restartOwner,{source:'restart'});
       return;
@@ -1383,11 +1490,13 @@ function scheduleVoiceSessionRestart(delay=VOICE_RESTART_DEFAULT_MS){
       voiceDebugTrace('session_restart',{phase:'completed',route:'test_session',restartCount:voiceRestartCount,turnId:activeVoiceTranscriptTurn||null});
       voiceDebugTrace('session_restart_completed',{route:'test_session',restartCount:voiceRestartCount,turnId:activeVoiceTranscriptTurn||null});
       voiceDebugTrace('test_session_listening',{restartCount:voiceRestartCount});
+      VoiceRuntime.assertInvariants('scheduleVoiceSessionRestart test session completed');
       return;
     }
     if(voiceSessionUseRealtime) startSousRealtimeVoice();
     else startTapRec({sessionRestart:true});
   },safeDelay);
+  VoiceRuntime.assertInvariants('scheduleVoiceSessionRestart: '+safeDelay);
 }
 function maybeResumeVoiceSession(delay=VOICE_RESTART_DEFAULT_MS){
   if(isHoldVoiceInputMode()) return;
@@ -1511,6 +1620,7 @@ function stopAllVoiceActivity(reason){
   isSpeaking=false;
   alwaysOnActive=false;
   setVoiceSessionState('idle',reason);
+  VoiceRuntime.assertInvariants('stopAllVoiceActivity: '+(reason||'stop all voice activity'));
 }
 
 const VOICE_PHRASE_REPAIRS=[
@@ -2139,6 +2249,19 @@ function exposeSousVoiceTestHarness(){
   };
   window.__sousStartHoldToTalkTest=()=>startHoldToTalk('test helper');
   window.__sousStopHoldToTalkTest=()=>stopHoldToTalk('test helper');
+  window.__sousForceVoiceRuntimeDebugState=patch=>{
+    if(!patch||typeof patch!=='object') return window.__sousVoiceRuntimeSnapshot();
+    if(Object.prototype.hasOwnProperty.call(patch,'state')) voiceSessionState=String(patch.state);
+    if(Object.prototype.hasOwnProperty.call(patch,'voiceCurrentlyListening')) voiceCurrentlyListening=!!patch.voiceCurrentlyListening;
+    if(Object.prototype.hasOwnProperty.call(patch,'isRecording')) isRecording=!!patch.isRecording;
+    if(Object.prototype.hasOwnProperty.call(patch,'processing')) processingTranscript=!!patch.processing;
+    if(Object.prototype.hasOwnProperty.call(patch,'speaking')) isSpeaking=!!patch.speaking;
+    if(Object.prototype.hasOwnProperty.call(patch,'sessionActive')) voiceSessionActive=!!patch.sessionActive;
+    if(Object.prototype.hasOwnProperty.call(patch,'clearProcessingTimer')&&patch.clearProcessingTimer) clearVoiceProcessingTimer();
+    if(Object.prototype.hasOwnProperty.call(patch,'clearSpeakingTimer')&&patch.clearSpeakingTimer) clearVoiceSpeakingTimer();
+    if(Object.prototype.hasOwnProperty.call(patch,'clearRestartTimer')&&patch.clearRestartTimer) clearVoiceRestartTimer();
+    return window.__sousVoiceRuntimeSnapshot();
+  };
   window.__sousTestVoiceTranscript=async input=>{
     const payload=typeof input==='object'&&input?input:{transcript:input};
     const clean=String(payload.transcript||payload.text||'').trim();

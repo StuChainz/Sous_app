@@ -781,6 +781,7 @@ async function assertNoProcessingConflict(page) {
 
 async function assertVoiceLoopSane(page) {
   await assertNoProcessingConflict(page);
+  await page.evaluate(() => window.__sousVoiceRuntimeAssert('assertVoiceLoopSane'));
   const state = await page.evaluate(() => window.__sousVoiceState());
   expect(['listening', 'restarting', 'speaking'].includes(state.state), `voice state: ${JSON.stringify(state)}`).toBe(true);
   const activeMockRecognizers = await page.evaluate(() => window.__mockVoiceStats?.active || 0);
@@ -1499,6 +1500,56 @@ test('duplicate final result in one recognizer run logs one ingredient', async (
   expect(runtime.transcriptClaimCount).toBe(1);
 });
 
+test('runtime invariants pass during normal simulated meal logging', async ({ page }) => {
+  await setupMockVoiceLifecyclePage(page, { silentMode: true });
+
+  for (const [index, transcript] of ['oats 100 grams', 'banana 120 grams', 'cheddar 30 grams'].entries()) {
+    await emitMockFinalThenNoSpeech(page, transcript);
+    await expect.poll(
+      () => page.evaluate(() => window.__sousVoiceState().meal.length),
+      { timeout: 5000, intervals: [50, 100, 200] }
+    ).toBe(index + 1);
+    await waitUntilNotProcessing(page);
+    await page.evaluate(label => window.__sousVoiceRuntimeAssert(label), `after ${transcript}`);
+    const recognizerCount = await page.evaluate(() => (window.__mockRecognizers || []).length);
+    await waitForVoiceLoopToRecover(page);
+    await waitForNextMockRecognizer(page, recognizerCount);
+  }
+
+  const runtime = await page.evaluate(() => window.__sousVoiceRuntimeSnapshot());
+  expect(runtime.lastInvariantFailure).toBe(null);
+  expect(runtime.validTurnCount).toBeLessThanOrEqual(3);
+  expect(runtime.transcriptClaimCount).toBeLessThanOrEqual(3);
+  expect(runtime.ingredientClaimCount).toBeLessThanOrEqual(3);
+  expect(await page.evaluate(() => window.__sousVoiceState().meal.length)).toBe(3);
+});
+
+test('duplicate transcript handling keeps runtime claim counts bounded', async ({ page }) => {
+  await setupMockVoiceLifecyclePage(page, { silentMode: true });
+
+  await page.evaluate(() => {
+    const rec = window.__mockRecognizers[window.__mockRecognizers.length - 1];
+    const final = [{ transcript: 'oats 100 grams', confidence: 0.96 }];
+    final.isFinal = true;
+    for (let i = 0; i < 8; i++) rec.onresult({ resultIndex: 0, results: [final] });
+    rec.__finish();
+  });
+  await expect.poll(
+    () => page.evaluate(() => window.__sousVoiceState().meal.filter(item => /oats/i.test(item.name || '')).length),
+    { timeout: 5000, intervals: [50, 100, 200] }
+  ).toBe(1);
+  await waitUntilNotProcessing(page);
+
+  const runtime = await page.evaluate(() => {
+    const assertResult = window.__sousVoiceRuntimeAssert('duplicate transcript claim bound');
+    return { assertResult, snapshot: window.__sousVoiceRuntimeSnapshot() };
+  });
+  expect(runtime.assertResult.ok).toBe(true);
+  expect(runtime.snapshot.transcriptClaimCount).toBe(1);
+  expect(runtime.snapshot.ingredientClaimCount).toBeLessThanOrEqual(1);
+  expect(await page.evaluate(() => window.__sousVoiceState().meal.filter(item => /oats/i.test(item.name || '')).length)).toBe(1);
+});
+
 test('same phrase in separate recognizer runs logs two deliberate ingredients', async ({ page }) => {
   await setupMockVoiceLifecyclePage(page, { silentMode: true });
 
@@ -1575,6 +1626,100 @@ test('runtime invalidation clears active voice turns and claims', async ({ page 
   expect(result.after.transcriptClaimCount).toBe(0);
   expect(result.after.ingredientClaimCount).toBe(0);
   expect(result.validAfter).toBe(false);
+});
+
+test('stopping voice clears pending restart and listening runtime state', async ({ page }) => {
+  await setupMockVoiceLifecyclePage(page, { silentMode: true });
+
+  const result = await page.evaluate(() => {
+    scheduleVoiceSessionRestart(700);
+    const before = window.__sousVoiceRuntimeSnapshot();
+    window.__sousStopVoiceTestSession();
+    const after = window.__sousVoiceRuntimeSnapshot();
+    const assertResult = window.__sousVoiceRuntimeAssert('after stop clears restart');
+    return { before, after, assertResult };
+  });
+
+  expect(result.before.restartTimerActive).toBe(true);
+  expect(result.after.sessionActive).toBe(false);
+  expect(result.after.restartTimerActive).toBe(false);
+  expect(result.after.voiceCurrentlyListening).toBe(false);
+  expect(result.after.isRecording).toBe(false);
+  expect(result.after.state).toBe('idle');
+  expect(result.assertResult.ok).toBe(true);
+});
+
+test('invalidating voice turns clears prompt ownership safely', async ({ page }) => {
+  await setupMockVoiceLifecyclePage(page, { silentMode: true });
+
+  const result = await page.evaluate(() => {
+    const owner = voiceOwnerSnapshot({ source: 'voice' });
+    const voiceContext = voiceContextFromOwner(owner);
+    const turnId = beginVoiceTranscriptTurn('cheddar 30 grams', voiceContext);
+    voiceContext.turnId = turnId;
+    setVoicePromptOwner('quantity', {
+      prompt: 'private prompt text',
+      item: { name: 'Private food', weight: 30 }
+    });
+    claimVoiceFinalTranscript(owner, 'cheddar 30 grams');
+    const before = window.__sousVoiceRuntimeSnapshot();
+    invalidateVoiceTurns('prompt owner invalidation regression');
+    const after = window.__sousVoiceRuntimeSnapshot();
+    const assertResult = window.__sousVoiceRuntimeAssert('after prompt owner invalidation');
+    return { before, after, assertResult };
+  });
+
+  expect(result.before.promptOwner).toEqual(expect.objectContaining({
+    type: 'quantity',
+    hasPrompt: true,
+    hasItem: true
+  }));
+  expect(result.after.promptOwner).toBe(null);
+  expect(result.after.validTurnCount).toBe(0);
+  expect(result.after.transcriptClaimCount).toBe(0);
+  expect(result.after.ingredientClaimCount).toBe(0);
+  expect(result.assertResult.ok).toBe(true);
+  expect(JSON.stringify(result.after).toLowerCase()).not.toContain('private');
+});
+
+test('runtime assert reports forced illegal debug state in test mode', async ({ page }) => {
+  await setupMockVoiceLifecyclePage(page, { silentMode: true });
+
+  const result = await page.evaluate(() => {
+    window.__sousForceVoiceRuntimeDebugState({
+      state: 'processing',
+      processing: false,
+      clearProcessingTimer: true,
+      voiceCurrentlyListening: true,
+      isRecording: true
+    });
+    try {
+      window.__sousVoiceRuntimeAssert('forced illegal debug state');
+      return { threw: false, message: null, snapshot: window.__sousVoiceRuntimeSnapshot() };
+    } catch (error) {
+      return { threw: true, message: error.message, snapshot: window.__sousVoiceRuntimeSnapshot() };
+    } finally {
+      window.__sousForceVoiceRuntimeDebugState({
+        state: 'idle',
+        processing: false,
+        speaking: false,
+        voiceCurrentlyListening: false,
+        isRecording: false,
+        clearProcessingTimer: true,
+        clearSpeakingTimer: true,
+        clearRestartTimer: true
+      });
+      window.__sousStopVoiceTestSession();
+    }
+  });
+
+  expect(result.threw).toBe(true);
+  expect(result.message).toMatch(/^voice invariant failed: /);
+  expect(result.message).toMatch(/processing state without active processing|listening while processing/);
+  expect(result.snapshot.lastInvariantFailure).toEqual(expect.objectContaining({
+    reason: 'forced illegal debug state',
+    message: expect.stringMatching(/^voice invariant failed: /)
+  }));
 });
 
 test('runtime snapshot exposes safe lifecycle state only', async ({ page }) => {
@@ -1785,9 +1930,10 @@ test('quantity success feedback owns restart when iOS audio fallback is blocked'
   const eventOffset = await page.evaluate(() => {
     const oats = { name: 'Oats', w: 100, kcal: 389, p: 17, c: 66, f: 7, fi: 10, icon: '', type: 'solid' };
     askQuantity({ name: 'Oats', weight: 100, rawFood: oats, weightSpecified: false, confidence: 'high' });
-    localStorage.setItem('sous_voice_feedback', '1');
-    window.getCachedResponseAsync = async key => (key === 'added' ? 'Added.' : '');
-    window.getCachedAudioUrlAsync = async key => (key === 'added' ? 'mock://added.mp3' : null);
+    setVoiceFeedbackMode('voice');
+    const successKeys = new Set(['added', 'added_that', 'got_it', 'logged']);
+    window.getCachedResponseAsync = async key => (successKeys.has(key) ? 'Added.' : '');
+    window.getCachedAudioUrlAsync = async key => (successKeys.has(key) ? `mock://${key}.mp3` : null);
     const offset = window.sousVoiceDebug().length;
     commitQuantity(75);
     return offset;
@@ -1804,7 +1950,8 @@ test('quantity success feedback owns restart when iOS audio fallback is blocked'
 
   const trace = await page.evaluate(offset => window.sousVoiceDebug().slice(offset), eventOffset);
   const resolvedIndex = trace.findIndex(event => event.event === 'prompt_owner_cleared' && event.reason === 'quantity_resolved');
-  const feedbackIndex = trace.findIndex(event => event.event === 'voice_feedback_requested' && event.key === 'added');
+  const feedbackIndex = trace.findIndex(event => event.event === 'voice_feedback_requested' && ['added', 'added_that', 'got_it', 'logged'].includes(event.key));
+  const blockedIndex = trace.findIndex(event => event.event === 'voice_feedback_blocked' && event.route === 'cached_audio_play_failed');
   const restartBeforeFeedbackIndex = trace.findIndex((event, index) =>
     index > resolvedIndex &&
     index < feedbackIndex &&
@@ -1816,8 +1963,9 @@ test('quantity success feedback owns restart when iOS audio fallback is blocked'
   );
   expect(resolvedIndex).toBeGreaterThanOrEqual(0);
   expect(feedbackIndex).toBeGreaterThanOrEqual(0);
+  expect(blockedIndex).toBeGreaterThan(feedbackIndex);
   expect(restartBeforeFeedbackIndex).toBe(-1);
-  expect(restartAfterFeedbackIndex).toBeGreaterThan(feedbackIndex);
+  expect(restartAfterFeedbackIndex).toBeGreaterThan(blockedIndex);
   expect(trace.some(event =>
     (event.event === 'voice_error' && event.error === 'speech_start_timeout') ||
     (event.event === 'voice_feedback_ended' && event.reason === 'speech failed')
