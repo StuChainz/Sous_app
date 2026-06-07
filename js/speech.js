@@ -16,6 +16,27 @@ let voiceSessionId=0, voiceRecognizerRunId=0, voiceInputModeEpoch=0;
 let voiceOutcomeTurns=new Set();
 let voiceTranscriptClaims=new Set(), voiceValidTurns=new Map(), voiceIngredientClaims=new Set();
 let voicePromptOwner=null;
+let nativeCookingMode={
+  plugin:null,
+  available:false,
+  listenersBound:false,
+  active:false,
+  intended:false,
+  starting:false,
+  state:'idle',
+  lastError:'',
+  wakeAudioActive:false,
+  commandAudioActive:false,
+  micAudioSessionActive:false,
+  lastInterruptionReason:'none',
+  lastRouteChange:'none',
+  pendingTranscriptCount:0,
+  lastCommandId:'',
+  lastCommandDeliveryStatus:'none',
+  sessionStartedAt:'',
+  sessionDurationMs:0,
+  commandIds:new Set()
+};
 let _voiceMode=false;
 let nextIngId=1;
 let modalSelectedFood=null, modalActiveTab='search';
@@ -56,6 +77,7 @@ const VOICE_SUCCESS_CUE_KEYS=['got_it','added_that','logged'];
 const VOICE_SUCCESS_FEEDBACK_KEYS=new Set(['added','added_that','logged','done','got_it']);
 const VOICE_DEBUG_KEY='sous_voice_debug_trace';
 const VOICE_DEBUG_OVERLAY_KEY='sous_voice_debug_overlay';
+const NATIVE_COOKING_DIAGNOSTICS_KEY='sous_native_cooking_mode_trace';
 const VOICE_DEBUG_LIMIT=200;
 let voiceDebugEvents=[];
 let voiceDebugSeq=0;
@@ -80,6 +102,7 @@ const VoiceRuntime={
     if(clarificationActive) count++;
     if(!realtimeActive&&!clarificationActive&&tapActive) count++;
     if(alwaysOnActive&&cookingModeEnabled()) count++;
+    if(nativeCookingModeOwnsMic()) count++;
     return count;
   },
   invariantSnapshot(){
@@ -107,6 +130,8 @@ const VoiceRuntime={
       realtimeStarting:!!sousRealtimeStarting,
       clarificationRecognizerActive:!!clarificationRec,
       alwaysOnActive:!!alwaysOnActive,
+      nativeCookingModeActive:nativeCookingModeOwnsMic(),
+      nativeCookingModeState:nativeCookingMode.state,
       recognizerOwnerCount:this.recognizerOwnerCount(),
       activeTurnId:activeVoiceTranscriptTurn||null,
       promptOwner:this.safePromptOwner(),
@@ -718,7 +743,7 @@ function voiceLifecycleSnapshot(opts={}){
     owner:voiceOwnerSnapshot(),
     sessionActive:!!voiceSessionActive,
     testSessionActive:!!voiceTestSessionActive,
-    recognizerActive:!!(voiceCurrentlyListening||isRecording||(includeAlwaysOn&&alwaysOnActive)||clarificationRec||(sousRealtime&&sousRealtime.active)),
+    recognizerActive:!!(voiceCurrentlyListening||isRecording||(includeAlwaysOn&&alwaysOnActive)||clarificationRec||(sousRealtime&&sousRealtime.active)||nativeCookingModeOwnsMic()),
     voiceCurrentlyListening:!!voiceCurrentlyListening,
     isRecording:!!isRecording,
     tapRecStarting:!!tapRecStarting,
@@ -728,6 +753,21 @@ function voiceLifecycleSnapshot(opts={}){
     speaking:!!isSpeaking,
     voiceInputMode:getVoiceInputMode(),
     voiceFeedbackMode:getVoiceFeedbackMode(),
+    nativeCookingModeAvailable:nativeCookingModeAvailable(),
+    nativeCookingModeActive:nativeCookingModeOwnsMic(),
+    nativeCookingModeState:nativeCookingMode.state,
+    nativeCookingModeDiagnostics:{
+      micAudioSessionActive:!!nativeCookingMode.micAudioSessionActive,
+      wakeAudioActive:!!nativeCookingMode.wakeAudioActive,
+      commandAudioActive:!!nativeCookingMode.commandAudioActive,
+      lastInterruptionReason:nativeCookingMode.lastInterruptionReason,
+      lastRouteChange:nativeCookingMode.lastRouteChange,
+      pendingTranscriptCount:nativeCookingMode.pendingTranscriptCount,
+      lastCommandId:nativeCookingMode.lastCommandId,
+      lastCommandDeliveryStatus:nativeCookingMode.lastCommandDeliveryStatus,
+      sessionStartedAt:nativeCookingMode.sessionStartedAt,
+      sessionDurationMs:nativeCookingMode.sessionDurationMs
+    },
     voiceHoldActive:!!voiceHoldActive,
     restartCount:voiceRestartCount
   };
@@ -910,6 +950,312 @@ function cookingModeEnabled(){
   try{return localStorage.getItem('sous_cooking_mode')==='1';}
   catch(e){return false;}
 }
+function capacitorPlatform(){
+  try{
+    const cap=window.Capacitor;
+    if(!cap) return '';
+    if(typeof cap.getPlatform==='function') return cap.getPlatform();
+    return cap.platform||'';
+  }catch(e){return '';}
+}
+function isNativeIOSRuntime(){
+  try{
+    const cap=window.Capacitor;
+    if(!cap) return false;
+    const native=typeof cap.isNativePlatform==='function'?cap.isNativePlatform():!!cap.isNative;
+    return !!native&&capacitorPlatform()==='ios';
+  }catch(e){return false;}
+}
+function getNativeCookingModePlugin(){
+  if(nativeCookingMode.plugin) return nativeCookingMode.plugin;
+  try{
+    const plugin=window.Capacitor?.Plugins?.CookingMode||null;
+    if(plugin&&typeof plugin.startCookingMode==='function'&&typeof plugin.stopCookingMode==='function'){
+      nativeCookingMode.plugin=plugin;
+      nativeCookingMode.available=isNativeIOSRuntime();
+      return plugin;
+    }
+  }catch(e){}
+  nativeCookingMode.available=false;
+  return null;
+}
+function nativeCookingModeAvailable(){
+  return !!(isNativeIOSRuntime()&&getNativeCookingModePlugin());
+}
+function nativeCookingModeOwnsMic(){
+  return !!(nativeCookingMode.active||nativeCookingMode.starting||nativeCookingMode.intended);
+}
+function dispatchNativeCookingModeWindowEvent(event,payload={}){
+  try{window.dispatchEvent(new CustomEvent('jot:cooking-mode:'+event,{detail:payload}));}
+  catch(e){}
+}
+function applyNativeCookingModeDiagnostics(payload={}){
+  if(!payload||typeof payload!=='object') return;
+  if(Object.prototype.hasOwnProperty.call(payload,'wakeAudioActive')) nativeCookingMode.wakeAudioActive=!!payload.wakeAudioActive;
+  if(Object.prototype.hasOwnProperty.call(payload,'commandAudioActive')) nativeCookingMode.commandAudioActive=!!payload.commandAudioActive;
+  if(Object.prototype.hasOwnProperty.call(payload,'micAudioSessionActive')) nativeCookingMode.micAudioSessionActive=!!payload.micAudioSessionActive;
+  else if(Object.prototype.hasOwnProperty.call(payload,'audioSessionActive')) nativeCookingMode.micAudioSessionActive=!!payload.audioSessionActive;
+  if(Object.prototype.hasOwnProperty.call(payload,'lastInterruptionReason')) nativeCookingMode.lastInterruptionReason=String(payload.lastInterruptionReason||'none');
+  if(Object.prototype.hasOwnProperty.call(payload,'lastRouteChange')) nativeCookingMode.lastRouteChange=String(payload.lastRouteChange||'none');
+  if(Object.prototype.hasOwnProperty.call(payload,'pendingTranscriptCount')) nativeCookingMode.pendingTranscriptCount=Number(payload.pendingTranscriptCount)||0;
+  const commandId=payload.lastCommandId||payload.commandId||payload.id;
+  if(commandId) nativeCookingMode.lastCommandId=String(commandId);
+  if(Object.prototype.hasOwnProperty.call(payload,'lastCommandDeliveryStatus')) nativeCookingMode.lastCommandDeliveryStatus=String(payload.lastCommandDeliveryStatus||'none');
+  if(Object.prototype.hasOwnProperty.call(payload,'sessionStartedAt')) nativeCookingMode.sessionStartedAt=String(payload.sessionStartedAt||'');
+  if(Object.prototype.hasOwnProperty.call(payload,'sessionDurationMs')) nativeCookingMode.sessionDurationMs=Number(payload.sessionDurationMs)||0;
+}
+function recordNativeCookingModeDiagnostic(event,payload={}){
+  applyNativeCookingModeDiagnostics(payload);
+  const entry={
+    t:new Date().toISOString(),
+    event,
+    state:String(payload.state||nativeCookingMode.state||'idle'),
+    active:payload.active==null?nativeCookingModeOwnsMic():!!payload.active,
+    reason:payload.reason||null,
+    code:payload.code||null,
+    message:payload.message||payload.error||null,
+    phase:payload.phase||null,
+    commandId:payload.commandId||payload.id||null,
+    wakeAudioActive:payload.wakeAudioActive??null,
+    commandAudioActive:payload.commandAudioActive??null,
+    micAudioSessionActive:payload.micAudioSessionActive??payload.audioSessionActive??null,
+    lastInterruptionReason:payload.lastInterruptionReason||null,
+    lastRouteChange:payload.lastRouteChange||null,
+    pendingTranscriptCount:payload.pendingTranscriptCount??null,
+    lastCommandId:payload.lastCommandId||null,
+    lastCommandDeliveryStatus:payload.lastCommandDeliveryStatus||null,
+    sessionStartedAt:payload.sessionStartedAt||null,
+    sessionDurationMs:payload.sessionDurationMs??null
+  };
+  try{
+    const previous=JSON.parse(localStorage.getItem(NATIVE_COOKING_DIAGNOSTICS_KEY)||'[]');
+    const next=(Array.isArray(previous)?previous:[]).concat(entry).slice(-80);
+    localStorage.setItem(NATIVE_COOKING_DIAGNOSTICS_KEY,JSON.stringify(next));
+  }catch(e){}
+  return entry;
+}
+function nativeCookingModeDiagnostics(){
+  try{
+    const list=JSON.parse(localStorage.getItem(NATIVE_COOKING_DIAGNOSTICS_KEY)||'[]');
+    return Array.isArray(list)?list:[];
+  }catch(e){return [];}
+}
+function nativeCookingModeCurrentDiagnostics(){
+  return {
+    state:nativeCookingMode.state,
+    active:nativeCookingModeOwnsMic(),
+    micAudioSessionActive:!!nativeCookingMode.micAudioSessionActive,
+    wakeAudioActive:!!nativeCookingMode.wakeAudioActive,
+    commandAudioActive:!!nativeCookingMode.commandAudioActive,
+    lastInterruptionReason:nativeCookingMode.lastInterruptionReason,
+    lastRouteChange:nativeCookingMode.lastRouteChange,
+    pendingTranscriptCount:nativeCookingMode.pendingTranscriptCount,
+    lastCommandId:nativeCookingMode.lastCommandId,
+    lastCommandDeliveryStatus:nativeCookingMode.lastCommandDeliveryStatus,
+    sessionStartedAt:nativeCookingMode.sessionStartedAt,
+    sessionDurationMs:nativeCookingMode.sessionDurationMs
+  };
+}
+function updateNativeCookingModeControls(){
+  const row=document.getElementById('native-cooking-mode-row');
+  if(row) row.style.display=nativeCookingModeAvailable()?'flex':'none';
+  document.querySelectorAll('#seg-native-cooking-mode .seg-btn').forEach(btn=>{
+    btn.classList.toggle('active',(nativeCookingModeOwnsMic()?'on':'off')===btn.dataset.val);
+  });
+}
+function updateNativeCookingModeState(payload={},fallbackState=null){
+  applyNativeCookingModeDiagnostics(payload);
+  const state=String(payload.state||fallbackState||nativeCookingMode.state||'idle');
+  nativeCookingMode.state=state;
+  nativeCookingMode.active=payload.active==null
+    ?!['idle','error'].includes(state)
+    :!!payload.active;
+  nativeCookingMode.intended=nativeCookingMode.active;
+  nativeCookingMode.starting=false;
+  nativeCookingMode.lastError=String(payload.message||payload.error||'');
+  if(!nativeCookingMode.active){
+    nativeCookingMode.wakeAudioActive=false;
+    nativeCookingMode.commandAudioActive=false;
+    nativeCookingMode.micAudioSessionActive=false;
+    nativeCookingMode.pendingTranscriptCount=0;
+  }
+  updateNativeCookingModeControls();
+}
+function handleNativeCookingModeTranscript(payload={}){
+  const text=String(payload.text||'').trim();
+  if(!text||payload.isFinal===false){
+    voiceDebugTrace('transcript_rejected',{source:'cooking_native',transcript:text,reason:text?'not_final':'empty'});
+    return false;
+  }
+  const commandId=String(payload.id||payload.commandId||'').trim();
+  if(commandId){
+    if(nativeCookingMode.commandIds.has(commandId)){
+      nativeCookingMode.lastCommandId=commandId;
+      nativeCookingMode.lastCommandDeliveryStatus='duplicate_ignored';
+      voiceDebugTrace('duplicate_transcript_ignored',{source:'cooking_native',commandId,transcript:text});
+      return false;
+    }
+    nativeCookingMode.commandIds.add(commandId);
+    if(nativeCookingMode.commandIds.size>250){
+      nativeCookingMode.commandIds=new Set(Array.from(nativeCookingMode.commandIds).slice(-200));
+    }
+  }
+  nativeCookingMode.lastCommandDeliveryStatus='accepted_by_js';
+  const el=document.getElementById('transcript-text');
+  if(el) el.textContent='"'+text+'"';
+  return routeFinalVoiceTranscript(text,{source:'cooking_native',confidence:payload.confidence??1,lowConfidence:false});
+}
+function handleNativeCookingModeEvent(event,payload={}){
+  const data=payload&&typeof payload==='object'?payload:{};
+  recordNativeCookingModeDiagnostic(event,data);
+  if(event==='stopped'){
+    nativeCookingMode.active=false;
+    nativeCookingMode.intended=false;
+    nativeCookingMode.starting=false;
+    nativeCookingMode.state=String(data.state||'idle');
+    if(!voiceSessionActive&&!processingTranscript&&!isSpeaking) setMicState('idle');
+  } else if(event==='error'){
+    updateNativeCookingModeState(data,'error');
+    const msg=String(data.message||'Cooking Mode paused');
+    showToast(msg);
+    const status=document.getElementById('listen-status');
+    if(status) status.textContent=msg;
+  } else if(event==='interrupted'||event==='suspended'){
+    updateNativeCookingModeState({...data,active:true},event);
+    setMicState('idle');
+    const status=document.getElementById('listen-status');
+    if(status){
+      status.className='listen-status on';
+      status.textContent='Cooking Mode paused';
+    }
+  } else if(event==='wake'){
+    updateNativeCookingModeState({...data,active:true},data.state||'command_listening');
+    setMicState('wake');
+  } else if(event==='listening'){
+    updateNativeCookingModeState({...data,active:true},data.state||'wake_listening');
+    if(!isRecording&&!voiceCurrentlyListening&&!processingTranscript&&!isSpeaking) setMicState('listening');
+  } else if(event==='transcript'){
+    updateNativeCookingModeState({...data,active:true},data.state||'dispatching');
+    handleNativeCookingModeTranscript(data);
+  }
+  voiceDebugTrace('native_cooking_mode_event',{event,payload:data});
+  dispatchNativeCookingModeWindowEvent(event,data);
+}
+function bindNativeCookingModeListeners(){
+  const plugin=getNativeCookingModePlugin();
+  if(!plugin||nativeCookingMode.listenersBound||typeof plugin.addListener!=='function') return !!plugin;
+  ['wake','listening','transcript','error','stopped','interrupted','suspended'].forEach(event=>{
+    try{plugin.addListener(event,payload=>handleNativeCookingModeEvent(event,payload||{}));}
+    catch(e){voiceDebugTrace('native_cooking_mode_listener_error',{event,error:e?.message||String(e)});}
+  });
+  nativeCookingMode.listenersBound=true;
+  updateNativeCookingModeControls();
+  return true;
+}
+async function refreshNativeCookingModeState(reason='refresh'){
+  const plugin=getNativeCookingModePlugin();
+  if(!plugin||typeof plugin.getCookingModeState!=='function') return null;
+  try{
+    const state=await plugin.getCookingModeState();
+    updateNativeCookingModeState(state||{},state?.state||'idle');
+    recordNativeCookingModeDiagnostic('state_refresh',{...(state||{}),reason});
+    if(!nativeCookingModeOwnsMic()){
+      try{localStorage.setItem('sous_cooking_mode','0');}catch(e){}
+    }
+    return state||null;
+  }catch(e){
+    voiceDebugTrace('native_cooking_mode_error',{phase:'state_refresh',reason,error:e?.message||String(e)});
+    return null;
+  }
+}
+async function flushNativeCookingModeTranscripts(reason='flush'){
+  const plugin=getNativeCookingModePlugin();
+  if(!plugin||typeof plugin.flushPendingTranscripts!=='function') return null;
+  try{
+    const state=await plugin.flushPendingTranscripts({reason});
+    updateNativeCookingModeState(state||{},state?.state||nativeCookingMode.state);
+    recordNativeCookingModeDiagnostic('flush_pending',{...(state||{}),reason});
+    return state||null;
+  }catch(e){
+    voiceDebugTrace('native_cooking_mode_error',{phase:'flush_pending',reason,error:e?.message||String(e)});
+    return null;
+  }
+}
+function nativeCookingModeBlockNormalVoice(){
+  if(!nativeCookingModeOwnsMic()) return false;
+  const message='Stop Cooking Mode before using normal voice logging.';
+  showToast(message);
+  const status=document.getElementById('listen-status');
+  if(status) status.textContent=message;
+  voiceDebugTrace('recognizer_start_blocked',{source:'native_cooking_mode',reason:'native_cooking_mode_owns_mic'});
+  return true;
+}
+async function startNativeCookingMode(){
+  const plugin=getNativeCookingModePlugin();
+  if(!plugin){
+    showToast('Cooking Mode is only available in the iOS app.');
+    updateNativeCookingModeControls();
+    return false;
+  }
+  bindNativeCookingModeListeners();
+  stopAllVoiceActivity('native cooking mode starting');
+  pauseAlwaysOn();
+  nativeCookingMode.starting=true;
+  nativeCookingMode.intended=true;
+  nativeCookingMode.state='arming';
+  nativeCookingMode.commandIds=new Set();
+  nativeCookingMode.lastCommandDeliveryStatus='starting';
+  updateNativeCookingModeControls();
+  setMicState('arming');
+  try{
+    if(typeof plugin.requestPermissions==='function') await plugin.requestPermissions();
+    const state=await plugin.startCookingMode();
+    updateNativeCookingModeState(state||{},'wake_listening');
+    try{localStorage.setItem('sous_cooking_mode','1');}catch(e){}
+    voiceDebugTrace('native_cooking_mode_started',{state:state||null});
+    flushNativeCookingModeTranscripts('after_start');
+    return true;
+  }catch(e){
+    nativeCookingMode.starting=false;
+    nativeCookingMode.intended=false;
+    nativeCookingMode.active=false;
+    nativeCookingMode.state='error';
+    updateNativeCookingModeControls();
+    setMicState('idle');
+    showToast(e?.message||'Cooking Mode could not start');
+    voiceDebugTrace('native_cooking_mode_error',{phase:'start',error:e?.message||String(e)});
+    return false;
+  }
+}
+async function stopNativeCookingMode(){
+  const plugin=getNativeCookingModePlugin();
+  nativeCookingMode.intended=false;
+  nativeCookingMode.starting=false;
+  try{
+    if(plugin&&typeof plugin.stopCookingMode==='function'){
+      const state=await plugin.stopCookingMode();
+      updateNativeCookingModeState(state||{},'idle');
+    }
+  }catch(e){
+    voiceDebugTrace('native_cooking_mode_error',{phase:'stop',error:e?.message||String(e)});
+  }
+  nativeCookingMode.active=false;
+  nativeCookingMode.state='idle';
+  nativeCookingMode.wakeAudioActive=false;
+  nativeCookingMode.commandAudioActive=false;
+  nativeCookingMode.micAudioSessionActive=false;
+  nativeCookingMode.pendingTranscriptCount=0;
+  nativeCookingMode.lastCommandDeliveryStatus='stopped';
+  updateNativeCookingModeControls();
+  setMicState('idle');
+  try{localStorage.setItem('sous_cooking_mode','0');}catch(e){}
+  return true;
+}
+async function simulateNativeCookingWakeForDebug(delayMs=0){
+  const plugin=getNativeCookingModePlugin();
+  if(!plugin||typeof plugin.simulateWakeForDebug!=='function') return false;
+  return plugin.simulateWakeForDebug({delayMs:Number(delayMs)||0});
+}
 function normalizeVoiceInputMode(mode){
   return mode==='hold'?'hold':'continuous';
 }
@@ -958,6 +1304,9 @@ function updateVoiceInputModeControls(){
     btn.classList.toggle('active',btn.dataset.val===mode);
   });
   updateVoiceFeedbackModeControls();
+  bindNativeCookingModeListeners();
+  updateNativeCookingModeControls();
+  refreshNativeCookingModeState('controls_update').then(()=>flushNativeCookingModeTranscripts('controls_update'));
   const mic=document.getElementById('mic-btn');
   if(mic){
     mic.setAttribute('aria-label',mode==='hold'?'Hold to speak':'Start voice logging');
@@ -992,6 +1341,14 @@ window.setVoiceInputMode=setVoiceInputMode;
 window.getVoiceInputMode=getVoiceInputMode;
 window.setVoiceFeedbackMode=setVoiceFeedbackMode;
 window.getVoiceFeedbackMode=getVoiceFeedbackMode;
+window.startNativeCookingMode=startNativeCookingMode;
+window.stopNativeCookingMode=stopNativeCookingMode;
+window.simulateNativeCookingWakeForDebug=simulateNativeCookingWakeForDebug;
+window.nativeCookingModeAvailable=nativeCookingModeAvailable;
+window.nativeCookingModeDiagnostics=nativeCookingModeDiagnostics;
+window.nativeCookingModeCurrentDiagnostics=nativeCookingModeCurrentDiagnostics;
+window.refreshNativeCookingModeState=refreshNativeCookingModeState;
+window.flushNativeCookingModeTranscripts=flushNativeCookingModeTranscripts;
 function setVoiceHintText(id,text){
   const el=document.getElementById(id);
   if(el) el.textContent=text;
@@ -1298,6 +1655,7 @@ function logRestartBlocked(reason){
 }
 function voiceRestartBlockReason(){
   if(!voiceSessionActive) return 'session inactive';
+  if(nativeCookingModeOwnsMic()) return 'native cooking mode owns mic';
   if(voicePausedForVisibility) return 'page hidden';
   if(voiceMicWarmupActive) return 'mic warming up';
   if(tapRecStarting) return 'recognition starting';
@@ -1421,7 +1779,7 @@ function setVoiceProcessing(active,reason='processing',opts={}){
     },VOICE_PROCESSING_TIMEOUT_MS);
   } else if(voiceSessionState==='processing'){
     setVoiceSessionState(voiceSessionActive?'restarting':'idle',reason+' finished');
-    if(!voiceSessionActive&&!isSpeaking) setMicState('idle');
+    if(!voiceSessionActive&&!isSpeaking) setMicState(nativeCookingModeOwnsMic()?'listening':'idle');
   }
 }
 function setVoiceSpeaking(active,reason='speaking',onTimeout,opts={}){
@@ -1446,7 +1804,7 @@ function setVoiceSpeaking(active,reason='speaking',onTimeout,opts={}){
   } else {
     if(voiceSessionState==='speaking') setVoiceSessionState(voiceSessionActive?'restarting':'idle',reason+' finished');
     if(opts.restart!==false&&voiceSessionActive&&document.querySelector('.log-screen.active')?.id==='ls-listening') scheduleVoiceSessionRestart(VOICE_POST_SPEECH_QUIET_MS);
-    else if(!voiceSessionActive) setMicState('idle');
+    else if(!voiceSessionActive) setMicState(nativeCookingModeOwnsMic()?'listening':'idle');
   }
 }
 function scheduleVoiceSessionRestart(delay=VOICE_RESTART_DEFAULT_MS){
@@ -1543,6 +1901,7 @@ async function warmUpVoiceInput(){
   }
 }
 async function beginVoiceSession(){
+  if(nativeCookingModeBlockNormalVoice()) return;
   if(isHoldVoiceInputMode()){
     clearVoiceRestartTimer();
     setHoldIdlePrompt('Hold to speak');
@@ -5875,6 +6234,7 @@ function finishSousRealtimeVoice(){
   }
 }
 async function startSousRealtimeVoice(){
+  if(nativeCookingModeBlockNormalVoice()) return;
   logVoiceState('recognition start requested',{source:'realtime'});
   if(sousRealtimeStarting){
     console.log('[Sous Voice] duplicate recognizer blocked');
@@ -6034,6 +6394,7 @@ function stopSousRealtimeVoice(announce=false){
   if(!isSpeaking&&!processingTranscript) setMicState(alwaysOnActive&&cookingModeEnabled()?'listening':'idle');
 }
 function startTapRec(opts={}){
+  if(nativeCookingModeBlockNormalVoice()) return;
   if(!SR){showToast('Speech not supported — use text input');return;}
   if(opts.sessionRestart&&!canRestartVoiceListening()) return;
   const holdToTalk=!!opts.holdToTalk;
@@ -6122,6 +6483,7 @@ function startTapRec(opts={}){
   }
 }
 function startClarificationListen(onResult){
+  if(nativeCookingModeBlockNormalVoice()) return;
   if(!SR){
     voiceDebugTrace('voice_error',{source:'clarification_start',error:'speech_recognition_unavailable'});
     return;
@@ -6188,6 +6550,7 @@ function buildAlwaysOn(){
 function pauseAlwaysOn(){if(alwaysOnRec){try{alwaysOnRec.stop();}catch(e){}}alwaysOnActive=false;}
 function restartAlwaysOn(){
   if(!cookingModeEnabled()){console.log('[Sous Voice] cooking mode disabled');return;}
+  if(nativeCookingModeOwnsMic()){voiceDebugTrace('always_on_blocked',{reason:'native_cooking_mode_owns_mic'});return;}
   const active=document.querySelector('.log-screen.active');
   if(!active||active.id!=='ls-listening'||currentTab!=='log') return;
   if(alwaysOnActive) return;
@@ -6197,6 +6560,7 @@ function restartAlwaysOn(){
 }
 function startAlwaysOn(){
   if(!cookingModeEnabled()){console.log('[Sous Voice] cooking mode disabled');return;}
+  if(nativeCookingModeOwnsMic()){voiceDebugTrace('always_on_blocked',{reason:'native_cooking_mode_owns_mic'});return;}
   if(!SR){document.getElementById('perm-warn').style.display='block';return;}
   if(alwaysOnActive) return;
   alwaysOnRec=buildAlwaysOn();
@@ -6269,6 +6633,7 @@ function setHoldIdlePrompt(text='Hold to speak'){
   }
 }
 function startHoldToTalk(reason='hold start'){
+  if(nativeCookingModeBlockNormalVoice()) return true;
   if(!isHoldVoiceInputMode()) return false;
   if(voiceHoldActive||tapRecStarting||tapRecStopping||voiceCurrentlyListening||isRecording){
     voiceDebugTrace('hold_to_talk_ignored',{phase:'start',reason:'already_active'});
@@ -6430,6 +6795,7 @@ function wireLogButtons(){
       pauseVoiceForLifecycle('page hidden');
       return;
     }
+    refreshNativeCookingModeState('page_visible').then(()=>flushNativeCookingModeTranscripts('page_visible'));
     resumeVoiceAfterLifecyclePause('page visible');
   });
   window.addEventListener('pagehide',()=>{
